@@ -75,6 +75,7 @@ import com.example.cahier.features.drawing.InkDebugMetrics
 import com.example.cahier.features.drawing.InkDebugSample
 import com.example.cahier.features.drawing.PressureCurveMapper
 import com.example.cahier.features.drawing.StrokeIdMapper
+import com.example.cahier.features.drawing.export.ExportComposer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -946,46 +947,19 @@ class DrawingCanvasViewModel @Inject constructor(
                 }
             }
 
-            val markdown = buildString {
-                append("# ")
-                append(safeTitle)
-                append("\n\n")
-                append("## Tables\n\n")
-            doc.pages.firstOrNull()?.blocks?.filterIsInstance<TableBlock>()?.forEach { table ->
-                table.cells.forEach { row ->
-                    append("| ")
-                        append(row.joinToString(" | ") { it.text.ifBlank { " " } })
-                        append(" |\n")
-                }
-                append("\n")
-            }
-            doc.pages.firstOrNull()?.blocks?.filterIsInstance<ImageBlock>()?.forEachIndexed { idx, img ->
-                append("![image-$idx](assets/")
-                append(File(img.assetPath).name)
-                append(")\n")
-            }
-            append("## Ink\n\n")
-                append("Finalized stroke count: ${_uiState.value.strokes.size}\n")
-            }
+            val strokeCount = _uiState.value.strokes.size
+            val markdown = ExportComposer.toMarkdown(
+                title = safeTitle,
+                document = doc,
+                strokeCount = strokeCount
+            )
             File(baseDir, "$safeTitle.md").writeText(markdown)
 
-            val html = """
-                <html><body>
-                <h1>$safeTitle</h1>
-                <h2>Tables</h2>
-                ${doc.pages.firstOrNull()?.blocks?.filterIsInstance<TableBlock>()?.joinToString("\n") { table ->
-                    val rows = table.cells.joinToString("\n") { row ->
-                        "<tr>${row.joinToString("") { "<td>${it.text}</td>" }}</tr>"
-                    }
-                    "<table border=\"1\" cellspacing=\"0\" cellpadding=\"4\">$rows</table>"
-                } ?: ""}
-                ${doc.pages.firstOrNull()?.blocks?.filterIsInstance<ImageBlock>()?.joinToString("\n") { img ->
-                    "<img src=\"assets/${File(img.assetPath).name}\" width=\"${img.width}\" height=\"${img.height}\" />"
-                } ?: ""}
-                <h2>Ink</h2>
-                <p>Finalized stroke count: ${_uiState.value.strokes.size}</p>
-                </body></html>
-            """.trimIndent()
+            val html = ExportComposer.toHtml(
+                title = safeTitle,
+                document = doc,
+                strokeCount = strokeCount
+            )
             File(baseDir, "$safeTitle.html").writeText(html)
 
             val pdfFile = File(baseDir, "$safeTitle.pdf")
@@ -999,6 +973,16 @@ class DrawingCanvasViewModel @Inject constructor(
 
                 zip.putNextEntry(ZipEntry("strokes-count.txt"))
                 zip.write(_uiState.value.strokes.size.toString().toByteArray())
+                zip.closeEntry()
+                zip.putNextEntry(ZipEntry("manifest.json"))
+                zip.write(
+                    """
+                    {"title":"$safeTitle","version":1,"assets_dir":"assets","ink_file":"ink.json","document_file":"document.json"}
+                    """.trimIndent().toByteArray()
+                )
+                zip.closeEntry()
+                zip.putNextEntry(ZipEntry("ink.json"))
+                zip.write("""{"finalizedStrokeCount":$strokeCount}""".toByteArray())
                 zip.closeEntry()
 
                 File(baseDir, "$safeTitle.md").takeIf { it.exists() }?.let { file ->
