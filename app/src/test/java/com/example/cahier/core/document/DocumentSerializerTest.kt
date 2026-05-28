@@ -35,4 +35,26 @@ class DocumentSerializerTest {
         val decoded = DocumentSerializer.decodeOrNull("{bad json")
         assertNull(decoded)
     }
+
+    @Test
+    fun encodeDecode_preservesCellFormattingAndRowGrowth() {
+        val row = listOf(
+            TableCell(text = "A1", bold = true),
+            TableCell(text = "B1"),
+            TableCell(text = "C1")
+        )
+        val table = TableBlock(
+            rows = 4,
+            columns = 3,
+            cells = listOf(row, row, row, row)
+        )
+        val document = TicDocument(pages = listOf(CanvasPage(blocks = listOf(table))))
+
+        val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
+        val decodedTable = decoded!!.pages.first().blocks.first() as TableBlock
+
+        assertEquals(4, decodedTable.rows)
+        assertEquals(true, decodedTable.cells.first().first().bold)
+        assertEquals("A1", decodedTable.cells.first().first().text)
+    }
 }

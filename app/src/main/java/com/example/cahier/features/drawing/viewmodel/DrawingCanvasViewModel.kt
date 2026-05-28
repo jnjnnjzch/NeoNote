@@ -54,6 +54,8 @@ import coil3.toBitmap
 import com.example.cahier.core.data.CustomBrush
 import com.example.cahier.core.data.NotesRepository
 import com.example.cahier.core.document.DocumentSerializer
+import com.example.cahier.core.document.TableBlock
+import com.example.cahier.core.document.TableCell
 import com.example.cahier.core.document.TicDocument
 import com.example.cahier.core.navigation.DrawingCanvasDestination
 import com.example.cahier.core.ui.CahierTextureBitmapStore
@@ -625,5 +627,73 @@ class DrawingCanvasViewModel @Inject constructor(
     companion object {
         private const val TAG = "DrawingCanvasViewModel"
         private const val HIGHLIGHTER_ALPHA = 0.3f
+    }
+
+    fun ensureDefaultTableBlock() {
+        val current = _document.value
+        val page = current.pages.firstOrNull() ?: return
+        if (page.blocks.any { it is TableBlock }) return
+        val updated = current.copy(
+            pages = listOf(
+                page.copy(blocks = page.blocks + TableBlock())
+            )
+        )
+        persistDocument(updated)
+    }
+
+    fun updateTableCell(
+        row: Int,
+        col: Int,
+        text: String,
+    ) {
+        updateFirstTableBlock { table ->
+            val updatedCells = table.cells.mapIndexed { rowIndex, rowCells ->
+                rowCells.mapIndexed { colIndex, cell ->
+                    if (rowIndex == row && colIndex == col) cell.copy(text = text) else cell
+                }
+            }
+            table.copy(cells = updatedCells)
+        }
+    }
+
+    fun toggleTableCellBold(row: Int, col: Int) {
+        updateFirstTableBlock { table ->
+            val updatedCells = table.cells.mapIndexed { rowIndex, rowCells ->
+                rowCells.mapIndexed { colIndex, cell ->
+                    if (rowIndex == row && colIndex == col) cell.copy(bold = !cell.bold) else cell
+                }
+            }
+            table.copy(cells = updatedCells)
+        }
+    }
+
+    fun appendTableRow() {
+        updateFirstTableBlock { table ->
+            val newRow = List(table.columns) { TableCell() }
+            table.copy(
+                rows = table.rows + 1,
+                cells = table.cells + listOf(newRow)
+            )
+        }
+    }
+
+    private fun updateFirstTableBlock(transform: (TableBlock) -> TableBlock) {
+        val current = _document.value
+        val page = current.pages.firstOrNull() ?: return
+        val idx = page.blocks.indexOfFirst { it is TableBlock }
+        if (idx < 0) return
+        val target = page.blocks[idx] as TableBlock
+        val updatedBlocks = page.blocks.toMutableList()
+        updatedBlocks[idx] = transform(target)
+        val updated = current.copy(pages = listOf(page.copy(blocks = updatedBlocks)))
+        persistDocument(updated)
+    }
+
+    private fun persistDocument(document: TicDocument) {
+        _document.value = document
+        viewModelScope.launch {
+            val note = _uiState.value.note
+            noteRepository.updateNote(note.copy(text = DocumentSerializer.encode(document)))
+        }
     }
 }

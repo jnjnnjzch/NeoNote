@@ -43,6 +43,13 @@ data class TableBlock(
     override val y: Float = 64f,
     override val width: Float = 640f,
     override val height: Float = 320f,
-    val rows: Int = 0,
-    val columns: Int = 0,
+    val rows: Int = 3,
+    val columns: Int = 3,
+    val cells: List<List<TableCell>> = List(3) { List(3) { TableCell() } },
 ) : Block
+
+@Serializable
+data class TableCell(
+    val text: String = "",
+    val bold: Boolean = false
+)

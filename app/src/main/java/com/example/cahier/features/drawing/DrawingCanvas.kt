@@ -30,6 +30,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +44,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
@@ -65,9 +67,14 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
@@ -85,6 +92,7 @@ import com.example.cahier.core.ui.FocusedFieldEnum
 import com.example.cahier.core.ui.LocalTextureStore
 import com.example.cahier.core.ui.theme.CahierAppTheme
 import com.example.cahier.core.utils.createDropTarget
+import com.example.cahier.core.document.TableBlock
 import com.example.cahier.features.drawing.viewmodel.DrawingCanvasViewModel
 
 
@@ -100,6 +108,7 @@ fun DrawingCanvas(
     drawingCanvasViewModel: DrawingCanvasViewModel = hiltViewModel(),
 ) {
     val uiState by drawingCanvasViewModel.uiState.collectAsStateWithLifecycle()
+    val document by drawingCanvasViewModel.document.collectAsStateWithLifecycle()
     var showConfirmationDialog by rememberSaveable { mutableStateOf(false) }
     var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -130,6 +139,9 @@ fun DrawingCanvas(
             title = stringResource(R.string.replace_image_title),
             text = stringResource(R.string.replace_image_text)
         )
+    }
+    LaunchedEffect(document.pages.size) {
+        drawingCanvasViewModel.ensureDefaultTableBlock()
     }
 
     Column(
@@ -295,6 +307,12 @@ private fun DrawingSurfaceWithTarget(
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     val view = LocalView.current
     val activity = LocalActivity.current as ComponentActivity
+    val tableBlock = drawingCanvasViewModel.document.collectAsStateWithLifecycle().value
+        .pages
+        .firstOrNull()
+        ?.blocks
+        ?.filterIsInstance<TableBlock>()
+        ?.firstOrNull()
 
     val dropTarget = remember {
         createDropTarget(activity) { uri, permissions ->
@@ -386,6 +404,80 @@ private fun DrawingSurfaceWithTarget(
                 .align(Alignment.TopStart)
                 .padding(8.dp)
         )
+
+        tableBlock?.let { table ->
+            TableBlockEditor(
+                table = table,
+                onCellChange = drawingCanvasViewModel::updateTableCell,
+                onToggleBold = drawingCanvasViewModel::toggleTableCellBold,
+                onAppendRow = drawingCanvasViewModel::appendTableRow,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 8.dp, vertical = 12.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun TableBlockEditor(
+    table: TableBlock,
+    onCellChange: (Int, Int, String) -> Unit,
+    onToggleBold: (Int, Int) -> Unit,
+    onAppendRow: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val focusRequesters = remember(table.rows, table.columns) {
+        List(table.rows * table.columns) { FocusRequester() }
+    }
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = Color(0xCC202020),
+        tonalElevation = 2.dp
+    ) {
+        Column(modifier = Modifier.padding(8.dp)) {
+            table.cells.forEachIndexed { row, rowCells ->
+                Row {
+                    rowCells.forEachIndexed { col, cell ->
+                        val index = row * table.columns + col
+                        TextField(
+                            value = cell.text,
+                            onValueChange = { onCellChange(row, col, it) },
+                            textStyle = MaterialTheme.typography.bodySmall.copy(
+                                color = Color.White,
+                                fontWeight = if (cell.bold) FontWeight.Bold else FontWeight.Normal
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(2.dp)
+                                .border(1.dp, Color(0x55FFFFFF))
+                                .focusRequester(focusRequesters[index])
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown && event.key == Key.Tab) {
+                                        val isLast = row == table.rows - 1 && col == table.columns - 1
+                                        if (isLast) {
+                                            onAppendRow()
+                                        } else {
+                                            val next = (index + 1).coerceAtMost(focusRequesters.lastIndex)
+                                            focusRequesters[next].requestFocus()
+                                        }
+                                        true
+                                    } else if (
+                                        event.type == KeyEventType.KeyDown &&
+                                        event.key == Key.B &&
+                                        event.isCtrlPressed
+                                    ) {
+                                        onToggleBold(row, col)
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
