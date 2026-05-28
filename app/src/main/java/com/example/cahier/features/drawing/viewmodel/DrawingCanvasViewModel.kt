@@ -20,6 +20,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
@@ -78,7 +80,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
+import java.io.File
+import java.io.FileOutputStream
 import java.util.zip.GZIPInputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import javax.inject.Inject
 
 @HiltViewModel
@@ -148,6 +154,8 @@ class DrawingCanvasViewModel @Inject constructor(
     private var eventWindowStartMillis = SystemClock.elapsedRealtime()
 
     private var isBrushSelectedInSession = false
+    private val _lastExportDirectory = MutableStateFlow<String?>(null)
+    val lastExportDirectory: StateFlow<String?> = _lastExportDirectory.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -796,5 +804,116 @@ class DrawingCanvasViewModel @Inject constructor(
             }
         }
         _strokeTranslations.value = translations
+    }
+
+    fun exportAllFormats() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val note = _uiState.value.note
+            val doc = _document.value
+            val now = System.currentTimeMillis()
+            val baseDir = File(context.filesDir, "exports/$now").apply { mkdirs() }
+            val assetsDir = File(baseDir, "assets").apply { mkdirs() }
+            val safeTitle = note.title.ifBlank { "note-$noteId" }.replace("""[^\w\-]+""".toRegex(), "_")
+            val imagePath = note.imageUriList?.firstOrNull()
+            imagePath?.let {
+                runCatching {
+                    File(it).takeIf { file -> file.exists() }?.copyTo(
+                        target = File(assetsDir, "background.png"),
+                        overwrite = true
+                    )
+                }
+            }
+
+            val markdown = buildString {
+                append("# ")
+                append(safeTitle)
+                append("\n\n")
+                append("## Tables\n\n")
+                doc.pages.firstOrNull()?.blocks?.filterIsInstance<TableBlock>()?.forEach { table ->
+                    table.cells.forEach { row ->
+                        append("| ")
+                        append(row.joinToString(" | ") { it.text.ifBlank { " " } })
+                        append(" |\n")
+                    }
+                    append("\n")
+                }
+                append("## Ink\n\n")
+                append("Finalized stroke count: ${_uiState.value.strokes.size}\n")
+            }
+            File(baseDir, "$safeTitle.md").writeText(markdown)
+
+            val html = """
+                <html><body>
+                <h1>$safeTitle</h1>
+                <h2>Tables</h2>
+                ${doc.pages.firstOrNull()?.blocks?.filterIsInstance<TableBlock>()?.joinToString("\n") { table ->
+                    val rows = table.cells.joinToString("\n") { row ->
+                        "<tr>${row.joinToString("") { "<td>${it.text}</td>" }}</tr>"
+                    }
+                    "<table border=\"1\" cellspacing=\"0\" cellpadding=\"4\">$rows</table>"
+                } ?: ""}
+                <h2>Ink</h2>
+                <p>Finalized stroke count: ${_uiState.value.strokes.size}</p>
+                </body></html>
+            """.trimIndent()
+            File(baseDir, "$safeTitle.html").writeText(html)
+
+            val pdfFile = File(baseDir, "$safeTitle.pdf")
+            exportPdf(pdfFile, safeTitle, doc)
+
+            val archiveFile = File(baseDir, "$safeTitle.ticnote")
+            ZipOutputStream(FileOutputStream(archiveFile)).use { zip ->
+                zip.putNextEntry(ZipEntry("document.json"))
+                zip.write(DocumentSerializer.encode(doc).toByteArray())
+                zip.closeEntry()
+
+                zip.putNextEntry(ZipEntry("strokes-count.txt"))
+                zip.write(_uiState.value.strokes.size.toString().toByteArray())
+                zip.closeEntry()
+
+                File(baseDir, "$safeTitle.md").takeIf { it.exists() }?.let { file ->
+                    zip.putNextEntry(ZipEntry(file.name))
+                    zip.write(file.readBytes())
+                    zip.closeEntry()
+                }
+                File(baseDir, "$safeTitle.html").takeIf { it.exists() }?.let { file ->
+                    zip.putNextEntry(ZipEntry(file.name))
+                    zip.write(file.readBytes())
+                    zip.closeEntry()
+                }
+                File(assetsDir, "background.png").takeIf { it.exists() }?.let { file ->
+                    zip.putNextEntry(ZipEntry("assets/background.png"))
+                    zip.write(file.readBytes())
+                    zip.closeEntry()
+                }
+            }
+            _lastExportDirectory.value = baseDir.absolutePath
+        }
+    }
+
+    private fun exportPdf(pdfFile: File, title: String, document: TicDocument) {
+        val pdf = PdfDocument()
+        val page = pdf.startPage(PdfDocument.PageInfo.Builder(1080, 1920, 1).create())
+        val canvas = page.canvas
+        val paint = Paint().apply {
+            color = android.graphics.Color.BLACK
+            textSize = 28f
+        }
+        canvas.drawText(title, 64f, 80f, paint)
+        canvas.drawText("Tables:", 64f, 140f, paint)
+        var y = 190f
+        document.pages.firstOrNull()?.blocks?.filterIsInstance<TableBlock>()?.forEachIndexed { idx, table ->
+            canvas.drawText("Table ${idx + 1} (${table.rows}x${table.columns})", 64f, y, paint)
+            y += 40f
+            table.cells.forEach { row ->
+                canvas.drawText(row.joinToString(" | ") { it.text.ifBlank { " " } }, 80f, y, paint)
+                y += 34f
+            }
+            y += 20f
+        }
+        canvas.drawText("Finalized strokes: ${_uiState.value.strokes.size}", 64f, y + 40f, paint)
+        pdf.finishPage(page)
+        pdf.writeTo(FileOutputStream(pdfFile))
+        pdf.close()
     }
 }
