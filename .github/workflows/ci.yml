@@ -63,6 +63,9 @@ jobs:
           APK="app/build/outputs/apk/debug/app-debug.apk"
           APKSIGNER_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n1)"
           AAPT_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/aapt | sort -V | tail -n1)"
+          export PATH="$(dirname "$APKSIGNER_BIN"):$PATH"
+          command -v apksigner
+          "$APKSIGNER_BIN" --version || true
           unzip -t "$APK"
           "$APKSIGNER_BIN" verify --verbose --print-certs "$APK"
           "$AAPT_BIN" dump badging "$APK" > debug.badging.txt
@@ -158,6 +161,8 @@ jobs:
           set +e
           APKSIGNER_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n1)"
           AAPT_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/aapt | sort -V | tail -n1)"
+          export PATH="$(dirname "$APKSIGNER_BIN"):$PATH"
+          command -v apksigner
           UNSIGNED="$(ls dist/NeoNote-release-unsigned-NOT-INSTALLABLE-*.apk)"
           AAB="$(ls dist/NeoNote-release-bundle-NOT-INSTALLABLE-DIRECTLY-*.aab)"
           unzip -t "$UNSIGNED" | tee release-unsigned-unzip.txt
@@ -173,6 +178,8 @@ jobs:
         run: |
           APKSIGNER_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n1)"
           AAPT_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/aapt | sort -V | tail -n1)"
+          export PATH="$(dirname "$APKSIGNER_BIN"):$PATH"
+          command -v apksigner
           SHORT_SHA="${{ needs.verify.outputs.short_sha }}"
           VNAME="${{ needs.verify.outputs.version_name }}"
           VCODE="${{ needs.verify.outputs.version_code }}"
@@ -331,6 +338,8 @@ jobs:
         run: |
           set -e
           APKSIGNER_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n1)"
+          export PATH="$(dirname "$APKSIGNER_BIN"):$PATH"
+          command -v apksigner
           ls -la collected
           DEBUG_APK=$(ls collected/NeoNote-debug-installable-*.apk)
           UNSIGNED_APK=$(ls collected/NeoNote-release-unsigned-NOT-INSTALLABLE-*.apk)
