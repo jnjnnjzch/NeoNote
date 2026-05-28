@@ -51,12 +51,14 @@ import androidx.ink.rendering.android.canvas.CanvasStrokeRenderer
 import androidx.ink.strokes.Stroke
 import coil3.compose.AsyncImage
 import com.example.cahier.core.utils.pointerInputWithSiblingFallthrough
+import com.example.cahier.features.drawing.CanvasTransform
 
 @SuppressLint("RestrictedApi", "VisibleForTests")
 @Composable
 fun DrawingSurface(
     strokes: List<Stroke>,
     strokeTranslations: Map<Int, Pair<Float, Float>> = emptyMap(),
+    canvasTransform: CanvasTransform = CanvasTransform(),
     canvasStrokeRenderer: CanvasStrokeRenderer,
     onStrokesFinished: (List<Stroke>) -> Unit,
     onErase: (offsetX: Float, offsetY: Float) -> Unit,
@@ -98,9 +100,10 @@ fun DrawingSurface(
                     BlendMode.SrcOver
                 }
                 val matrix = Matrix()
-                strokeTranslations[index]?.let { (dx, dy) ->
-                    matrix.postTranslate(dx, dy)
-                }
+                val translation = strokeTranslations[index] ?: (0f to 0f)
+                matrix.postTranslate(translation.first, translation.second)
+                matrix.postScale(canvasTransform.scale, canvasTransform.scale)
+                matrix.postTranslate(canvasTransform.panX, canvasTransform.panY)
                 drawContext.canvas.withSaveLayer(
                     drawContext.size.toRect(),
                     androidx.compose.ui.graphics.Paint()
@@ -184,6 +187,7 @@ fun DrawingSurfacePreview() {
 
     DrawingSurface(
         strokes = emptyList(),
+        canvasTransform = CanvasTransform(),
         canvasStrokeRenderer = canvasStrokeRenderer,
         onStrokesFinished = {},
         onErase = { _, _ -> },

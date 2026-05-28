@@ -22,6 +22,7 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.net.Uri
 import android.view.KeyEvent as AndroidKeyEvent
+import android.view.MotionEvent
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
@@ -75,7 +76,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -101,6 +104,9 @@ import com.example.cahier.core.ui.LocalTextureStore
 import com.example.cahier.core.ui.theme.CahierAppTheme
 import com.example.cahier.core.utils.createDropTarget
 import com.example.cahier.core.document.TableBlock
+import com.example.cahier.features.drawing.CanvasTransformMapper.docToScreenX
+import com.example.cahier.features.drawing.CanvasTransformMapper.docToScreenY
+import com.example.cahier.features.drawing.CanvasTransformMapper.screenToDocDelta
 import com.example.cahier.features.drawing.viewmodel.DrawingCanvasViewModel
 
 
@@ -335,9 +341,12 @@ private fun DrawingSurfaceWithTarget(
     val uiState by drawingCanvasViewModel.uiState.collectAsStateWithLifecycle()
     val exportedUri by drawingCanvasViewModel.exportedImageUri.collectAsStateWithLifecycle()
     val currentBrush by drawingCanvasViewModel.currentBrush.collectAsStateWithLifecycle()
+    val pressureCurve by drawingCanvasViewModel.pressureCurve.collectAsStateWithLifecycle()
+    val lastPressure by drawingCanvasViewModel.lastPressure.collectAsStateWithLifecycle()
     val isEraserMode by drawingCanvasViewModel.isEraserMode.collectAsStateWithLifecycle()
     val isSelectionMode by drawingCanvasViewModel.selectionModeEnabled.collectAsStateWithLifecycle()
     val strokeTranslations by drawingCanvasViewModel.strokeTranslations.collectAsStateWithLifecycle()
+    val fingerPanZoomEnabled by drawingCanvasViewModel.fingerPansByDefault.collectAsStateWithLifecycle()
     val strokes = remember { mutableStateListOf<Stroke>() }
     val textureStore = LocalTextureStore.current
     val cacheGen by textureStore.generation.collectAsState()
@@ -347,6 +356,10 @@ private fun DrawingSurfaceWithTarget(
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     val view = LocalView.current
     val activity = LocalActivity.current as ComponentActivity
+    var canvasTransform by remember { mutableStateOf(CanvasTransform()) }
+    var lastFingerX by remember { mutableStateOf(0f) }
+    var lastFingerY by remember { mutableStateOf(0f) }
+    var lastFingerDistance by remember { mutableStateOf(0f) }
     val tableBlock = drawingCanvasViewModel.document.collectAsStateWithLifecycle().value
         .pages
         .firstOrNull()
@@ -384,6 +397,51 @@ private fun DrawingSurfaceWithTarget(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .pointerInteropFilter { event ->
+                if (!fingerPanZoomEnabled) return@pointerInteropFilter false
+                val toolType = event.getToolType(0)
+                val isFinger = toolType == MotionEvent.TOOL_TYPE_FINGER
+                if (!isFinger) return@pointerInteropFilter false
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        lastFingerX = event.x
+                        lastFingerY = event.y
+                        true
+                    }
+                    MotionEvent.ACTION_POINTER_DOWN -> {
+                        if (event.pointerCount >= 2) {
+                            val dx = event.getX(0) - event.getX(1)
+                            val dy = event.getY(0) - event.getY(1)
+                            lastFingerDistance = kotlin.math.sqrt(dx * dx + dy * dy)
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        if (event.pointerCount >= 2) {
+                            val dx = event.getX(0) - event.getX(1)
+                            val dy = event.getY(0) - event.getY(1)
+                            val distance = kotlin.math.sqrt(dx * dx + dy * dy)
+                            if (lastFingerDistance > 0f) {
+                                val ratio = (distance / lastFingerDistance).coerceIn(0.5f, 2.0f)
+                                val newScale = (canvasTransform.scale * ratio).coerceIn(0.5f, 4.0f)
+                                canvasTransform = canvasTransform.copy(scale = newScale)
+                            }
+                            lastFingerDistance = distance
+                        } else {
+                            val dx = event.x - lastFingerX
+                            val dy = event.y - lastFingerY
+                            canvasTransform = canvasTransform.copy(
+                                panX = canvasTransform.panX + dx,
+                                panY = canvasTransform.panY + dy
+                            )
+                            lastFingerX = event.x
+                            lastFingerY = event.y
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            }
             .onSizeChanged { canvasSize = it }
             .dragAndDropTarget(
                 shouldStartDragAndDrop = { event ->
@@ -395,6 +453,7 @@ private fun DrawingSurfaceWithTarget(
         DrawingSurface(
             strokes = strokes,
             strokeTranslations = strokeTranslations,
+            canvasTransform = canvasTransform,
             canvasStrokeRenderer = canvasStrokeRenderer,
             onStrokesFinished = { newStrokes ->
                 strokes.addAll(newStrokes)
@@ -431,8 +490,8 @@ private fun DrawingSurfaceWithTarget(
                     )
                 }
             },
-            currentBrush = currentBrush,
-            onGetNextBrush = drawingCanvasViewModel::getCurrentBrush,
+            currentBrush = drawingCanvasViewModel.getCurrentBrushWithPressureCurve(),
+            onGetNextBrush = drawingCanvasViewModel::getCurrentBrushWithPressureCurve,
             isEraserMode = isEraserMode,
             isSelectionMode = isSelectionMode,
             backgroundImageUri = uiState.note.imageUriList?.firstOrNull(),
@@ -447,6 +506,16 @@ private fun DrawingSurfaceWithTarget(
                 .padding(8.dp)
         )
 
+        PressureTestPanel(
+            baseSize = currentBrush.size,
+            pressure = lastPressure,
+            curve = pressureCurve,
+            scale = drawingCanvasViewModel.mapPressureToScale(lastPressure, pressureCurve),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp)
+        )
+
         tableBlock?.let { table ->
             TableBlockEditor(
                 table = table,
@@ -457,15 +526,53 @@ private fun DrawingSurfaceWithTarget(
                 onAppendRow = drawingCanvasViewModel::appendTableRow,
                 onMove = drawingCanvasViewModel::moveTableBlockBy,
                 onResize = drawingCanvasViewModel::resizeTableBlockBy,
+                canvasTransform = canvasTransform,
                 modifier = Modifier
-                    .offset { IntOffset(table.x.toInt(), table.y.toInt()) }
+                    .offset {
+                        IntOffset(
+                            docToScreenX(table.x, canvasTransform).toInt(),
+                            docToScreenY(table.y, canvasTransform).toInt()
+                        )
+                    }
             )
         }
     }
 }
 
 @Composable
-private fun TableBlockEditor(
+private fun PressureTestPanel(
+    baseSize: Float,
+    pressure: Float,
+    curve: Float,
+    scale: Float,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = buildString {
+            append("pressure test\n")
+            append("pressure=")
+            append(String.format("%.3f", pressure))
+            append(" curve=")
+            append(String.format("%.2f", curve))
+            append('\n')
+            append("baseSize=")
+            append(String.format("%.2f", baseSize))
+            append(" scale=")
+            append(String.format("%.2f", scale))
+            append(" outSize=")
+            append(String.format("%.2f", baseSize * scale))
+        },
+        modifier = modifier
+            .background(Color(0xCC102020))
+            .padding(8.dp),
+        color = Color.White,
+        fontFamily = FontFamily.Monospace,
+        style = MaterialTheme.typography.bodySmall
+    )
+}
+
+@Composable
+internal fun TableBlockEditor(
     table: TableBlock,
     onCellChange: (Int, Int, String) -> Unit,
     onToggleBold: (Int, Int) -> Unit,
@@ -474,6 +581,7 @@ private fun TableBlockEditor(
     onAppendRow: () -> Unit,
     onMove: (Float, Float) -> Unit,
     onResize: (Float, Float) -> Unit,
+    canvasTransform: CanvasTransform,
     modifier: Modifier = Modifier,
 ) {
     val focusRequesters = remember(table.rows, table.columns) {
@@ -481,12 +589,15 @@ private fun TableBlockEditor(
     }
     Surface(
         modifier = modifier
-            .width(table.width.dp)
-            .height(table.height.dp)
+            .width((table.width * canvasTransform.scale).dp)
+            .height((table.height * canvasTransform.scale).dp)
             .pointerInput(table.id) {
                 detectDragGestures { change, dragAmount ->
                     change.consume()
-                    onMove(dragAmount.x, dragAmount.y)
+                    onMove(
+                        screenToDocDelta(dragAmount.x, canvasTransform),
+                        screenToDocDelta(dragAmount.y, canvasTransform)
+                    )
                 }
             },
         color = Color(0xCC202020),
@@ -511,6 +622,7 @@ private fun TableBlockEditor(
                                 .weight(1f)
                                 .padding(2.dp)
                                 .border(1.dp, Color(0x55FFFFFF))
+                                .testTag("table-cell-$row-$col")
                                 .focusRequester(focusRequesters[index])
                                 .onPreviewKeyEvent { event ->
                                     val nativeEvent = event.nativeKeyEvent
@@ -564,7 +676,10 @@ private fun TableBlockEditor(
                     .pointerInput(table.id) {
                         detectDragGestures { change, dragAmount ->
                             change.consume()
-                            onResize(dragAmount.x, dragAmount.y)
+                            onResize(
+                                screenToDocDelta(dragAmount.x, canvasTransform),
+                                screenToDocDelta(dragAmount.y, canvasTransform)
+                            )
                         }
                     }
             )
@@ -586,6 +701,9 @@ private fun InkDebugOverlay(
             append("  points=")
             append(metrics.pointCount)
             append('\n')
+            append("tilt=")
+            append(metrics.tiltRadians?.let { String.format("%.3f", it) } ?: "n/a")
+            append(" rad  ")
             append("rate=")
             append(metrics.eventRateHz)
             append("Hz  finalized=")

@@ -7,12 +7,18 @@ import java.util.UUID
 @Serializable
 data class TicDocument(
     val version: Int = CURRENT_VERSION,
-    val pages: List<CanvasPage> = listOf(CanvasPage())
+    val pages: List<CanvasPage> = listOf(CanvasPage()),
+    val settings: DocumentSettings = DocumentSettings()
 ) {
     companion object {
         const val CURRENT_VERSION = 1
     }
 }
+
+@Serializable
+data class DocumentSettings(
+    val pressureCurve: Float = 1.0f
+)
 
 @Serializable
 data class CanvasPage(

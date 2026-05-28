@@ -61,4 +61,12 @@ class DocumentSerializerTest {
         assertEquals("x^2", decodedTable.cells.first().first().latex)
         assertEquals("A1", decodedTable.cells.first().first().text)
     }
+
+    @Test
+    fun encodeDecode_preservesPressureCurveSetting() {
+        val document = TicDocument(settings = DocumentSettings(pressureCurve = 1.7f))
+        val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
+        assertNotNull(decoded)
+        assertEquals(1.7f, decoded!!.settings.pressureCurve)
+    }
 }

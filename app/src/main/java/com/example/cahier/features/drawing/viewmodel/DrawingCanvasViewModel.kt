@@ -56,6 +56,7 @@ import coil3.toBitmap
 import com.example.cahier.core.data.CustomBrush
 import com.example.cahier.core.data.NotesRepository
 import com.example.cahier.core.document.DocumentSerializer
+import com.example.cahier.core.document.DocumentSettings
 import com.example.cahier.core.document.StrokeAnchor
 import com.example.cahier.core.document.TableBlock
 import com.example.cahier.core.document.TableCell
@@ -68,7 +69,10 @@ import com.example.cahier.developer.brushdesigner.data.AUTOSAVE_KEY
 import com.example.cahier.developer.brushdesigner.data.CustomBrushDao
 import com.example.cahier.developer.brushdesigner.data.CustomBrushEntity
 import com.example.cahier.features.drawing.CustomBrushes
+import com.example.cahier.features.drawing.InkDebugAggregator
 import com.example.cahier.features.drawing.InkDebugMetrics
+import com.example.cahier.features.drawing.InkDebugSample
+import com.example.cahier.features.drawing.PressureCurveMapper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -150,14 +154,7 @@ class DrawingCanvasViewModel @Inject constructor(
     val strokeTranslations: StateFlow<Map<Int, Pair<Float, Float>>> = _strokeTranslations.asStateFlow()
     private val _inkDebugMetrics = MutableStateFlow(InkDebugMetrics())
     val inkDebugMetrics: StateFlow<InkDebugMetrics> = _inkDebugMetrics.asStateFlow()
-    private var eventCounterSinceWindow = 0
-    private var eventWindowStartMillis = SystemClock.elapsedRealtime()
-    private var lastDebugPublishMillis = 0L
-    private var pendingPressure = 0f
-    private var pendingToolType = "unknown"
-    private var pendingPointIncrement = 0L
-    private var pendingCancelIncrement = 0L
-    private var pendingPalmIncrement = 0L
+    private val inkDebugAggregator = InkDebugAggregator()
 
     private var isBrushSelectedInSession = false
     private val _lastExportDirectory = MutableStateFlow<String?>(null)
@@ -170,6 +167,8 @@ class DrawingCanvasViewModel @Inject constructor(
     val pressureCurve: StateFlow<Float> = _pressureCurve.asStateFlow()
     private val _selectionModeEnabled = MutableStateFlow(false)
     val selectionModeEnabled: StateFlow<Boolean> = _selectionModeEnabled.asStateFlow()
+    private val _lastPressure = MutableStateFlow(0.5f)
+    val lastPressure: StateFlow<Float> = _lastPressure.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -178,6 +177,7 @@ class DrawingCanvasViewModel @Inject constructor(
                 .collect { note ->
                     val parsedDocument = DocumentSerializer.decodeOrNull(note.text) ?: TicDocument()
                     _document.value = parsedDocument
+                    _pressureCurve.value = parsedDocument.settings.pressureCurve
                     recomputeStrokeTranslations()
                     if (note.text.isNullOrBlank()) {
                         noteRepository.updateNote(note.copy(text = DocumentSerializer.encode(parsedDocument)))
@@ -382,41 +382,21 @@ class DrawingCanvasViewModel @Inject constructor(
 
     fun onRawMotionEvent(event: MotionEvent) {
         val now = SystemClock.elapsedRealtime()
-        eventCounterSinceWindow++
-        val elapsed = now - eventWindowStartMillis
-        val currentRateHz = if (elapsed > 0L) {
-            ((eventCounterSinceWindow * 1000L) / elapsed).toInt()
-        } else {
-            0
+        val tilt = event.getAxisValue(MotionEvent.AXIS_TILT).let { axis ->
+            if (axis == 0f) null else axis
         }
-
-        pendingPressure = event.pressure
-        pendingToolType = toolTypeName(event.getToolType(0))
-        pendingPointIncrement += event.historySize + 1L
-        if (event.actionMasked == MotionEvent.ACTION_CANCEL) pendingCancelIncrement++
-        if (event.getToolType(0) == TOOL_TYPE_PALM_COMPAT) pendingPalmIncrement++
-
-        if (now - lastDebugPublishMillis >= 100L) {
-            _inkDebugMetrics.update { current ->
-                current.copy(
-                    pressure = pendingPressure,
-                    toolType = pendingToolType,
-                    pointCount = current.pointCount + pendingPointIncrement,
-                    eventRateHz = currentRateHz,
-                    cancelEventCount = current.cancelEventCount + pendingCancelIncrement,
-                    palmEventCount = current.palmEventCount + pendingPalmIncrement
-                )
-            }
-            pendingPointIncrement = 0L
-            pendingCancelIncrement = 0L
-            pendingPalmIncrement = 0L
-            lastDebugPublishMillis = now
+        val sample = InkDebugSample(
+            pressure = event.pressure,
+            toolType = toolTypeName(event.getToolType(0)),
+            historySize = event.historySize,
+            isCancel = event.actionMasked == MotionEvent.ACTION_CANCEL,
+            isPalm = event.getToolType(0) == TOOL_TYPE_PALM_COMPAT,
+            tiltRadians = tilt
+        )
+        inkDebugAggregator.ingest(now, sample, _inkDebugMetrics.value)?.let { updated ->
+            _inkDebugMetrics.value = updated
         }
-
-        if (elapsed >= 1000L) {
-            eventWindowStartMillis = now
-            eventCounterSinceWindow = 0
-        }
+        _lastPressure.value = event.pressure.coerceIn(0f, 1f)
     }
 
     private fun toolTypeName(toolType: Int): String {
@@ -567,6 +547,15 @@ class DrawingCanvasViewModel @Inject constructor(
 
     fun getCurrentBrush(): Brush {
         return _selectedBrush.value
+    }
+
+    fun getCurrentBrushWithPressureCurve(): Brush {
+        val base = _selectedBrush.value
+        val mapped = mapPressureToScale(
+            pressure = _lastPressure.value,
+            curve = _pressureCurve.value
+        )
+        return base.copy(size = (base.size * mapped).coerceIn(1f, 128f))
     }
 
     suspend fun saveCurrentBrushToAutosave() {
@@ -840,7 +829,10 @@ class DrawingCanvasViewModel @Inject constructor(
     }
 
     fun setPressureCurve(curve: Float) {
-        _pressureCurve.value = curve.coerceIn(0.5f, 2.0f)
+        val clamped = curve.coerceIn(0.5f, 2.0f)
+        _pressureCurve.value = clamped
+        val current = _document.value
+        persistDocument(current.copy(settings = current.settings.copy(pressureCurve = clamped)))
     }
 
     fun setSelectionMode(enabled: Boolean) {
@@ -983,5 +975,9 @@ class DrawingCanvasViewModel @Inject constructor(
         pdf.finishPage(page)
         pdf.writeTo(FileOutputStream(pdfFile))
         pdf.close()
+    }
+
+    fun mapPressureToScale(pressure: Float, curve: Float): Float {
+        return PressureCurveMapper.mapPressureToScale(pressure, curve)
     }
 }

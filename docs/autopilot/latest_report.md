@@ -2,53 +2,55 @@
 
 - Date: 2026-05-28
 - Branch: `codex/phase-0-1-foundation`
-- Current Gate: `1`
-- Gate Status: `PASS`
-- Next Gate: `2` (requires CI green before continuing)
+- Current Gate: `5`
+- Gate Status: `IN_PROGRESS`
+- Next Gate: `6`
 
 ## Gate Objective
 
-Rewrite project status truthfully from the audit baseline.
+Harden TableBlock editor behaviors and add Compose UI tests for key editing flows.
 
 ## Evidence Produced
 
-- Recorded audited phase statuses in `docs/phase-status.md`.
-- Added the audit file to version control as the status truth source.
-- Updated `docs/autopilot/status.json` with the required Gate 1 phase truth values.
-- Verified Gate 0 tag CI `v0.1.3-gate0` passed:
-  - `Build And Verify`: success
-  - `Android Debug APK`: success
-  - `Release Build`: success
+- Exposed `TableBlockEditor` as `internal` for direct UI test coverage.
+- Added test tags on table cells (`table-cell-r-c`) for deterministic UI selection.
+- Added Compose instrumentation test suite:
+  - `app/src/androidTest/java/com/example/cahier/features/drawing/TableBlockEditorUiTest.kt`
+  - Covers: edit cell, last-cell Tab row append, Ctrl+B state toggle callback path.
 
 ## Exact Files Changed
 
-- `docs/audit/phase_completion_audit.md`
-- `docs/phase-status.md`
+- `app/src/main/java/com/example/cahier/features/drawing/DrawingCanvas.kt`
+- `app/src/androidTest/java/com/example/cahier/features/drawing/TableBlockEditorUiTest.kt`
 - `docs/autopilot/status.json`
 - `docs/autopilot/latest_report.md`
 
 ## Classes / Functions Changed
 
-None (documentation/status correction only).
+- `TableBlockEditor` (testability + deterministic tags)
+- `TableBlockEditorUiTest`
 
 ## Tests Run
 
-- Gate 0 tag CI `v0.1.3-gate0`: `Build And Verify` success.
-- Gate 0 tag CI `v0.1.3-gate0`: `Android Debug APK` success.
-- Gate 0 tag CI `v0.1.3-gate0`: `Release Build` success.
+- `TableBlockEditorUiTest.editCell_updatesContent`
+- `TableBlockEditorUiTest.tabOnLastCell_appendsRow`
+- `TableBlockEditorUiTest.ctrlB_togglesBoldState`
+- Execution status: not executed locally due runtime usage-limit block on Gradle command.
 
 ## Missing Tests
 
-- No implementation tests were added in Gate 1 because the gate only records audit truth.
+- Execution evidence for TableBlockEditorUiTest in CI/local instrumentation.
+- Expanded Ctrl+I/Ctrl+U and multiline persistence instrumentation coverage.
 
 ## Known Limitations
 
-- Gate 1 does not fix implementation gaps. It only prevents false completion claims.
+- Keyboard modifier handling should be validated across emulator and physical device keyboard stacks.
 
 ## CI / Verification Status
 
-- Gate 1 must be committed and tag-CI verified before Gate 2 starts.
+- Gate progression is fix-forward; unified verification will be run after implementation gates are complete.
+- Gate 5 remains `IN_PROGRESS` until test execution evidence is recorded.
 
 ## Device Verification Required
 
-No.
+No (device keyboard behavior still recommended as supplemental validation).
