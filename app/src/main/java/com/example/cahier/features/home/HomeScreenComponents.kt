@@ -81,6 +81,7 @@ import com.example.cahier.core.data.NoteType
 import com.example.cahier.core.ui.theme.CahierAppTheme
 import com.example.cahier.features.drawing.DrawingDetailThumbnail
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NoteList(
     favorites: List<Note>,
