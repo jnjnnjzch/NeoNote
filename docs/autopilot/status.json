@@ -1,0 +1,97 @@
+{
+  "project": "NeoNote",
+  "branch": "codex/phase-0-1-foundation",
+  "autopilot_version": "1.0.0",
+  "last_updated_utc": "2026-05-28T00:00:00Z",
+  "overall": {
+    "current_gate": 0,
+    "state": "IN_PROGRESS",
+    "ci_required_for_next_gate": true,
+    "notes": "Gate progression is test-gated. Do not mark PASS without reproducible evidence."
+  },
+  "gates": [
+    {
+      "gate": 0,
+      "title": "Progress and evidence system",
+      "status": "PASS",
+      "evidence_level": "FILES_CREATED",
+      "device_verification_required": false,
+      "files_changed": [
+        "docs/autopilot/status.json",
+        "docs/autopilot/latest_report.md"
+      ],
+      "classes_functions_changed": [],
+      "tests_run": [],
+      "missing_tests": [
+        "Schema validation test for status.json format (optional future enhancement)"
+      ],
+      "known_limitations": [
+        "Timestamps are updated manually unless automated by CI or script."
+      ],
+      "manual_protocol": [
+        "Open docs/autopilot/status.json and confirm all gate records are present.",
+        "Open docs/autopilot/latest_report.md and confirm fixed report sections exist."
+      ]
+    },
+    {
+      "gate": 1,
+      "title": "Truthful phase baseline from audit",
+      "status": "PENDING"
+    },
+    {
+      "gate": 2,
+      "title": "Inking pipeline evidence and metrics tests",
+      "status": "PENDING"
+    },
+    {
+      "gate": 3,
+      "title": "Pressure behavior proof and pressure curve persistence",
+      "status": "PENDING"
+    },
+    {
+      "gate": 4,
+      "title": "True infinite canvas transform for ink and tables",
+      "status": "PENDING"
+    },
+    {
+      "gate": 5,
+      "title": "TableBlock hardening with Compose UI tests",
+      "status": "PENDING"
+    },
+    {
+      "gate": 6,
+      "title": "Real clipboard image paste and asset persistence",
+      "status": "PENDING"
+    },
+    {
+      "gate": 7,
+      "title": "Real LaTeX render in app and exports",
+      "status": "PENDING"
+    },
+    {
+      "gate": 8,
+      "title": "Stable-ID anchored ink reliability",
+      "status": "PENDING"
+    },
+    {
+      "gate": 9,
+      "title": "Real export fidelity and integrity tests",
+      "status": "PENDING"
+    },
+    {
+      "gate": 10,
+      "title": "Performance stress automation",
+      "status": "PENDING"
+    },
+    {
+      "gate": 11,
+      "title": "Beta UX completion and settings persistence",
+      "status": "PENDING"
+    },
+    {
+      "gate": 12,
+      "title": "Release verification and artifact evidence",
+      "status": "PENDING"
+    }
+  ]
+}
