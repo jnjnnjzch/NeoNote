@@ -13,7 +13,7 @@ class ExportComposerTest {
     fun markdown_contains_table_image_formula_and_ink_count() {
         val doc = sampleDoc()
         val md = ExportComposer.toMarkdown("Neo", doc, 12)
-        assertTrue(md.contains("| alpha `$x^2$` |"))
+        assertTrue(md.contains("| alpha `${'$'}x^2${'$'}` |"))
         assertTrue(md.contains("![image-0](assets/sample.png)"))
         assertTrue(md.contains("Finalized stroke count: 12"))
     }

@@ -3,12 +3,13 @@ package com.example.cahier.features.drawing.export
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import kotlin.io.path.createTempDirectory
 import java.util.zip.ZipFile
 
 class TicNoteArchiveWriterTest {
     @Test
     fun writeArchive_contains_required_entries() {
-        val root = createTempDir(prefix = "ticnote-test")
+        val root = createTempDirectory("ticnote-test").toFile()
         val md = File(root, "note.md").apply { writeText("# note") }
         val html = File(root, "note.html").apply { writeText("<html/>") }
         val bg = File(root, "background.png").apply { writeBytes(byteArrayOf(1, 2, 3)) }

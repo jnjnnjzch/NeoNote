@@ -8,7 +8,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class StrokeIdMapperTest {
-    private fun stroke() = Stroke(StockBrushes.markerLatest(), ImmutableStrokeInputBatch.EMPTY)
+    private fun stroke() = Stroke(StockBrushes.marker(), ImmutableStrokeInputBatch.EMPTY)
 
     @Test
     fun remapIds_preservesIdsForUnchangedOrder() {
