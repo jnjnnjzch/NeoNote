@@ -394,7 +394,7 @@ class DrawingCanvasViewModel @Inject constructor(
         pendingToolType = toolTypeName(event.getToolType(0))
         pendingPointIncrement += event.historySize + 1L
         if (event.actionMasked == MotionEvent.ACTION_CANCEL) pendingCancelIncrement++
-        if (event.getToolType(0) == MotionEvent.TOOL_TYPE_PALM) pendingPalmIncrement++
+        if (event.getToolType(0) == TOOL_TYPE_PALM_COMPAT) pendingPalmIncrement++
 
         if (now - lastDebugPublishMillis >= 100L) {
             _inkDebugMetrics.update { current ->
@@ -425,7 +425,7 @@ class DrawingCanvasViewModel @Inject constructor(
             MotionEvent.TOOL_TYPE_ERASER -> "eraser"
             MotionEvent.TOOL_TYPE_FINGER -> "finger"
             MotionEvent.TOOL_TYPE_MOUSE -> "mouse"
-            MotionEvent.TOOL_TYPE_PALM -> "palm"
+            TOOL_TYPE_PALM_COMPAT -> "palm"
             else -> "unknown($toolType)"
         }
     }
@@ -665,6 +665,7 @@ class DrawingCanvasViewModel @Inject constructor(
     companion object {
         private const val TAG = "DrawingCanvasViewModel"
         private const val HIGHLIGHTER_ALPHA = 0.3f
+        private const val TOOL_TYPE_PALM_COMPAT = 5
     }
 
     fun ensureDefaultTableBlock() {

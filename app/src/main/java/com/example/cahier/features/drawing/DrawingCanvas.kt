@@ -21,6 +21,7 @@ package com.example.cahier.features.drawing
 import android.content.ClipData
 import android.content.ClipDescription
 import android.net.Uri
+import android.view.KeyEvent as AndroidKeyEvent
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
@@ -75,9 +76,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -515,7 +513,11 @@ private fun TableBlockEditor(
                                 .border(1.dp, Color(0x55FFFFFF))
                                 .focusRequester(focusRequesters[index])
                                 .onPreviewKeyEvent { event ->
-                                    if (event.type == KeyEventType.KeyDown && event.key == Key.Tab) {
+                                    val nativeEvent = event.nativeKeyEvent
+                                    if (
+                                        nativeEvent.action == AndroidKeyEvent.ACTION_DOWN &&
+                                        nativeEvent.keyCode == AndroidKeyEvent.KEYCODE_TAB
+                                    ) {
                                         val isLast = row == table.rows - 1 && col == table.columns - 1
                                         if (isLast) {
                                             onAppendRow()
@@ -525,23 +527,23 @@ private fun TableBlockEditor(
                                         }
                                         true
                                     } else if (
-                                        event.type == KeyEventType.KeyDown &&
-                                        event.key == Key.B &&
-                                        event.isCtrlPressed
+                                        nativeEvent.action == AndroidKeyEvent.ACTION_DOWN &&
+                                        nativeEvent.keyCode == AndroidKeyEvent.KEYCODE_B &&
+                                        nativeEvent.isCtrlPressed
                                     ) {
                                         onToggleBold(row, col)
                                         true
                                     } else if (
-                                        event.type == KeyEventType.KeyDown &&
-                                        event.key == Key.I &&
-                                        event.isCtrlPressed
+                                        nativeEvent.action == AndroidKeyEvent.ACTION_DOWN &&
+                                        nativeEvent.keyCode == AndroidKeyEvent.KEYCODE_I &&
+                                        nativeEvent.isCtrlPressed
                                     ) {
                                         onToggleItalic(row, col)
                                         true
                                     } else if (
-                                        event.type == KeyEventType.KeyDown &&
-                                        event.key == Key.U &&
-                                        event.isCtrlPressed
+                                        nativeEvent.action == AndroidKeyEvent.ACTION_DOWN &&
+                                        nativeEvent.keyCode == AndroidKeyEvent.KEYCODE_U &&
+                                        nativeEvent.isCtrlPressed
                                     ) {
                                         onToggleUnderline(row, col)
                                         true
