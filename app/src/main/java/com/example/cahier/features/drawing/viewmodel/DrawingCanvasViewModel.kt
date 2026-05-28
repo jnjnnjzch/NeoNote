@@ -816,8 +816,10 @@ class DrawingCanvasViewModel @Inject constructor(
     }
 
     private fun extractLatex(text: String): String? {
-        val regex = Regex("""\$\$([^$]+)\$\$""")
-        return regex.find(text)?.groupValues?.getOrNull(1)
+        val block = Regex("""\$\$([\s\S]+?)\$\$""").find(text)?.groupValues?.getOrNull(1)
+        if (!block.isNullOrBlank()) return block
+        val inline = Regex("""\$([^$\n]+)\$""").find(text)?.groupValues?.getOrNull(1)
+        return inline
     }
 
     private fun anchorNewStrokes(startIndex: Int, count: Int) {
