@@ -95,7 +95,20 @@
   - `.\gradlew.bat :app:testDebugUnitTest` -> PASS
 
 ## Milestone 10 - Release Artifact Policy
-- Status: IN PROGRESS
+- Status: PASS
 - Date: 2026-05-28
 - Commit: pending
 - Scope: classify installability rules for debug/release/APK/AAB artifacts and add verification metadata/checksums.
+- Completed:
+  - Added release artifact policy classifier for debug APK / signed release APK / unsigned APK / AAB installability.
+  - Added SHA-256 checksum metadata generation for artifact verification.
+  - Added unit tests for policy classification and checksum metadata shape.
+- Validation:
+  - `.\gradlew.bat :app:assembleDebug` -> PASS
+  - `.\gradlew.bat :app:testDebugUnitTest` -> PASS
+
+## Milestone 11 - Final Audit
+- Status: IN PROGRESS
+- Date: 2026-05-28
+- Commit: pending
+- Scope: generate final audit artifacts and avoid overstating completion claims.

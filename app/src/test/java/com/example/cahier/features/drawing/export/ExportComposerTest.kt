@@ -26,10 +26,9 @@ class ExportComposerTest {
         val doc = sampleDoc()
         val html = ExportComposer.toHtml("Neo<Note>", doc, 3)
         assertTrue(html.contains("<h1>Neo&lt;Note&gt;</h1>"))
-        assertTrue(html.contains("class=\"latex\""))
-        assertTrue(html.contains("data-latex=\"x^2\""))
         assertTrue(html.contains("class=\"canvas\""))
-        assertTrue(html.contains("class=\"formula\""))
+        assertTrue(html.contains("class=\"block formula\""))
+        assertTrue(html.contains("x^2"))
         assertTrue(html.contains("Finalized stroke count: 3"))
     }
 
