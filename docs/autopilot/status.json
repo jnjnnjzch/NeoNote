@@ -4,7 +4,7 @@
   "autopilot_version": "1.0.0",
   "last_updated_utc": "2026-05-28T00:00:00Z",
   "overall": {
-    "current_gate": 0,
+    "current_gate": 1,
     "state": "IN_PROGRESS",
     "ci_required_for_next_gate": true,
     "notes": "Gate progression is test-gated. Do not mark PASS without reproducible evidence."
@@ -36,7 +36,44 @@
     {
       "gate": 1,
       "title": "Truthful phase baseline from audit",
-      "status": "PENDING"
+      "status": "PASS",
+      "evidence_level": "AUDIT_BASELINE_RECORDED",
+      "device_verification_required": false,
+      "files_changed": [
+        "docs/audit/phase_completion_audit.md",
+        "docs/phase-status.md",
+        "docs/autopilot/status.json",
+        "docs/autopilot/latest_report.md"
+      ],
+      "classes_functions_changed": [],
+      "tests_run": [
+        "Gate 0 tag CI v0.1.3-gate0: Build And Verify success",
+        "Gate 0 tag CI v0.1.3-gate0: Android Debug APK success",
+        "Gate 0 tag CI v0.1.3-gate0: Release Build success"
+      ],
+      "phase_truth": {
+        "phase_0": "PASS",
+        "phase_1": "PARTIAL",
+        "phase_2": "PASS",
+        "phase_3": "PASS",
+        "phase_4": "PARTIAL",
+        "phase_5": "PARTIAL_IMAGE_PASTE_FAIL_LATEX_RENDER_FAIL",
+        "phase_6": "PARTIAL",
+        "phase_7": "PARTIAL",
+        "phase_8": "PARTIAL",
+        "phase_9": "PARTIAL",
+        "phase_10": "NOT_VERIFIED"
+      },
+      "missing_tests": [
+        "No code tests added in Gate 1 because this gate records audit truth only."
+      ],
+      "known_limitations": [
+        "Gate 1 does not fix implementation gaps; it prevents false PASS claims before later gates."
+      ],
+      "manual_protocol": [
+        "Open docs/phase-status.md and verify phase statuses match docs/audit/phase_completion_audit.md.",
+        "Open docs/autopilot/status.json and verify phase_truth uses the required Gate 1 status values."
+      ]
     },
     {
       "gate": 2,

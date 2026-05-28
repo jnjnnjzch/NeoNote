@@ -2,46 +2,52 @@
 
 - Date: 2026-05-28
 - Branch: `codex/phase-0-1-foundation`
-- Current Gate: `0`
+- Current Gate: `1`
 - Gate Status: `PASS`
-- Next Gate: `1` (requires CI green before continuing)
+- Next Gate: `2` (requires CI green before continuing)
 
 ## Gate Objective
 
-Create a repeatable progress/evidence tracking system.
+Rewrite project status truthfully from the audit baseline.
 
 ## Evidence Produced
 
-- Added machine-readable status ledger:
-  - `docs/autopilot/status.json`
-- Added human-readable gate report template:
-  - `docs/autopilot/latest_report.md`
+- Recorded audited phase statuses in `docs/phase-status.md`.
+- Added the audit file to version control as the status truth source.
+- Updated `docs/autopilot/status.json` with the required Gate 1 phase truth values.
+- Verified Gate 0 tag CI `v0.1.3-gate0` passed:
+  - `Build And Verify`: success
+  - `Android Debug APK`: success
+  - `Release Build`: success
 
 ## Exact Files Changed
 
+- `docs/audit/phase_completion_audit.md`
+- `docs/phase-status.md`
 - `docs/autopilot/status.json`
 - `docs/autopilot/latest_report.md`
 
 ## Classes / Functions Changed
 
-None (documentation/system tracking only).
+None (documentation/status correction only).
 
 ## Tests Run
 
-None (Gate 0 is documentation and process scaffolding).
+- Gate 0 tag CI `v0.1.3-gate0`: `Build And Verify` success.
+- Gate 0 tag CI `v0.1.3-gate0`: `Android Debug APK` success.
+- Gate 0 tag CI `v0.1.3-gate0`: `Release Build` success.
 
 ## Missing Tests
 
-- Optional future schema validation for `status.json`.
+- No implementation tests were added in Gate 1 because the gate only records audit truth.
 
 ## Known Limitations
 
-- Status timestamps are currently maintained manually.
+- Gate 1 does not fix implementation gaps. It only prevents false completion claims.
 
 ## CI / Verification Status
 
-- CI not executed in this gate.
-- Per autopilot policy, proceed to Gate 1 only after CI is green for this commit.
+- Gate 1 must be committed and tag-CI verified before Gate 2 starts.
 
 ## Device Verification Required
 
