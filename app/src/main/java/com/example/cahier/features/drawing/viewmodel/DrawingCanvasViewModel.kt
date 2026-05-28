@@ -62,6 +62,7 @@ import com.example.cahier.core.document.StrokeAnchor
 import com.example.cahier.core.document.TableBlock
 import com.example.cahier.core.document.TableCell
 import com.example.cahier.core.document.ParagraphNode
+import com.example.cahier.core.document.TableNode
 import com.example.cahier.core.document.TextContainerBlock
 import com.example.cahier.core.document.TextContainerContent
 import com.example.cahier.core.document.TicDocument
@@ -758,6 +759,86 @@ class DrawingCanvasViewModel @Inject constructor(
         }
     }
 
+    fun updateTextContainerParagraphAt(index: Int, text: String) {
+        updateFirstTextContainer { container ->
+            val nodes = container.content.nodes.toMutableList()
+            val paragraphIndexes = nodes.mapIndexedNotNull { i, n -> if (n is ParagraphNode) i else null }
+            val targetNodeIndex = paragraphIndexes.getOrNull(index)
+            if (targetNodeIndex != null) {
+                nodes[targetNodeIndex] = ParagraphNode(text)
+            } else {
+                nodes.add(ParagraphNode(text))
+            }
+            container.copy(content = container.content.copy(nodes = nodes))
+        }
+    }
+
+    fun insertInlineTableInTextContainer(rows: Int = 3, columns: Int = 3) {
+        updateFirstTextContainer { container ->
+            val nodes = container.content.nodes.toMutableList()
+            if (nodes.any { it is TableNode }) return@updateFirstTextContainer container
+            if (nodes.isEmpty()) {
+                nodes.add(ParagraphNode(""))
+            }
+            nodes.add(TableNode(rows = rows, columns = columns))
+            nodes.add(ParagraphNode(""))
+            container.copy(content = container.content.copy(nodes = nodes))
+        }
+    }
+
+    fun updateInlineTableCell(row: Int, col: Int, text: String) {
+        updateFirstTextContainer { container ->
+            val tableIndex = container.content.nodes.indexOfFirst { it is TableNode }
+            if (tableIndex < 0) return@updateFirstTextContainer container
+            val table = container.content.nodes[tableIndex] as TableNode
+            val updatedCells = table.cells.mapIndexed { rowIndex, rowCells ->
+                rowCells.mapIndexed { colIndex, cell ->
+                    if (rowIndex == row && colIndex == col) {
+                        val imageUri = extractImageUri(text)
+                        val latex = extractLatex(text)
+                        cell.copy(
+                            text = text,
+                            imageUri = imageUri ?: cell.imageUri,
+                            latex = latex ?: cell.latex
+                        )
+                    } else {
+                        cell
+                    }
+                }
+            }
+            val nodes = container.content.nodes.toMutableList()
+            nodes[tableIndex] = table.copy(cells = updatedCells)
+            container.copy(content = container.content.copy(nodes = nodes))
+        }
+    }
+
+    fun appendInlineTableRow() {
+        updateFirstTextContainer { container ->
+            val tableIndex = container.content.nodes.indexOfFirst { it is TableNode }
+            if (tableIndex < 0) return@updateFirstTextContainer container
+            val table = container.content.nodes[tableIndex] as TableNode
+            val newRow = List(table.columns) { TableCell() }
+            val nodes = container.content.nodes.toMutableList()
+            nodes[tableIndex] = table.copy(
+                rows = table.rows + 1,
+                cells = table.cells + listOf(newRow)
+            )
+            container.copy(content = container.content.copy(nodes = nodes))
+        }
+    }
+
+    fun toggleInlineTableCellBold(row: Int, col: Int) {
+        updateInlineTableCellStyle(row, col) { it.copy(bold = !it.bold) }
+    }
+
+    fun toggleInlineTableCellItalic(row: Int, col: Int) {
+        updateInlineTableCellStyle(row, col) { it.copy(italic = !it.italic) }
+    }
+
+    fun toggleInlineTableCellUnderline(row: Int, col: Int) {
+        updateInlineTableCellStyle(row, col) { it.copy(underline = !it.underline) }
+    }
+
     fun moveTextContainerBy(dx: Float, dy: Float) {
         updateFirstTextContainer { container ->
             container.copy(
@@ -889,6 +970,26 @@ class DrawingCanvasViewModel @Inject constructor(
         updatedBlocks[idx] = transform(target)
         val updated = current.copy(pages = listOf(page.copy(blocks = updatedBlocks)))
         persistDocument(updated)
+    }
+
+    private fun updateInlineTableCellStyle(
+        row: Int,
+        col: Int,
+        transform: (TableCell) -> TableCell
+    ) {
+        updateFirstTextContainer { container ->
+            val tableIndex = container.content.nodes.indexOfFirst { it is TableNode }
+            if (tableIndex < 0) return@updateFirstTextContainer container
+            val table = container.content.nodes[tableIndex] as TableNode
+            val updatedCells = table.cells.mapIndexed { rowIndex, rowCells ->
+                rowCells.mapIndexed { colIndex, cell ->
+                    if (rowIndex == row && colIndex == col) transform(cell) else cell
+                }
+            }
+            val nodes = container.content.nodes.toMutableList()
+            nodes[tableIndex] = table.copy(cells = updatedCells)
+            container.copy(content = container.content.copy(nodes = nodes))
+        }
     }
 
     private fun persistDocument(document: TicDocument) {

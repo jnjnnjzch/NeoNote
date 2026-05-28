@@ -41,3 +41,22 @@
 ### Remaining for Milestone 1 acceptance
 - Full UI/interaction verification in CI/device run.
 - Additional explicit persistence/movement tests beyond serializer baseline.
+
+## Milestone 2 — Inline Table in TextContainer
+- Status: IN PROGRESS (core workflow switched)
+- Date: 2026-05-28
+- Commit: pending
+
+### Completed
+- `New Table Note` now initializes `TextContainer` with inline `TableNode`.
+- Added before/after paragraph fields around inline table in the same container.
+- Added inline table editing behavior in `TextContainerEditor`:
+  - Tab navigation
+  - last-cell Tab append row
+  - Ctrl+B / Ctrl+I / Ctrl+U
+  - multiline cells
+- Legacy standalone `TableBlock` now compatibility-rendered only when no `TextContainer` exists.
+
+### Remaining for Milestone 2 acceptance
+- Dedicated persistence tests for before/after paragraph + inline table edits.
+- CI/instrumentation run confirmation.

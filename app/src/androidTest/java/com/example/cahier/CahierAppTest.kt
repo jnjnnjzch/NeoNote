@@ -84,6 +84,9 @@ class CahierAppTest {
     @Test
     fun newTableNote_opensDrawingWithEditableTableAndToolbar() {
         composeTestRule.onNodeWithTag("btn-new-table").performClick()
+        composeTestRule.onNodeWithTag("text-container-editor").assertExists()
+        composeTestRule.onNodeWithTag("tc-paragraph-before").assertExists()
+        composeTestRule.onNodeWithTag("tc-paragraph-after").assertExists()
         composeTestRule.onNodeWithTag("table-cell-0-0").assertExists()
         composeTestRule.onNodeWithContentDescription("Brush").assertExists()
         composeTestRule.onNodeWithContentDescription("Color").assertExists()

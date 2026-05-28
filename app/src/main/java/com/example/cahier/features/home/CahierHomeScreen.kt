@@ -278,6 +278,11 @@ private fun CahierNavigationSuite(
                                         navigateToDrawingCanvas(noteId)
                                     }
                                 },
+                                onAddNewTableNote = {
+                                    homeScreenViewModel.addTableInkNote { noteId ->
+                                        navigateToDrawingCanvas(noteId)
+                                    }
+                                },
                                 onDeleteNote = { note ->
                                     homeScreenViewModel.deleteNote(note)
                                     navigateUp()
@@ -364,6 +369,7 @@ private fun ListPaneContent(
     onNoteClick: (Note) -> Unit,
     onAddNewTextNote: () -> Unit,
     onAddNewDrawingNote: () -> Unit,
+    onAddNewTableNote: () -> Unit,
     onToggleFavorite: (Long) -> Unit,
     onOpenLastNote: () -> Unit,
     onStressTest: () -> Unit,
@@ -383,6 +389,7 @@ private fun ListPaneContent(
         onNoteClick = onNoteClick,
         onAddNewTextNote = onAddNewTextNote,
         onAddNewDrawingNote = onAddNewDrawingNote,
+        onAddNewTableNote = onAddNewTableNote,
         onDeleteNote = onDeleteNote,
         onToggleFavorite = onToggleFavorite,
         onNewWindow = onNewWindow,

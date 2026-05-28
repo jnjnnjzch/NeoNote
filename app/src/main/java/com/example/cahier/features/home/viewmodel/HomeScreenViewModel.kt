@@ -24,6 +24,13 @@ import androidx.lifecycle.viewModelScope
 import com.example.cahier.core.data.Note
 import com.example.cahier.core.data.NoteType
 import com.example.cahier.core.data.NotesRepository
+import com.example.cahier.core.document.CanvasPage
+import com.example.cahier.core.document.DocumentSerializer
+import com.example.cahier.core.document.ParagraphNode
+import com.example.cahier.core.document.TableNode
+import com.example.cahier.core.document.TextContainerBlock
+import com.example.cahier.core.document.TextContainerContent
+import com.example.cahier.core.document.TicDocument
 import com.example.cahier.core.ui.CahierUiState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -109,6 +116,35 @@ class HomeScreenViewModel @Inject constructor(
             newNoteId?.let {
                 callback(it)
             }
+        }
+    }
+
+    fun addTableInkNote(callback: (id: Long) -> Unit) {
+        viewModelScope.launch {
+            val tableContainer = TextContainerBlock(
+                content = TextContainerContent(
+                    nodes = listOf(
+                        ParagraphNode(""),
+                        TableNode(rows = 3, columns = 3),
+                        ParagraphNode("")
+                    )
+                )
+            )
+            val initialDoc = TicDocument(
+                pages = listOf(
+                    CanvasPage(blocks = listOf(tableContainer))
+                )
+            )
+            val initialText = DocumentSerializer.encode(initialDoc)
+            val newNote = Note(
+                id = 0,
+                title = "",
+                type = NoteType.Drawing,
+                text = initialText
+            )
+            val insertedId = noteRepository.addNote(newNote)
+            _uiState.value = CahierUiState(note = newNote.copy(id = insertedId))
+            callback(insertedId)
         }
     }
 

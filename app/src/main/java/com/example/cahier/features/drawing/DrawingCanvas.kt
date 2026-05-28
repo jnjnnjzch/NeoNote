@@ -107,6 +107,7 @@ import com.example.cahier.core.ui.LocalTextureStore
 import com.example.cahier.core.ui.theme.CahierAppTheme
 import com.example.cahier.core.utils.createDropTarget
 import com.example.cahier.core.document.TableBlock
+import com.example.cahier.core.document.TableNode
 import com.example.cahier.core.document.TextContainerBlock
 import com.example.cahier.core.document.ParagraphNode
 import com.example.cahier.features.drawing.CanvasTransformMapper.docToScreenX
@@ -528,7 +529,7 @@ private fun DrawingSurfaceWithTarget(
                 .padding(8.dp)
         )
 
-        tableBlock?.let { table ->
+        if (textContainer == null) tableBlock?.let { table ->
             TableBlockEditor(
                 table = table,
                 onCellChange = drawingCanvasViewModel::updateTableCell,
@@ -567,11 +568,21 @@ private fun DrawingSurfaceWithTarget(
         }
 
         textContainer?.let { container ->
-            val paragraphText = container.content.nodes.filterIsInstance<ParagraphNode>().firstOrNull()?.text ?: ""
+            val paragraphs = container.content.nodes.filterIsInstance<ParagraphNode>()
+            val tableNode = container.content.nodes.filterIsInstance<TableNode>().firstOrNull()
             TextContainerEditor(
-                text = paragraphText,
+                paragraphBefore = paragraphs.getOrNull(0)?.text.orEmpty(),
+                paragraphAfter = paragraphs.getOrNull(1)?.text.orEmpty(),
+                tableNode = tableNode,
                 canvasTransform = canvasTransform,
-                onTextChange = drawingCanvasViewModel::updateTextContainerParagraph,
+                onParagraphBeforeChange = { drawingCanvasViewModel.updateTextContainerParagraphAt(0, it) },
+                onParagraphAfterChange = { drawingCanvasViewModel.updateTextContainerParagraphAt(1, it) },
+                onInsertTable = drawingCanvasViewModel::insertInlineTableInTextContainer,
+                onInlineTableCellChange = drawingCanvasViewModel::updateInlineTableCell,
+                onInlineTableAppendRow = drawingCanvasViewModel::appendInlineTableRow,
+                onInlineToggleBold = drawingCanvasViewModel::toggleInlineTableCellBold,
+                onInlineToggleItalic = drawingCanvasViewModel::toggleInlineTableCellItalic,
+                onInlineToggleUnderline = drawingCanvasViewModel::toggleInlineTableCellUnderline,
                 onMove = drawingCanvasViewModel::moveTextContainerBy,
                 modifier = Modifier
                     .offset {
@@ -589,15 +600,24 @@ private fun DrawingSurfaceWithTarget(
 
 @Composable
 private fun TextContainerEditor(
-    text: String,
+    paragraphBefore: String,
+    paragraphAfter: String,
+    tableNode: TableNode?,
     canvasTransform: CanvasTransform,
-    onTextChange: (String) -> Unit,
+    onParagraphBeforeChange: (String) -> Unit,
+    onParagraphAfterChange: (String) -> Unit,
+    onInsertTable: () -> Unit,
+    onInlineTableCellChange: (Int, Int, String) -> Unit,
+    onInlineTableAppendRow: () -> Unit,
+    onInlineToggleBold: (Int, Int) -> Unit,
+    onInlineToggleItalic: (Int, Int) -> Unit,
+    onInlineToggleUnderline: (Int, Int) -> Unit,
     onMove: (Float, Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
         modifier = modifier
-            .pointerInput(text) {
+            .pointerInput(Unit) {
                 detectDragGestures { change, dragAmount ->
                     change.consume()
                     onMove(
@@ -609,16 +629,130 @@ private fun TextContainerEditor(
         color = Color(0xFFFCFCFB),
         tonalElevation = 1.dp
     ) {
-        TextField(
-            value = text,
-            onValueChange = onTextChange,
-            placeholder = { Text("Type your note…") },
-            singleLine = false,
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(8.dp)
                 .testTag("text-container-editor")
-        )
+        ) {
+            TextField(
+                value = paragraphBefore,
+                onValueChange = onParagraphBeforeChange,
+                placeholder = { Text("Type your note…") },
+                singleLine = false,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("tc-paragraph-before")
+            )
+            if (tableNode == null) {
+                TextButton(onClick = onInsertTable, modifier = Modifier.testTag("btn-insert-inline-table")) {
+                    Text("Insert Table")
+                }
+            } else {
+                InlineTableNodeEditor(
+                    table = tableNode,
+                    onCellChange = onInlineTableCellChange,
+                    onSelectCell = { _, _ -> },
+                    onToggleBold = onInlineToggleBold,
+                    onToggleItalic = onInlineToggleItalic,
+                    onToggleUnderline = onInlineToggleUnderline,
+                    onAppendRow = onInlineTableAppendRow,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                )
+            }
+            TextField(
+                value = paragraphAfter,
+                onValueChange = onParagraphAfterChange,
+                placeholder = { Text("Continue notes…") },
+                singleLine = false,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("tc-paragraph-after")
+            )
+        }
+    }
+}
+
+@Composable
+private fun InlineTableNodeEditor(
+    table: TableNode,
+    onCellChange: (Int, Int, String) -> Unit,
+    onSelectCell: (Int, Int) -> Unit,
+    onToggleBold: (Int, Int) -> Unit,
+    onToggleItalic: (Int, Int) -> Unit,
+    onToggleUnderline: (Int, Int) -> Unit,
+    onAppendRow: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val focusRequesters = remember(table.rows, table.columns) {
+        List(table.rows * table.columns) { FocusRequester() }
+    }
+    Column(modifier = modifier.padding(vertical = 8.dp)) {
+        table.cells.forEachIndexed { row, rowCells ->
+            Row {
+                rowCells.forEachIndexed { col, cell ->
+                    val index = row * table.columns + col
+                    TextField(
+                        value = cell.text,
+                        onValueChange = { onCellChange(row, col, it) },
+                        textStyle = MaterialTheme.typography.bodySmall.copy(
+                            fontWeight = if (cell.bold) FontWeight.Bold else FontWeight.Normal,
+                            fontStyle = if (cell.italic) FontStyle.Italic else FontStyle.Normal,
+                            textDecoration = if (cell.underline) TextDecoration.Underline else TextDecoration.None
+                        ),
+                        singleLine = false,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(2.dp)
+                            .border(1.dp, Color(0xFFD8DDE3))
+                            .testTag("table-cell-$row-$col")
+                            .focusRequester(focusRequesters[index])
+                            .onFocusChanged { if (it.isFocused) onSelectCell(row, col) }
+                            .onPreviewKeyEvent { event ->
+                                val nativeEvent = event.nativeKeyEvent
+                                if (
+                                    nativeEvent.action == AndroidKeyEvent.ACTION_DOWN &&
+                                    nativeEvent.keyCode == AndroidKeyEvent.KEYCODE_TAB
+                                ) {
+                                    val isLast = row == table.rows - 1 && col == table.columns - 1
+                                    if (isLast) {
+                                        onAppendRow()
+                                    } else {
+                                        val next = (index + 1).coerceAtMost(focusRequesters.lastIndex)
+                                        focusRequesters[next].requestFocus()
+                                    }
+                                    true
+                                } else if (
+                                    nativeEvent.action == AndroidKeyEvent.ACTION_DOWN &&
+                                    nativeEvent.keyCode == AndroidKeyEvent.KEYCODE_B &&
+                                    nativeEvent.isCtrlPressed
+                                ) {
+                                    onToggleBold(row, col)
+                                    true
+                                } else if (
+                                    nativeEvent.action == AndroidKeyEvent.ACTION_DOWN &&
+                                    nativeEvent.keyCode == AndroidKeyEvent.KEYCODE_I &&
+                                    nativeEvent.isCtrlPressed
+                                ) {
+                                    onToggleItalic(row, col)
+                                    true
+                                } else if (
+                                    nativeEvent.action == AndroidKeyEvent.ACTION_DOWN &&
+                                    nativeEvent.keyCode == AndroidKeyEvent.KEYCODE_U &&
+                                    nativeEvent.isCtrlPressed
+                                ) {
+                                    onToggleUnderline(row, col)
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                    )
+                }
+            }
+        }
     }
 }
 
