@@ -20,6 +20,8 @@ package com.example.cahier.features.drawing
 
 import android.content.ClipData
 import android.content.ClipDescription
+import android.content.ClipboardManager
+import android.content.Context
 import android.net.Uri
 import android.view.KeyEvent as AndroidKeyEvent
 import android.view.MotionEvent
@@ -81,6 +83,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -366,6 +369,8 @@ private fun DrawingSurfaceWithTarget(
         ?.blocks
         ?.filterIsInstance<TableBlock>()
         ?.firstOrNull()
+    var selectedCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    val context = LocalContext.current
 
     val dropTarget = remember {
         createDropTarget(activity) { uri, permissions ->
@@ -520,6 +525,23 @@ private fun DrawingSurfaceWithTarget(
             TableBlockEditor(
                 table = table,
                 onCellChange = drawingCanvasViewModel::updateTableCell,
+                onSelectCell = { r, c -> selectedCell = r to c },
+                onPasteImage = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip = clipboard.primaryClip
+                    val uri = clip?.getItemAt(0)?.uri?.toString()
+                    if (uri != null) {
+                        val asset = drawingCanvasViewModel.importImageFromUriToAssets(uri)
+                        if (asset != null) {
+                            val target = selectedCell
+                            if (target != null) {
+                                drawingCanvasViewModel.attachImageAssetToCell(target.first, target.second, asset)
+                            } else {
+                                drawingCanvasViewModel.addImageBlock(asset)
+                            }
+                        }
+                    }
+                },
                 onToggleBold = drawingCanvasViewModel::toggleTableCellBold,
                 onToggleItalic = drawingCanvasViewModel::toggleTableCellItalic,
                 onToggleUnderline = drawingCanvasViewModel::toggleTableCellUnderline,
@@ -575,6 +597,8 @@ private fun PressureTestPanel(
 internal fun TableBlockEditor(
     table: TableBlock,
     onCellChange: (Int, Int, String) -> Unit,
+    onSelectCell: (Int, Int) -> Unit,
+    onPasteImage: () -> Unit,
     onToggleBold: (Int, Int) -> Unit,
     onToggleItalic: (Int, Int) -> Unit,
     onToggleUnderline: (Int, Int) -> Unit,
@@ -604,6 +628,9 @@ internal fun TableBlockEditor(
         tonalElevation = 2.dp
     ) {
         Column(modifier = Modifier.padding(8.dp)) {
+            Row {
+                TextButton(onClick = onPasteImage) { Text("Paste Img") }
+            }
             table.cells.forEachIndexed { row, rowCells ->
                 Row {
                     rowCells.forEachIndexed { col, cell ->
@@ -624,6 +651,7 @@ internal fun TableBlockEditor(
                                 .border(1.dp, Color(0x55FFFFFF))
                                 .testTag("table-cell-$row-$col")
                                 .focusRequester(focusRequesters[index])
+                                .onFocusChanged { if (it.isFocused) onSelectCell(row, col) }
                                 .onPreviewKeyEvent { event ->
                                     val nativeEvent = event.nativeKeyEvent
                                     if (

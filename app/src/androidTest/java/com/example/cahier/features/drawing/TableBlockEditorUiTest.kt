@@ -41,6 +41,8 @@ class TableBlockEditorUiTest {
                         }
                     )
                 },
+                onSelectCell = { _, _ -> },
+                onPasteImage = {},
                 onToggleBold = { _, _ -> },
                 onToggleItalic = { _, _ -> },
                 onToggleUnderline = { _, _ -> },
@@ -63,6 +65,8 @@ class TableBlockEditorUiTest {
             TableBlockEditor(
                 table = table,
                 onCellChange = { _, _, _ -> },
+                onSelectCell = { _, _ -> },
+                onPasteImage = {},
                 onToggleBold = { _, _ -> },
                 onToggleItalic = { _, _ -> },
                 onToggleUnderline = { _, _ -> },
@@ -90,6 +94,8 @@ class TableBlockEditorUiTest {
             TableBlockEditor(
                 table = table,
                 onCellChange = { _, _, _ -> },
+                onSelectCell = { _, _ -> },
+                onPasteImage = {},
                 onToggleBold = { r, c ->
                     table = table.copy(
                         cells = table.cells.mapIndexed { ri, row ->

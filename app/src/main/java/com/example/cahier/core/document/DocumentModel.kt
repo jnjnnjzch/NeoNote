@@ -65,6 +65,17 @@ data class TableBlock(
 ) : Block
 
 @Serializable
+@SerialName("image")
+data class ImageBlock(
+    override val id: String = UUID.randomUUID().toString(),
+    override val x: Float = 64f,
+    override val y: Float = 64f,
+    override val width: Float = 320f,
+    override val height: Float = 240f,
+    val assetPath: String
+) : Block
+
+@Serializable
 data class TableCell(
     val text: String = "",
     val bold: Boolean = false,

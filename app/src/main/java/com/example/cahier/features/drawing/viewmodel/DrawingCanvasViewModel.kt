@@ -57,6 +57,7 @@ import com.example.cahier.core.data.CustomBrush
 import com.example.cahier.core.data.NotesRepository
 import com.example.cahier.core.document.DocumentSerializer
 import com.example.cahier.core.document.DocumentSettings
+import com.example.cahier.core.document.ImageBlock
 import com.example.cahier.core.document.StrokeAnchor
 import com.example.cahier.core.document.TableBlock
 import com.example.cahier.core.document.TableCell
@@ -86,6 +87,7 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.util.zip.GZIPInputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -694,6 +696,38 @@ class DrawingCanvasViewModel @Inject constructor(
         }
     }
 
+    fun attachImageAssetToCell(row: Int, col: Int, assetPath: String) {
+        updateFirstTableBlock { table ->
+            val updatedCells = table.cells.mapIndexed { rowIndex, rowCells ->
+                rowCells.mapIndexed { colIndex, cell ->
+                    if (rowIndex == row && colIndex == col) cell.copy(imageUri = assetPath) else cell
+                }
+            }
+            table.copy(cells = updatedCells)
+        }
+    }
+
+    fun addImageBlock(assetPath: String) {
+        val current = _document.value
+        val page = current.pages.firstOrNull() ?: return
+        val imageBlock = ImageBlock(assetPath = assetPath)
+        persistDocument(current.copy(pages = listOf(page.copy(blocks = page.blocks + imageBlock))))
+    }
+
+    fun importImageFromUriToAssets(uriString: String): String? {
+        return runCatching {
+            val uri = uriString.toUri()
+            val input: InputStream = context.contentResolver.openInputStream(uri) ?: return null
+            input.use { stream ->
+                val dir = File(context.filesDir, "note_assets").apply { mkdirs() }
+                val name = "img_${System.currentTimeMillis()}.bin"
+                val outFile = File(dir, name)
+                FileOutputStream(outFile).use { out -> stream.copyTo(out) }
+                outFile.absolutePath
+            }
+        }.getOrNull()
+    }
+
     fun toggleTableCellBold(row: Int, col: Int) {
         updateFirstTableBlock { table ->
             val updatedCells = table.cells.mapIndexed { rowIndex, rowCells ->
@@ -865,15 +899,20 @@ class DrawingCanvasViewModel @Inject constructor(
                 append(safeTitle)
                 append("\n\n")
                 append("## Tables\n\n")
-                doc.pages.firstOrNull()?.blocks?.filterIsInstance<TableBlock>()?.forEach { table ->
-                    table.cells.forEach { row ->
-                        append("| ")
+            doc.pages.firstOrNull()?.blocks?.filterIsInstance<TableBlock>()?.forEach { table ->
+                table.cells.forEach { row ->
+                    append("| ")
                         append(row.joinToString(" | ") { it.text.ifBlank { " " } })
                         append(" |\n")
-                    }
-                    append("\n")
                 }
-                append("## Ink\n\n")
+                append("\n")
+            }
+            doc.pages.firstOrNull()?.blocks?.filterIsInstance<ImageBlock>()?.forEachIndexed { idx, img ->
+                append("![image-$idx](assets/")
+                append(File(img.assetPath).name)
+                append(")\n")
+            }
+            append("## Ink\n\n")
                 append("Finalized stroke count: ${_uiState.value.strokes.size}\n")
             }
             File(baseDir, "$safeTitle.md").writeText(markdown)
@@ -887,6 +926,9 @@ class DrawingCanvasViewModel @Inject constructor(
                         "<tr>${row.joinToString("") { "<td>${it.text}</td>" }}</tr>"
                     }
                     "<table border=\"1\" cellspacing=\"0\" cellpadding=\"4\">$rows</table>"
+                } ?: ""}
+                ${doc.pages.firstOrNull()?.blocks?.filterIsInstance<ImageBlock>()?.joinToString("\n") { img ->
+                    "<img src=\"assets/${File(img.assetPath).name}\" width=\"${img.width}\" height=\"${img.height}\" />"
                 } ?: ""}
                 <h2>Ink</h2>
                 <p>Finalized stroke count: ${_uiState.value.strokes.size}</p>
@@ -921,6 +963,15 @@ class DrawingCanvasViewModel @Inject constructor(
                     zip.putNextEntry(ZipEntry("assets/background.png"))
                     zip.write(file.readBytes())
                     zip.closeEntry()
+                }
+                doc.pages.firstOrNull()?.blocks?.filterIsInstance<ImageBlock>()?.forEach { img ->
+                    File(img.assetPath).takeIf { it.exists() }?.let { file ->
+                        val assetName = file.name
+                        File(assetsDir, assetName).writeBytes(file.readBytes())
+                        zip.putNextEntry(ZipEntry("assets/$assetName"))
+                        zip.write(file.readBytes())
+                        zip.closeEntry()
+                    }
                 }
             }
             _lastExportDirectory.value = baseDir.absolutePath
