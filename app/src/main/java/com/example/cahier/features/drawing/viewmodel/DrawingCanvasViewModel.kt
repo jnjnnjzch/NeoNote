@@ -152,6 +152,12 @@ class DrawingCanvasViewModel @Inject constructor(
     val inkDebugMetrics: StateFlow<InkDebugMetrics> = _inkDebugMetrics.asStateFlow()
     private var eventCounterSinceWindow = 0
     private var eventWindowStartMillis = SystemClock.elapsedRealtime()
+    private var lastDebugPublishMillis = 0L
+    private var pendingPressure = 0f
+    private var pendingToolType = "unknown"
+    private var pendingPointIncrement = 0L
+    private var pendingCancelIncrement = 0L
+    private var pendingPalmIncrement = 0L
 
     private var isBrushSelectedInSession = false
     private val _lastExportDirectory = MutableStateFlow<String?>(null)
@@ -376,17 +382,27 @@ class DrawingCanvasViewModel @Inject constructor(
             0
         }
 
-        val isPalm = event.getToolType(0) == MotionEvent.TOOL_TYPE_PALM
-        val isCancel = event.actionMasked == MotionEvent.ACTION_CANCEL
-        _inkDebugMetrics.update { current ->
-            current.copy(
-                pressure = event.pressure,
-                toolType = toolTypeName(event.getToolType(0)),
-                pointCount = current.pointCount + event.historySize + 1L,
-                eventRateHz = currentRateHz,
-                cancelEventCount = current.cancelEventCount + if (isCancel) 1 else 0,
-                palmEventCount = current.palmEventCount + if (isPalm) 1 else 0
-            )
+        pendingPressure = event.pressure
+        pendingToolType = toolTypeName(event.getToolType(0))
+        pendingPointIncrement += event.historySize + 1L
+        if (event.actionMasked == MotionEvent.ACTION_CANCEL) pendingCancelIncrement++
+        if (event.getToolType(0) == MotionEvent.TOOL_TYPE_PALM) pendingPalmIncrement++
+
+        if (now - lastDebugPublishMillis >= 100L) {
+            _inkDebugMetrics.update { current ->
+                current.copy(
+                    pressure = pendingPressure,
+                    toolType = pendingToolType,
+                    pointCount = current.pointCount + pendingPointIncrement,
+                    eventRateHz = currentRateHz,
+                    cancelEventCount = current.cancelEventCount + pendingCancelIncrement,
+                    palmEventCount = current.palmEventCount + pendingPalmIncrement
+                )
+            }
+            pendingPointIncrement = 0L
+            pendingCancelIncrement = 0L
+            pendingPalmIncrement = 0L
+            lastDebugPublishMillis = now
         }
 
         if (elapsed >= 1000L) {
@@ -889,6 +905,30 @@ class DrawingCanvasViewModel @Inject constructor(
             }
             _lastExportDirectory.value = baseDir.absolutePath
         }
+    }
+
+    fun generateStressDocument(
+        tableCount: Int = 24,
+        rowsPerTable: Int = 40,
+        columnsPerTable: Int = 6,
+    ) {
+        val tables = (0 until tableCount).map { i ->
+            TableBlock(
+                x = 64f + (i % 3) * 720f,
+                y = 64f + (i / 3) * 540f,
+                width = 680f,
+                height = 480f,
+                rows = rowsPerTable,
+                columns = columnsPerTable,
+                cells = List(rowsPerTable) { r ->
+                    List(columnsPerTable) { c ->
+                        TableCell(text = "R${r + 1}C${c + 1}")
+                    }
+                }
+            )
+        }
+        val page = _document.value.pages.firstOrNull() ?: return
+        persistDocument(_document.value.copy(pages = listOf(page.copy(blocks = tables))))
     }
 
     private fun exportPdf(pdfFile: File, title: String, document: TicDocument) {

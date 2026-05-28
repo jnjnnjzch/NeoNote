@@ -214,6 +214,9 @@ private fun DrawingCanvasTopBar(
         TextButton(onClick = drawingCanvasViewModel::exportAllFormats) {
             Text("Export")
         }
+        TextButton(onClick = drawingCanvasViewModel::generateStressDocument) {
+            Text("Stress")
+        }
     }
 }
 
