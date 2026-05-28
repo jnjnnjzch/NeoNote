@@ -210,12 +210,21 @@ jobs:
           merge-multiple: true
 
       - name: Build inventory files
+        env:
+          VERIFIED_VERSION_NAME: ${{ needs.verify.outputs.version_name }}
+          VERIFIED_VERSION_CODE: ${{ needs.verify.outputs.version_code }}
+          VERIFIED_APP_ID: ${{ needs.verify.outputs.app_id }}
+          VERIFIED_SHORT_SHA: ${{ needs.verify.outputs.short_sha }}
         run: |
           mkdir -p docs/audit
           python - <<'PY'
           import json, os, subprocess, hashlib
           root="collected"
           out=[]
+          fallback_version_name=os.getenv("VERIFIED_VERSION_NAME","n/a")
+          fallback_version_code=os.getenv("VERIFIED_VERSION_CODE","n/a")
+          fallback_app_id=os.getenv("VERIFIED_APP_ID","n/a")
+          fallback_sha=os.getenv("VERIFIED_SHORT_SHA","n/a")
           def run(cmd):
               p=subprocess.run(cmd, shell=True, text=True, capture_output=True)
               return p.returncode, p.stdout+p.stderr
@@ -233,12 +242,13 @@ jobs:
                   "job_that_produced_it": "verify/build_release",
                   "installable_on_android": False,
                   "reason": "",
-                  "versionName": "",
-                  "versionCode": "",
-                  "applicationId": "",
-                  "buildType": "",
+                  "versionName": fallback_version_name,
+                  "versionCode": fallback_version_code,
+                  "applicationId": fallback_app_id,
+                  "buildType": "unknown",
                   "signed": False,
-                  "sha256": sha
+                  "sha256": sha,
+                  "gitSha": fallback_sha
               }
               if ext==".apk":
                   rc1,o1=run(f'unzip -t "{path}"')
@@ -294,3 +304,61 @@ jobs:
             docs/audit/current_artifact_inventory.md
             docs/audit/current_artifact_inventory.json
           if-no-files-found: error
+
+  validate_artifact_policy:
+    needs: [verify, build_release, artifact_inventory]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Android SDK tools
+        uses: android-actions/setup-android@v3
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: collected
+          merge-multiple: true
+
+      - name: Enforce artifact naming and installability policy
+        run: |
+          set -e
+          ls -la collected
+          DEBUG_APK=$(ls collected/NeoNote-debug-installable-*.apk)
+          UNSIGNED_APK=$(ls collected/NeoNote-release-unsigned-NOT-INSTALLABLE-*.apk)
+          AAB_FILE=$(ls collected/NeoNote-release-bundle-NOT-INSTALLABLE-DIRECTLY-*.aab)
+          if [[ -z "$DEBUG_APK" ]]; then echo "Missing debug installable apk"; exit 1; fi
+          if [[ -z "$UNSIGNED_APK" ]]; then echo "Missing unsigned release apk with NOT-INSTALLABLE naming"; exit 1; fi
+          if [[ -z "$AAB_FILE" ]]; then echo "Missing AAB with NOT-INSTALLABLE-DIRECTLY naming"; exit 1; fi
+
+          apksigner verify --verbose --print-certs "$DEBUG_APK"
+
+          if ls collected/NeoNote-release-signed-installable-*.apk 1> /dev/null 2>&1; then
+            for f in collected/NeoNote-release-signed-installable-*.apk; do
+              apksigner verify --verbose --print-certs "$f"
+            done
+          fi
+
+      - name: Validate inventory fields
+        run: |
+          python - <<'PY'
+          import json
+          p='collected/current_artifact_inventory.json'
+          data=json.load(open(p,encoding='utf-8'))
+          arr=data.get('artifacts',[])
+          assert arr, "inventory artifacts list is empty"
+          required=["applicationId","versionCode","versionName","sha256","installable_on_android","exact_file_name"]
+          for i,a in enumerate(arr):
+              for k in required:
+                  if k not in a or a[k] in ("", None):
+                      raise AssertionError(f"artifact[{i}] missing required field: {k}")
+          print("inventory required fields validated")
+          PY
+
+      - name: Recommended install summary
+        run: |
+          echo "Recommended install file:"
+          ls collected/NeoNote-debug-installable-*.apk
+          echo ""
+          echo "Do not install:"
+          echo "- *UNSIGNED-NOT-INSTALLABLE*.apk"
+          echo "- *.aab"
+          echo "- artifact zip directly"

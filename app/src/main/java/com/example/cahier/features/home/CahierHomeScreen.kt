@@ -285,6 +285,38 @@ private fun CahierNavigationSuite(
                                 onToggleFavorite = { noteId ->
                                     homeScreenViewModel.toggleFavorite(noteId)
                                 },
+                                onOpenLastNote = {
+                                    val latest = noteList.noteList.maxByOrNull { it.id }
+                                    latest?.let { note ->
+                                        if (note.type == NoteType.Drawing) navigateToDrawingCanvas(note.id)
+                                        else navigateToCanvas(note.id)
+                                    }
+                                },
+                                onStressTest = {
+                                    val drawing = noteList.noteList
+                                        .filter { it.type == NoteType.Drawing }
+                                        .maxByOrNull { it.id }
+                                    if (drawing != null) {
+                                        navigateToDrawingCanvas(drawing.id)
+                                    } else {
+                                        homeScreenViewModel.addDrawingNote { noteId ->
+                                            navigateToDrawingCanvas(noteId)
+                                        }
+                                    }
+                                },
+                                onExportTest = {
+                                    val drawing = noteList.noteList
+                                        .filter { it.type == NoteType.Drawing }
+                                        .maxByOrNull { it.id }
+                                    if (drawing != null) {
+                                        navigateToDrawingCanvas(drawing.id)
+                                    } else {
+                                        homeScreenViewModel.addDrawingNote { noteId ->
+                                            navigateToDrawingCanvas(noteId)
+                                        }
+                                    }
+                                },
+                                onBuildInfo = { onDestinationChanged(AppDestinations.Settings) },
                                 onNewWindow = { note ->
                                     homeScreenViewModel.openInNewWindow(note)
                                 },
@@ -333,6 +365,10 @@ private fun ListPaneContent(
     onAddNewTextNote: () -> Unit,
     onAddNewDrawingNote: () -> Unit,
     onToggleFavorite: (Long) -> Unit,
+    onOpenLastNote: () -> Unit,
+    onStressTest: () -> Unit,
+    onExportTest: () -> Unit,
+    onBuildInfo: () -> Unit,
     modifier: Modifier = Modifier,
     onDeleteNote: (Note) -> Unit,
     onNewWindow: (Note) -> Unit,
@@ -350,6 +386,10 @@ private fun ListPaneContent(
         onDeleteNote = onDeleteNote,
         onToggleFavorite = onToggleFavorite,
         onNewWindow = onNewWindow,
+        onOpenLastNote = onOpenLastNote,
+        onStressTest = onStressTest,
+        onExportTest = onExportTest,
+        onBuildInfo = onBuildInfo,
         modifier = modifier.testTag("List")
     )
 }

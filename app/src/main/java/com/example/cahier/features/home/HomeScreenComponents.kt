@@ -47,10 +47,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
@@ -59,6 +61,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,6 +74,7 @@ import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
 import androidx.ink.strokes.Stroke
 import coil3.compose.AsyncImage
+import com.example.cahier.BuildConfig
 import com.example.cahier.R
 import com.example.cahier.core.data.Note
 import com.example.cahier.core.data.NoteType
@@ -88,6 +92,10 @@ fun NoteList(
     onNoteClick: (Note) -> Unit,
     onToggleFavorite: (Long) -> Unit,
     onNewWindow: (Note) -> Unit,
+    onOpenLastNote: () -> Unit,
+    onStressTest: () -> Unit,
+    onExportTest: () -> Unit,
+    onBuildInfo: () -> Unit,
     modifier: Modifier = Modifier,
     onDeleteNote: (Note) -> Unit = {},
 ) {
@@ -96,6 +104,24 @@ fun NoteList(
         shape = RoundedCornerShape(12.dp),
     ) {
         Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text("NeoNote")
+                            Text(
+                                text = stringResource(R.string.neonote_subtitle),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                text = "NeoNote ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) ${BuildConfig.BUILD_TYPE} / ${BuildConfig.GIT_SHA.take(7)} / run ${BuildConfig.GITHUB_RUN_NUMBER}",
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.testTag("build-badge")
+                            )
+                        }
+                    }
+                )
+            },
             floatingActionButton = {
                 val expanded = rememberSaveable { mutableStateOf(false) }
                 CahierFloatingButton(
@@ -112,17 +138,51 @@ fun NoteList(
             },
             modifier = Modifier
         ) { innerPadding ->
-            NoteListContent(
-                favorites = favorites,
-                otherNotes = otherNotes,
-                isCompact = isCompact,
-                selectedNoteId = selectedNoteId,
-                onNoteClick = onNoteClick,
-                onDeleteNote = onDeleteNote,
-                onToggleFavorite = onToggleFavorite,
-                onNewWindow = onNewWindow,
-                modifier = Modifier.padding(innerPadding)
-            )
+            Column(modifier = Modifier.padding(innerPadding)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(onClick = onAddNewDrawingNote, modifier = Modifier.testTag("btn-new-ink")) {
+                        Text(stringResource(R.string.new_ink_note))
+                    }
+                    OutlinedButton(onClick = onAddNewDrawingNote, modifier = Modifier.testTag("btn-new-table")) {
+                        Text(stringResource(R.string.new_table_note))
+                    }
+                    OutlinedButton(onClick = onOpenLastNote, modifier = Modifier.testTag("btn-open-last")) {
+                        Text(stringResource(R.string.open_last_note))
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(onClick = onStressTest, modifier = Modifier.testTag("btn-stress-test")) {
+                        Text(stringResource(R.string.stress_test))
+                    }
+                    OutlinedButton(onClick = onExportTest, modifier = Modifier.testTag("btn-export-test")) {
+                        Text(stringResource(R.string.export_test))
+                    }
+                    OutlinedButton(onClick = onBuildInfo, modifier = Modifier.testTag("btn-build-info")) {
+                        Text(stringResource(R.string.build_info))
+                    }
+                }
+                NoteListContent(
+                    favorites = favorites,
+                    otherNotes = otherNotes,
+                    isCompact = isCompact,
+                    selectedNoteId = selectedNoteId,
+                    onNoteClick = onNoteClick,
+                    onDeleteNote = onDeleteNote,
+                    onToggleFavorite = onToggleFavorite,
+                    onNewWindow = onNewWindow,
+                    modifier = Modifier
+                )
+            }
         }
     }
 }
@@ -569,6 +629,10 @@ fun NoteListPreview(
             onNoteClick = {},
             onToggleFavorite = {},
             onNewWindow = {},
+            onOpenLastNote = {},
+            onStressTest = {},
+            onExportTest = {},
+            onBuildInfo = {},
             onDeleteNote = {},
             modifier = modifier
         )

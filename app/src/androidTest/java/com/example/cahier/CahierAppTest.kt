@@ -25,6 +25,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performClick
@@ -65,6 +66,35 @@ class CahierAppTest {
         composeTestRule.onNodeWithContentDescription("Brush").assertExists()
         composeTestRule.onNodeWithContentDescription("Color").assertExists()
         composeTestRule.onNodeWithContentDescription("Eraser").assertExists()
+    }
+
+    @Test
+    fun homeScreen_showsNeoNoteBrand_buildBadge_andQuickLaunchButtons() {
+        composeTestRule.onNodeWithText("NeoNote").assertExists()
+        composeTestRule.onNodeWithText("Table-first ink canvas for S Pen").assertExists()
+        composeTestRule.onNodeWithTag("build-badge").assertExists()
+        composeTestRule.onNodeWithTag("btn-new-ink").assertExists()
+        composeTestRule.onNodeWithTag("btn-new-table").assertExists()
+        composeTestRule.onNodeWithTag("btn-open-last").assertExists()
+        composeTestRule.onNodeWithTag("btn-stress-test").assertExists()
+        composeTestRule.onNodeWithTag("btn-export-test").assertExists()
+        composeTestRule.onNodeWithTag("btn-build-info").assertExists()
+    }
+
+    @Test
+    fun newTableNote_opensDrawingWithEditableTableAndToolbar() {
+        composeTestRule.onNodeWithTag("btn-new-table").performClick()
+        composeTestRule.onNodeWithTag("table-cell-0-0").assertExists()
+        composeTestRule.onNodeWithContentDescription("Brush").assertExists()
+        composeTestRule.onNodeWithContentDescription("Color").assertExists()
+    }
+
+    @Test
+    fun settings_still_shows_build_info() {
+        composeTestRule.onNodeWithTag("btn-build-info").performClick()
+        composeTestRule.onNodeWithText("applicationId:", substring = true).assertExists()
+        composeTestRule.onNodeWithText("versionName:", substring = true).assertExists()
+        composeTestRule.onNodeWithText("gitSha:", substring = true).assertExists()
     }
 
     @Test
