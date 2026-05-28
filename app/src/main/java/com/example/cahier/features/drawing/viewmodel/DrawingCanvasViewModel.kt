@@ -53,6 +53,8 @@ import coil3.request.allowHardware
 import coil3.toBitmap
 import com.example.cahier.core.data.CustomBrush
 import com.example.cahier.core.data.NotesRepository
+import com.example.cahier.core.document.DocumentSerializer
+import com.example.cahier.core.document.TicDocument
 import com.example.cahier.core.navigation.DrawingCanvasDestination
 import com.example.cahier.core.ui.CahierTextureBitmapStore
 import com.example.cahier.core.ui.CahierUiState
@@ -133,6 +135,8 @@ class DrawingCanvasViewModel @Inject constructor(
 
     private val _customBrushes = MutableStateFlow<List<CustomBrush>>(emptyList())
     val customBrushes: StateFlow<List<CustomBrush>> = _customBrushes.asStateFlow()
+    private val _document = MutableStateFlow(TicDocument())
+    val document: StateFlow<TicDocument> = _document.asStateFlow()
     private val _inkDebugMetrics = MutableStateFlow(InkDebugMetrics())
     val inkDebugMetrics: StateFlow<InkDebugMetrics> = _inkDebugMetrics.asStateFlow()
     private var eventCounterSinceWindow = 0
@@ -145,6 +149,12 @@ class DrawingCanvasViewModel @Inject constructor(
             noteRepository.getNoteStream(noteId)
                 .filterNotNull()
                 .collect { note ->
+                    val parsedDocument = DocumentSerializer.decodeOrNull(note.text) ?: TicDocument()
+                    _document.value = parsedDocument
+                    if (note.text.isNullOrBlank()) {
+                        noteRepository.updateNote(note.copy(text = DocumentSerializer.encode(parsedDocument)))
+                    }
+
                     val initialStrokes = if (note.strokesData != null) {
                         noteRepository.getNoteStrokes(note.id)
                     } else {
