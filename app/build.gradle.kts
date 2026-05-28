@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+import java.time.Instant
+
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.ksp)
@@ -23,36 +25,42 @@ plugins {
     id("com.google.dagger.hilt.android")
 }
 
-fun env(name: String): String? = System.getenv(name)?.takeIf { it.isNotBlank() }
+fun env(name: String): String? =
+    System.getenv(name)?.takeIf { it.isNotBlank() }
 
 fun gitShortSha(): String {
-    return env("GITHUB_SHA")?.take(7) ?: runCatching {
-        val stdout = java.io.ByteArrayOutputStream()
-        exec {
-            commandLine("git", "rev-parse", "--short=7", "HEAD")
-            standardOutput = stdout
-        }
-        stdout.toString().trim()
-    }.getOrDefault("localdev")
+    env("GITHUB_SHA")?.take(7)?.let { return it }
+
+    return runCatching {
+        ProcessBuilder("git", "rev-parse", "--short=7", "HEAD")
+            .directory(rootDir)
+            .redirectErrorStream(true)
+            .start()
+            .inputStream
+            .bufferedReader()
+            .use { it.readText().trim() }
+            .ifBlank { "local" }
+    }.getOrDefault("local")
 }
 
-fun ciRunNumber(): Int = env("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0
-
-fun ciTagVersion(): String {
-    val refName = env("GITHUB_REF_NAME")
-    return if (refName != null && refName.startsWith("v")) {
-        refName.removePrefix("v")
-    } else {
-        "0.1.0-dev"
-    }
-}
+val buildTimeUtc = Instant.now().toString()
+val githubRunNumber = env("GITHUB_RUN_NUMBER") ?: "0"
+val ciRunNumber = githubRunNumber.toIntOrNull() ?: 0
+val baseVersionCode = 1000
+val computedVersionCode = baseVersionCode + ciRunNumber
 
 val gitSha = gitShortSha()
-val runNumber = ciRunNumber()
-val baseVersionCode = 1000
-val computedVersionCode = baseVersionCode + if (runNumber > 0) runNumber else 1
-val computedVersionName = "${ciTagVersion()}-$gitSha"
-val buildTimeUtc = java.time.Instant.now().toString()
+val refType = env("GITHUB_REF_TYPE")
+val refName = env("GITHUB_REF_NAME")
+
+val baseVersionName =
+    when {
+        env("NEONOTE_VERSION_NAME") != null -> env("NEONOTE_VERSION_NAME")!!
+        refType == "tag" && !refName.isNullOrBlank() -> refName.removePrefix("v")
+        else -> "0.1.0"
+    }
+
+val computedVersionName = "$baseVersionName-$gitSha"
 
 android {
     namespace = "com.example.cahier"
@@ -66,8 +74,8 @@ android {
         versionName = computedVersionName
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
         buildConfigField("String", "BUILD_TIME_UTC", "\"$buildTimeUtc\"")
-        buildConfigField("String", "GITHUB_RUN_NUMBER", "\"${env("GITHUB_RUN_NUMBER") ?: "local"}\"")
-        buildConfigField("String", "APPLICATION_ID_VALUE", "\"com.example.cahier\"")
+        buildConfigField("String", "GITHUB_RUN_NUMBER", "\"$githubRunNumber\"")
+        buildConfigField("String", "APPLICATION_ID_VALUE", "\"$applicationId\"")
 
         testInstrumentationRunner = "com.example.cahier.HiltTestRunner"
         vectorDrawables {
@@ -100,8 +108,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures {
-        compose = true
         buildConfig = true
+        compose = true
     }
     packaging {
         resources {
