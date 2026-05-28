@@ -3,13 +3,7 @@ name: Build And Verify
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-      - master
   pull_request:
-    branches:
-      - main
-      - master
 
 jobs:
   build:
