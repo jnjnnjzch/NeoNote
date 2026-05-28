@@ -2,55 +2,27 @@
 
 - Date: 2026-05-28
 - Branch: `codex/phase-0-1-foundation`
-- Current Gate: `5`
-- Gate Status: `IN_PROGRESS`
-- Next Gate: `6`
+- Current Focus: `Gate 8`
+- State: `IN_PROGRESS`
 
-## Gate Objective
+## What Changed
 
-Harden TableBlock editor behaviors and add Compose UI tests for key editing flows.
-
-## Evidence Produced
-
-- Exposed `TableBlockEditor` as `internal` for direct UI test coverage.
-- Added test tags on table cells (`table-cell-r-c`) for deterministic UI selection.
-- Added Compose instrumentation test suite:
-  - `app/src/androidTest/java/com/example/cahier/features/drawing/TableBlockEditorUiTest.kt`
-  - Covers: edit cell, last-cell Tab row append, Ctrl+B state toggle callback path.
+- Added stable stroke-id model fields:
+  - `CanvasPage.strokeIds`
+  - `StrokeAnchor.strokeIds`
+- Added `StrokeIdMapper` to keep stroke IDs stable after erase/insert/reorder operations.
+- Integrated stroke-id synchronization into `DrawingCanvasViewModel.updateStrokes`.
+- Updated anchor translation to prefer stroke-id mapping with legacy index fallback.
+- Added `StrokeIdMapperTest` unit tests.
 
 ## Exact Files Changed
 
-- `app/src/main/java/com/example/cahier/features/drawing/DrawingCanvas.kt`
-- `app/src/androidTest/java/com/example/cahier/features/drawing/TableBlockEditorUiTest.kt`
-- `docs/autopilot/status.json`
-- `docs/autopilot/latest_report.md`
+- `app/src/main/java/com/example/cahier/core/document/DocumentModel.kt`
+- `app/src/main/java/com/example/cahier/features/drawing/StrokeIdMapper.kt`
+- `app/src/main/java/com/example/cahier/features/drawing/viewmodel/DrawingCanvasViewModel.kt`
+- `app/src/test/java/com/example/cahier/features/drawing/StrokeIdMapperTest.kt`
 
-## Classes / Functions Changed
+## Verification Status
 
-- `TableBlockEditor` (testability + deterministic tags)
-- `TableBlockEditorUiTest`
-
-## Tests Run
-
-- `TableBlockEditorUiTest.editCell_updatesContent`
-- `TableBlockEditorUiTest.tabOnLastCell_appendsRow`
-- `TableBlockEditorUiTest.ctrlB_togglesBoldState`
-- Execution status: not executed locally due runtime usage-limit block on Gradle command.
-
-## Missing Tests
-
-- Execution evidence for TableBlockEditorUiTest in CI/local instrumentation.
-- Expanded Ctrl+I/Ctrl+U and multiline persistence instrumentation coverage.
-
-## Known Limitations
-
-- Keyboard modifier handling should be validated across emulator and physical device keyboard stacks.
-
-## CI / Verification Status
-
-- Gate progression is fix-forward; unified verification will be run after implementation gates are complete.
-- Gate 5 remains `IN_PROGRESS` until test execution evidence is recorded.
-
-## Device Verification Required
-
-No (device keyboard behavior still recommended as supplemental validation).
+- Local Android build/test execution is blocked on this machine due missing Android SDK configuration.
+- CI is tag-triggered (`v*`). Latest trigger tag: `v0.1.6-gate7`.

@@ -25,6 +25,7 @@ data class CanvasPage(
     val id: String = UUID.randomUUID().toString(),
     val blocks: List<Block> = emptyList(),
     val inkLayer: InkLayerRef = InkLayerRef(),
+    val strokeIds: List<String> = emptyList(),
     val strokeAnchors: List<StrokeAnchor> = emptyList(),
 )
 
@@ -36,8 +37,9 @@ data class InkLayerRef(
 @Serializable
 data class StrokeAnchor(
     val blockId: String,
-    val startStrokeIndex: Int,
-    val endStrokeIndexInclusive: Int,
+    val strokeIds: List<String> = emptyList(),
+    val startStrokeIndex: Int? = null,
+    val endStrokeIndexInclusive: Int? = null,
     val anchorOriginX: Float,
     val anchorOriginY: Float,
 )

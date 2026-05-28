@@ -74,6 +74,7 @@ import com.example.cahier.features.drawing.InkDebugAggregator
 import com.example.cahier.features.drawing.InkDebugMetrics
 import com.example.cahier.features.drawing.InkDebugSample
 import com.example.cahier.features.drawing.PressureCurveMapper
+import com.example.cahier.features.drawing.StrokeIdMapper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -88,6 +89,7 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.util.UUID
 import java.util.zip.GZIPInputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -233,14 +235,48 @@ class DrawingCanvasViewModel @Inject constructor(
     }
 
     private fun updateStrokes(newStrokes: List<Stroke>) {
+        val oldStrokes = _uiState.value.strokes
         if (historyIndex < history.size - 1) {
             history.subList(historyIndex + 1, history.size).clear()
         }
         history.add(newStrokes)
         historyIndex++
 
+        syncStrokeIds(oldStrokes = oldStrokes, newStrokes = newStrokes)
         _uiState.update { it.copy(strokes = newStrokes) }
         updateUndoRedoState()
+        recomputeStrokeTranslations()
+    }
+
+    private fun syncStrokeIds(oldStrokes: List<Stroke>, newStrokes: List<Stroke>) {
+        val current = _document.value
+        val page = current.pages.firstOrNull() ?: return
+        val oldIds = if (page.strokeIds.size == oldStrokes.size) {
+            page.strokeIds
+        } else {
+            List(oldStrokes.size) { UUID.randomUUID().toString() }
+        }
+        val remapped = StrokeIdMapper.remapIds(oldStrokes, newStrokes, oldIds)
+        val validIds = remapped.toSet()
+        val updatedAnchors = page.strokeAnchors.map { anchor ->
+            anchor.copy(strokeIds = anchor.strokeIds.filter { it in validIds })
+        }.filter { anchor ->
+            anchor.strokeIds.isNotEmpty() || (
+                anchor.startStrokeIndex != null &&
+                    anchor.endStrokeIndexInclusive != null &&
+                    anchor.endStrokeIndexInclusive >= anchor.startStrokeIndex
+                )
+        }
+        persistDocument(
+            current.copy(
+                pages = listOf(
+                    page.copy(
+                        strokeIds = remapped,
+                        strokeAnchors = updatedAnchors
+                    )
+                )
+            )
+        )
     }
 
     private fun updateUndoRedoState() {
@@ -827,8 +863,10 @@ class DrawingCanvasViewModel @Inject constructor(
         val current = _document.value
         val page = current.pages.firstOrNull() ?: return
         val table = page.blocks.filterIsInstance<TableBlock>().firstOrNull() ?: return
+        val ids = page.strokeIds.drop(startIndex).take(count)
         val anchor = StrokeAnchor(
             blockId = table.id,
+            strokeIds = ids,
             startStrokeIndex = startIndex,
             endStrokeIndexInclusive = startIndex + count - 1,
             anchorOriginX = table.x,
@@ -844,13 +882,25 @@ class DrawingCanvasViewModel @Inject constructor(
     private fun recomputeStrokeTranslations() {
         val page = _document.value.pages.firstOrNull() ?: return
         val tableById = page.blocks.filterIsInstance<TableBlock>().associateBy { it.id }
+        val strokeIndexById = page.strokeIds.withIndex().associate { (idx, id) -> id to idx }
         val translations = mutableMapOf<Int, Pair<Float, Float>>()
         page.strokeAnchors.forEach { anchor ->
             val table = tableById[anchor.blockId] ?: return@forEach
             val dx = table.x - anchor.anchorOriginX
             val dy = table.y - anchor.anchorOriginY
-            for (i in anchor.startStrokeIndex..anchor.endStrokeIndexInclusive) {
-                translations[i] = dx to dy
+            if (anchor.strokeIds.isNotEmpty()) {
+                anchor.strokeIds.forEach { strokeId ->
+                    val index = strokeIndexById[strokeId] ?: return@forEach
+                    translations[index] = dx to dy
+                }
+            } else if (
+                anchor.startStrokeIndex != null &&
+                anchor.endStrokeIndexInclusive != null &&
+                anchor.endStrokeIndexInclusive >= anchor.startStrokeIndex
+            ) {
+                for (i in anchor.startStrokeIndex..anchor.endStrokeIndexInclusive) {
+                    translations[i] = dx to dy
+                }
             }
         }
         _strokeTranslations.value = translations
