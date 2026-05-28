@@ -48,7 +48,8 @@ jobs:
         run: |
           APK="app/build/outputs/apk/debug/app-debug.apk"
           SHORT_SHA="$(git rev-parse --short=7 HEAD)"
-          BADGING="$(aapt dump badging "$APK")"
+          AAPT_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/aapt | sort -V | tail -n1)"
+          BADGING="$("$AAPT_BIN" dump badging "$APK")"
           VERSION_NAME="$(echo "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -n1)"
           VERSION_CODE="$(echo "$BADGING" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" | head -n1)"
           APP_ID="$(echo "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n1)"
@@ -60,9 +61,10 @@ jobs:
       - name: Validate debug APK
         run: |
           APK="app/build/outputs/apk/debug/app-debug.apk"
+          AAPT_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/aapt | sort -V | tail -n1)"
           unzip -t "$APK"
           apksigner verify --verbose --print-certs "$APK"
-          aapt dump badging "$APK" > debug.badging.txt
+          "$AAPT_BIN" dump badging "$APK" > debug.badging.txt
 
       - name: Rename installable debug APK
         run: |
@@ -153,11 +155,12 @@ jobs:
       - name: Validate release unsigned APK and AAB
         run: |
           set +e
+          AAPT_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/aapt | sort -V | tail -n1)"
           UNSIGNED="$(ls dist/NeoNote-release-unsigned-NOT-INSTALLABLE-*.apk)"
           AAB="$(ls dist/NeoNote-release-bundle-NOT-INSTALLABLE-DIRECTLY-*.aab)"
           unzip -t "$UNSIGNED" | tee release-unsigned-unzip.txt
           apksigner verify --verbose --print-certs "$UNSIGNED" | tee release-unsigned-signing.txt
-          aapt dump badging "$UNSIGNED" | tee release-unsigned.badging.txt
+          "$AAPT_BIN" dump badging "$UNSIGNED" | tee release-unsigned.badging.txt
           SHA_UNSIGNED="$(sha256sum "$UNSIGNED" | awk '{print $1}')"
           SHA_AAB="$(sha256sum "$AAB" | awk '{print $1}')"
           echo "$SHA_UNSIGNED  $UNSIGNED" > release-sha256.txt
@@ -166,6 +169,7 @@ jobs:
       - name: Optionally sign release APK
         if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && env.ANDROID_KEYSTORE_PASSWORD != '' && env.ANDROID_KEY_ALIAS != '' && env.ANDROID_KEY_PASSWORD != '' }}
         run: |
+          AAPT_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/aapt | sort -V | tail -n1)"
           SHORT_SHA="${{ needs.verify.outputs.short_sha }}"
           VNAME="${{ needs.verify.outputs.version_name }}"
           VCODE="${{ needs.verify.outputs.version_code }}"
@@ -181,7 +185,7 @@ jobs:
             "$UNSIGNED"
           unzip -t "$SIGNED" | tee release-signed-unzip.txt
           apksigner verify --verbose --print-certs "$SIGNED" | tee release-signed-signing.txt
-          aapt dump badging "$SIGNED" | tee release-signed.badging.txt
+          "$AAPT_BIN" dump badging "$SIGNED" | tee release-signed.badging.txt
           sha256sum "$SIGNED" >> release-sha256.txt
 
       - name: Upload release artifacts
@@ -251,9 +255,10 @@ jobs:
                   "gitSha": fallback_sha
               }
               if ext==".apk":
+                  aapt_bin = subprocess.run('ls -1d "$ANDROID_HOME"/build-tools/*/aapt | sort -V | tail -n1', shell=True, text=True, capture_output=True).stdout.strip()
                   rc1,o1=run(f'unzip -t "{path}"')
                   rc2,o2=run(f'apksigner verify --verbose --print-certs "{path}"')
-                  rc3,o3=run(f'aapt dump badging "{path}"')
+                  rc3,o3=run(f'"{aapt_bin}" dump badging "{path}"')
                   badging=o3
                   def pick(key):
                       import re
