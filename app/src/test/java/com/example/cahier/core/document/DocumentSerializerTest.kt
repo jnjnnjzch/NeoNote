@@ -39,7 +39,7 @@ class DocumentSerializerTest {
     @Test
     fun encodeDecode_preservesCellFormattingAndRowGrowth() {
         val row = listOf(
-            TableCell(text = "A1", bold = true),
+            TableCell(text = "A1", bold = true, italic = true, underline = true, imageUri = "content://image/1", latex = "x^2"),
             TableCell(text = "B1"),
             TableCell(text = "C1")
         )
@@ -55,6 +55,10 @@ class DocumentSerializerTest {
 
         assertEquals(4, decodedTable.rows)
         assertEquals(true, decodedTable.cells.first().first().bold)
+        assertEquals(true, decodedTable.cells.first().first().italic)
+        assertEquals(true, decodedTable.cells.first().first().underline)
+        assertEquals("content://image/1", decodedTable.cells.first().first().imageUri)
+        assertEquals("x^2", decodedTable.cells.first().first().latex)
         assertEquals("A1", decodedTable.cells.first().first().text)
     }
 }

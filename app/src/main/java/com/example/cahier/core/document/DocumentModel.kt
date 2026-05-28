@@ -51,5 +51,9 @@ data class TableBlock(
 @Serializable
 data class TableCell(
     val text: String = "",
-    val bold: Boolean = false
+    val bold: Boolean = false,
+    val italic: Boolean = false,
+    val underline: Boolean = false,
+    val imageUri: String? = null,
+    val latex: String? = null,
 )

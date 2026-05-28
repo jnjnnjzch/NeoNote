@@ -80,7 +80,9 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
@@ -416,6 +418,8 @@ private fun DrawingSurfaceWithTarget(
                 table = table,
                 onCellChange = drawingCanvasViewModel::updateTableCell,
                 onToggleBold = drawingCanvasViewModel::toggleTableCellBold,
+                onToggleItalic = drawingCanvasViewModel::toggleTableCellItalic,
+                onToggleUnderline = drawingCanvasViewModel::toggleTableCellUnderline,
                 onAppendRow = drawingCanvasViewModel::appendTableRow,
                 onMove = drawingCanvasViewModel::moveTableBlockBy,
                 onResize = drawingCanvasViewModel::resizeTableBlockBy,
@@ -431,6 +435,8 @@ private fun TableBlockEditor(
     table: TableBlock,
     onCellChange: (Int, Int, String) -> Unit,
     onToggleBold: (Int, Int) -> Unit,
+    onToggleItalic: (Int, Int) -> Unit,
+    onToggleUnderline: (Int, Int) -> Unit,
     onAppendRow: () -> Unit,
     onMove: (Float, Float) -> Unit,
     onResize: (Float, Float) -> Unit,
@@ -462,8 +468,11 @@ private fun TableBlockEditor(
                             onValueChange = { onCellChange(row, col, it) },
                             textStyle = MaterialTheme.typography.bodySmall.copy(
                                 color = Color.White,
-                                fontWeight = if (cell.bold) FontWeight.Bold else FontWeight.Normal
+                                fontWeight = if (cell.bold) FontWeight.Bold else FontWeight.Normal,
+                                fontStyle = if (cell.italic) FontStyle.Italic else FontStyle.Normal,
+                                textDecoration = if (cell.underline) TextDecoration.Underline else TextDecoration.None
                             ),
+                            singleLine = false,
                             modifier = Modifier
                                 .weight(1f)
                                 .padding(2.dp)
@@ -485,6 +494,20 @@ private fun TableBlockEditor(
                                         event.isCtrlPressed
                                     ) {
                                         onToggleBold(row, col)
+                                        true
+                                    } else if (
+                                        event.type == KeyEventType.KeyDown &&
+                                        event.key == Key.I &&
+                                        event.isCtrlPressed
+                                    ) {
+                                        onToggleItalic(row, col)
+                                        true
+                                    } else if (
+                                        event.type == KeyEventType.KeyDown &&
+                                        event.key == Key.U &&
+                                        event.isCtrlPressed
+                                    ) {
+                                        onToggleUnderline(row, col)
                                         true
                                     } else {
                                         false

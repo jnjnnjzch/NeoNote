@@ -649,7 +649,17 @@ class DrawingCanvasViewModel @Inject constructor(
         updateFirstTableBlock { table ->
             val updatedCells = table.cells.mapIndexed { rowIndex, rowCells ->
                 rowCells.mapIndexed { colIndex, cell ->
-                    if (rowIndex == row && colIndex == col) cell.copy(text = text) else cell
+                    if (rowIndex == row && colIndex == col) {
+                        val imageUri = extractImageUri(text)
+                        val latex = extractLatex(text)
+                        cell.copy(
+                            text = text,
+                            imageUri = imageUri ?: cell.imageUri,
+                            latex = latex ?: cell.latex
+                        )
+                    } else {
+                        cell
+                    }
                 }
             }
             table.copy(cells = updatedCells)
@@ -674,6 +684,28 @@ class DrawingCanvasViewModel @Inject constructor(
                 rows = table.rows + 1,
                 cells = table.cells + listOf(newRow)
             )
+        }
+    }
+
+    fun toggleTableCellItalic(row: Int, col: Int) {
+        updateFirstTableBlock { table ->
+            val updatedCells = table.cells.mapIndexed { rowIndex, rowCells ->
+                rowCells.mapIndexed { colIndex, cell ->
+                    if (rowIndex == row && colIndex == col) cell.copy(italic = !cell.italic) else cell
+                }
+            }
+            table.copy(cells = updatedCells)
+        }
+    }
+
+    fun toggleTableCellUnderline(row: Int, col: Int) {
+        updateFirstTableBlock { table ->
+            val updatedCells = table.cells.mapIndexed { rowIndex, rowCells ->
+                rowCells.mapIndexed { colIndex, cell ->
+                    if (rowIndex == row && colIndex == col) cell.copy(underline = !cell.underline) else cell
+                }
+            }
+            table.copy(cells = updatedCells)
         }
     }
 
@@ -713,5 +745,15 @@ class DrawingCanvasViewModel @Inject constructor(
                 height = (table.height + dh).coerceAtLeast(160f)
             )
         }
+    }
+
+    private fun extractImageUri(text: String): String? {
+        val regex = Regex("""!\[[^\]]*]\(([^)]+)\)""")
+        return regex.find(text)?.groupValues?.getOrNull(1)
+    }
+
+    private fun extractLatex(text: String): String? {
+        val regex = Regex("""\$\$([^$]+)\$\$""")
+        return regex.find(text)?.groupValues?.getOrNull(1)
     }
 }
