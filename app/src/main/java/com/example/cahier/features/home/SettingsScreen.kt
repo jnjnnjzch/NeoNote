@@ -61,6 +61,9 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     navigateToBrushDesigner: () -> Unit,
     navigateToBrushGraph: () -> Unit,
+    appMode: AppMode,
+    onAppModeChanged: (AppMode) -> Unit,
+    onOpenDebugCenter: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -232,6 +235,45 @@ fun SettingsScreen(
                                 onCheckedChange = { viewModel.setUsingGraphUi(it) },
                                 enabled = true
                             )
+                        }
+                    }
+                }
+
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Editor Mode",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Debug Mode")
+                                Text(
+                                    "Normal mode hides diagnostics and labs.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = appMode == AppMode.DEBUG,
+                                onCheckedChange = { enabled ->
+                                    onAppModeChanged(if (enabled) AppMode.DEBUG else AppMode.NORMAL)
+                                }
+                            )
+                        }
+                        FilledTonalButton(
+                            onClick = onOpenDebugCenter,
+                            enabled = appMode == AppMode.DEBUG
+                        ) {
+                            Text("Open Debug Center")
                         }
                     }
                 }

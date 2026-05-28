@@ -89,6 +89,7 @@ class CahierListDetailTest {
         HomePane(
             navigateToCanvas = { _ -> },
             navigateToDrawingCanvas = { _ -> },
+            navigateToDebugDrawingCanvas = { _ -> },
             navigateToBrushGraph = {},
             navigateUp = {},
             forceCompact = forceCompact,

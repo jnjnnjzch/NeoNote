@@ -27,6 +27,7 @@ import androidx.navigation.navArgument
 import com.example.cahier.core.ui.CahierTextureBitmapStore
 import com.example.cahier.developer.brushdesigner.ui.BrushDesignerScreen
 import com.example.cahier.features.drawing.DrawingCanvas
+import com.example.cahier.features.home.AppMode
 import com.example.cahier.features.home.HomeDestination
 import com.example.cahier.features.home.HomePane
 import com.example.cahier.features.text.TextNoteCanvasScreen
@@ -51,7 +52,10 @@ fun CahierNavHost(
                     navController.navigate("${TextCanvasDestination.route}/$noteId")
                 },
                 navigateToDrawingCanvas = { noteId ->
-                    navController.navigate("${DrawingCanvasDestination.route}/$noteId")
+                    navController.navigate("${DrawingCanvasDestination.route}/$noteId?mode=${AppMode.NORMAL.name}")
+                },
+                navigateToDebugDrawingCanvas = { noteId ->
+                    navController.navigate("${DrawingCanvasDestination.route}/$noteId?mode=${AppMode.DEBUG.name}")
                 },
                 navigateUp = {
                     navController.navigateUp()
@@ -62,7 +66,6 @@ fun CahierNavHost(
                 navigateToBrushGraph = {
                     navController.navigate(BrushGraphDestination.route)
                 },
-
                 )
         }
         composable(
@@ -77,13 +80,22 @@ fun CahierNavHost(
         }
         composable(
             route = DrawingCanvasDestination.routeWithArgs,
-            arguments = listOf(navArgument(DrawingCanvasDestination.NOTE_ID_ARG) {
-                type = NavType.LongType
-            })
+            arguments = listOf(
+                navArgument(DrawingCanvasDestination.NOTE_ID_ARG) { type = NavType.LongType },
+                navArgument(DrawingCanvasDestination.MODE_ARG) {
+                    type = NavType.StringType
+                    defaultValue = AppMode.NORMAL.name
+                }
+            )
         ) { navBackStackEntry ->
+            val modeArg = navBackStackEntry.arguments
+                ?.getString(DrawingCanvasDestination.MODE_ARG)
+                ?: AppMode.NORMAL.name
+            val appMode = AppMode.entries.firstOrNull { it.name == modeArg } ?: AppMode.NORMAL
             DrawingCanvas(
                 navigateUp = { navController.navigateUp() },
-                navigateToBrushGraph = { navController.navigate(BrushGraphDestination.route) }
+                navigateToBrushGraph = { navController.navigate(BrushGraphDestination.route) },
+                appMode = appMode
             )
         }
         composable(route = BrushDesignerDestination.route) {
@@ -110,7 +122,8 @@ object TextCanvasDestination : NavigationDestination {
 object DrawingCanvasDestination : NavigationDestination {
     override val route = "drawing_canvas"
     const val NOTE_ID_ARG = "noteId"
-    val routeWithArgs = "$route/{$NOTE_ID_ARG}"
+    const val MODE_ARG = "mode"
+    val routeWithArgs = "$route/{$NOTE_ID_ARG}?$MODE_ARG={$MODE_ARG}"
 }
 
 object BrushDesignerDestination : NavigationDestination {

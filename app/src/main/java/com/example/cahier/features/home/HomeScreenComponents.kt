@@ -98,6 +98,7 @@ fun NoteList(
     onStressTest: () -> Unit,
     onExportTest: () -> Unit,
     onBuildInfo: () -> Unit,
+    showDebugControls: Boolean,
     modifier: Modifier = Modifier,
     onDeleteNote: (Note) -> Unit = {},
 ) {
@@ -115,11 +116,13 @@ fun NoteList(
                                 text = stringResource(R.string.neonote_subtitle),
                                 style = MaterialTheme.typography.bodySmall
                             )
-                            Text(
-                                text = "NeoNote ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) ${BuildConfig.BUILD_TYPE} / ${BuildConfig.GIT_SHA.take(7)} / run ${BuildConfig.GITHUB_RUN_NUMBER}",
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.testTag("build-badge")
-                            )
+                            if (showDebugControls) {
+                                Text(
+                                    text = "NeoNote ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) ${BuildConfig.BUILD_TYPE} / ${BuildConfig.GIT_SHA.take(7)} / run ${BuildConfig.GITHUB_RUN_NUMBER}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.testTag("build-badge")
+                                )
+                            }
                         }
                     }
                 )
@@ -157,20 +160,22 @@ fun NoteList(
                         Text(stringResource(R.string.open_last_note))
                     }
                 }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(onClick = onStressTest, modifier = Modifier.testTag("btn-stress-test")) {
-                        Text(stringResource(R.string.stress_test))
-                    }
-                    OutlinedButton(onClick = onExportTest, modifier = Modifier.testTag("btn-export-test")) {
-                        Text(stringResource(R.string.export_test))
-                    }
-                    OutlinedButton(onClick = onBuildInfo, modifier = Modifier.testTag("btn-build-info")) {
-                        Text(stringResource(R.string.build_info))
+                if (showDebugControls) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(onClick = onStressTest, modifier = Modifier.testTag("btn-stress-test")) {
+                            Text(stringResource(R.string.stress_test))
+                        }
+                        OutlinedButton(onClick = onExportTest, modifier = Modifier.testTag("btn-export-test")) {
+                            Text(stringResource(R.string.export_test))
+                        }
+                        OutlinedButton(onClick = onBuildInfo, modifier = Modifier.testTag("btn-build-info")) {
+                            Text(stringResource(R.string.build_info))
+                        }
                     }
                 }
                 NoteListContent(
@@ -636,6 +641,7 @@ fun NoteListPreview(
             onStressTest = {},
             onExportTest = {},
             onBuildInfo = {},
+            showDebugControls = true,
             onDeleteNote = {},
             modifier = modifier
         )

@@ -90,6 +90,11 @@ enum class AppDestinations(
         icon = R.drawable.settings_24px,
         contentDescription = R.string.settings
     ),
+    DebugCenter(
+        label = R.string.build_info,
+        icon = R.drawable.bubble_chart_24px,
+        contentDescription = R.string.build_info
+    ),
 }
 
 
@@ -104,6 +109,7 @@ fun HomePane(
     navigateToDrawingCanvas: (Long) -> Unit,
     navigateToBrushDesigner: () -> Unit = {},
     navigateToBrushGraph: () -> Unit = {},
+    navigateToDebugDrawingCanvas: (Long) -> Unit,
     navigateUp: () -> Unit,
     modifier: Modifier = Modifier,
     forceCompact: Boolean? = null,
@@ -123,6 +129,7 @@ fun HomePane(
     val isCompact = forceCompact
         ?: (windowSizeClass?.widthSizeClass == WindowWidthSizeClass.Compact)
     val context = LocalContext.current
+    var appMode by rememberSaveable { mutableStateOf(loadAppMode(context)) }
 
 
     LaunchedEffect(Unit) {
@@ -176,8 +183,14 @@ fun HomePane(
         selectedNoteUIState = selectedNoteUIState,
         navigateToCanvas = navigateToCanvas,
         navigateToDrawingCanvas = navigateToDrawingCanvas,
+        navigateToDebugDrawingCanvas = navigateToDebugDrawingCanvas,
         navigateToBrushDesigner = navigateToBrushDesigner,
         navigateToBrushGraph = navigateToBrushGraph,
+        appMode = appMode,
+        onAppModeChanged = {
+            appMode = it
+            persistAppMode(context, it)
+        },
         navigateUp = navigateUp
     )
 }
@@ -197,8 +210,11 @@ private fun CahierNavigationSuite(
     selectedNoteUIState: CahierUiState,
     navigateToCanvas: (Long) -> Unit,
     navigateToDrawingCanvas: (Long) -> Unit,
+    navigateToDebugDrawingCanvas: (Long) -> Unit,
     navigateToBrushDesigner: () -> Unit,
     navigateToBrushGraph: () -> Unit,
+    appMode: AppMode,
+    onAppModeChanged: (AppMode) -> Unit,
     navigateUp: () -> Unit
 ) {
     NavigationSuiteScaffold(
@@ -302,10 +318,10 @@ private fun CahierNavigationSuite(
                                         .filter { it.type == NoteType.Drawing }
                                         .maxByOrNull { it.id }
                                     if (drawing != null) {
-                                        navigateToDrawingCanvas(drawing.id)
+                                        navigateToDebugDrawingCanvas(drawing.id)
                                     } else {
                                         homeScreenViewModel.addDrawingNote { noteId ->
-                                            navigateToDrawingCanvas(noteId)
+                                            navigateToDebugDrawingCanvas(noteId)
                                         }
                                     }
                                 },
@@ -314,14 +330,15 @@ private fun CahierNavigationSuite(
                                         .filter { it.type == NoteType.Drawing }
                                         .maxByOrNull { it.id }
                                     if (drawing != null) {
-                                        navigateToDrawingCanvas(drawing.id)
+                                        navigateToDebugDrawingCanvas(drawing.id)
                                     } else {
                                         homeScreenViewModel.addDrawingNote { noteId ->
-                                            navigateToDrawingCanvas(noteId)
+                                            navigateToDebugDrawingCanvas(noteId)
                                         }
                                     }
                                 },
-                                onBuildInfo = { onDestinationChanged(AppDestinations.Settings) },
+                                onBuildInfo = { onDestinationChanged(AppDestinations.DebugCenter) },
+                                showDebugControls = appMode == AppMode.DEBUG,
                                 onNewWindow = { note ->
                                     homeScreenViewModel.openInNewWindow(note)
                                 },
@@ -351,6 +368,75 @@ private fun CahierNavigationSuite(
                     SettingsScreen(
                         navigateToBrushDesigner = navigateToBrushDesigner,
                         navigateToBrushGraph = navigateToBrushGraph,
+                        appMode = appMode,
+                        onAppModeChanged = onAppModeChanged,
+                        onOpenDebugCenter = { onDestinationChanged(AppDestinations.DebugCenter) },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                AppDestinations.DebugCenter -> {
+                    DebugCenterScreen(
+                        onOpenBuildInfo = { onDestinationChanged(AppDestinations.Settings) },
+                        onOpenSPenMetrics = {
+                            val drawing = noteList.noteList
+                                .filter { it.type == NoteType.Drawing }
+                                .maxByOrNull { it.id }
+                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
+                        },
+                        onOpenPressureTest = {
+                            val drawing = noteList.noteList
+                                .filter { it.type == NoteType.Drawing }
+                                .maxByOrNull { it.id }
+                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
+                        },
+                        onOpenStrokeLatencyLab = {
+                            val drawing = noteList.noteList
+                                .filter { it.type == NoteType.Drawing }
+                                .maxByOrNull { it.id }
+                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
+                        },
+                        onOpenCanvasTransformLab = {
+                            val drawing = noteList.noteList
+                                .filter { it.type == NoteType.Drawing }
+                                .maxByOrNull { it.id }
+                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
+                        },
+                        onOpenTextContainerTableLab = {
+                            val drawing = noteList.noteList
+                                .filter { it.type == NoteType.Drawing }
+                                .maxByOrNull { it.id }
+                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
+                        },
+                        onOpenImagePasteLab = {
+                            val drawing = noteList.noteList
+                                .filter { it.type == NoteType.Drawing }
+                                .maxByOrNull { it.id }
+                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
+                        },
+                        onOpenLatexLab = {
+                            val drawing = noteList.noteList
+                                .filter { it.type == NoteType.Drawing }
+                                .maxByOrNull { it.id }
+                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
+                        },
+                        onOpenExportLab = {
+                            val drawing = noteList.noteList
+                                .filter { it.type == NoteType.Drawing }
+                                .maxByOrNull { it.id }
+                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
+                        },
+                        onOpenStressGenerator = {
+                            val drawing = noteList.noteList
+                                .filter { it.type == NoteType.Drawing }
+                                .maxByOrNull { it.id }
+                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
+                        },
+                        onOpenRawDocumentInspector = {
+                            val drawing = noteList.noteList
+                                .filter { it.type == NoteType.Drawing }
+                                .maxByOrNull { it.id }
+                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
+                        },
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -375,6 +461,7 @@ private fun ListPaneContent(
     onStressTest: () -> Unit,
     onExportTest: () -> Unit,
     onBuildInfo: () -> Unit,
+    showDebugControls: Boolean,
     modifier: Modifier = Modifier,
     onDeleteNote: (Note) -> Unit,
     onNewWindow: (Note) -> Unit,
@@ -397,6 +484,7 @@ private fun ListPaneContent(
         onStressTest = onStressTest,
         onExportTest = onExportTest,
         onBuildInfo = onBuildInfo,
+        showDebugControls = showDebugControls,
         modifier = modifier.testTag("List")
     )
 }

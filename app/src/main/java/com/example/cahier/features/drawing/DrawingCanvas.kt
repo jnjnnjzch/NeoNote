@@ -113,6 +113,7 @@ import com.example.cahier.core.document.ParagraphNode
 import com.example.cahier.features.drawing.CanvasTransformMapper.docToScreenX
 import com.example.cahier.features.drawing.CanvasTransformMapper.docToScreenY
 import com.example.cahier.features.drawing.CanvasTransformMapper.screenToDocDelta
+import com.example.cahier.features.home.AppMode
 import com.example.cahier.features.drawing.viewmodel.DrawingCanvasViewModel
 
 
@@ -124,6 +125,7 @@ import com.example.cahier.features.drawing.viewmodel.DrawingCanvasViewModel
 fun DrawingCanvas(
     navigateUp: () -> Unit,
     navigateToBrushGraph: () -> Unit,
+    appMode: AppMode,
     modifier: Modifier = Modifier,
     drawingCanvasViewModel: DrawingCanvasViewModel = hiltViewModel(),
 ) {
@@ -176,9 +178,26 @@ fun DrawingCanvas(
             drawingCanvasViewModel = drawingCanvasViewModel,
             imagePickerLauncher = imagePickerLauncher,
             onNavigateUp = navigateUp,
-            navigateToBrushGraph = navigateToBrushGraph
+            navigateToBrushGraph = navigateToBrushGraph,
+            appMode = appMode
         )
     }
+}
+
+@Composable
+fun NormalEditorScreen(
+    navigateUp: () -> Unit,
+    navigateToBrushGraph: () -> Unit,
+    modifier: Modifier = Modifier,
+    drawingCanvasViewModel: DrawingCanvasViewModel = hiltViewModel(),
+) {
+    DrawingCanvas(
+        navigateUp = navigateUp,
+        navigateToBrushGraph = navigateToBrushGraph,
+        appMode = AppMode.NORMAL,
+        modifier = modifier,
+        drawingCanvasViewModel = drawingCanvasViewModel
+    )
 }
 
 @Composable
@@ -263,6 +282,7 @@ private fun DrawingCanvasContent(
     imagePickerLauncher: ActivityResultLauncher<PickVisualMediaRequest>,
     onNavigateUp: () -> Unit,
     navigateToBrushGraph: () -> Unit,
+    appMode: AppMode,
     modifier: Modifier = Modifier,
 ) {
     val activity = LocalActivity.current as ComponentActivity
@@ -279,6 +299,7 @@ private fun DrawingCanvasContent(
     Box(modifier = modifier.fillMaxSize()) {
         DrawingSurfaceWithTarget(
             drawingCanvasViewModel,
+            appMode = appMode,
             modifier = Modifier.fillMaxSize()
         )
 
@@ -340,6 +361,7 @@ private fun DrawingCanvasContent(
 @Composable
 private fun DrawingSurfaceWithTarget(
     drawingCanvasViewModel: DrawingCanvasViewModel,
+    appMode: AppMode,
     modifier: Modifier = Modifier,
 ) {
     val uiState by drawingCanvasViewModel.uiState.collectAsStateWithLifecycle()
@@ -508,7 +530,24 @@ private fun DrawingSurfaceWithTarget(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Debug overlays intentionally hidden in Milestone 3 Normal Mode visual gate.
+        if (appMode == AppMode.DEBUG) {
+            val metrics by drawingCanvasViewModel.inkDebugMetrics.collectAsStateWithLifecycle()
+            val pressure by drawingCanvasViewModel.lastPressureUiSampled.collectAsStateWithLifecycle()
+            val curve by drawingCanvasViewModel.pressureCurve.collectAsStateWithLifecycle()
+            val brush by drawingCanvasViewModel.currentBrush.collectAsStateWithLifecycle()
+            val scale = drawingCanvasViewModel.mapPressureToScale(pressure, curve)
+            InkDebugOverlay(
+                metrics = metrics,
+                modifier = Modifier.align(Alignment.TopStart)
+            )
+            PressureTestPanel(
+                baseSize = brush.size,
+                pressure = pressure,
+                curve = curve,
+                scale = scale,
+                modifier = Modifier.align(Alignment.BottomStart)
+            )
+        }
 
         if (textContainer == null) tableBlock?.let { table ->
             TableBlockEditor(
