@@ -2,7 +2,7 @@
   "current_goal": "USABLE_ALPHA",
   "mode": "AUTOPILOT",
   "stop_policy": "stop_only_on_real_blocker",
-  "current_milestone": "7_spen_inking_preservation",
+  "current_milestone": "8_rich_content_image_formula",
   "milestones": {
     "0_legacy_tableblock_boundary": "PASS",
     "1_textcontainer_foundation": "PASS",
@@ -11,8 +11,8 @@
     "4_normal_debug_split": "PASS",
     "5_true_infinite_canvas": "PASS",
     "6_lasso_multiselect_group_move": "PASS",
-    "7_spen_inking_preservation": "IN_PROGRESS",
-    "8_rich_content_image_formula": "TODO",
+    "7_spen_inking_preservation": "PASS",
+    "8_rich_content_image_formula": "IN_PROGRESS",
     "9_layout_preserving_export": "TODO",
     "10_release_artifact_policy": "TODO",
     "11_final_audit": "TODO"

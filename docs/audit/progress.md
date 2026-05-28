@@ -56,9 +56,18 @@
   - `.\gradlew.bat :app:testDebugUnitTest` -> PASS
 
 ## Milestone 7 - S Pen Inking Preservation
-- Status: IN PROGRESS
+- Status: PASS (with device verification sub-item)
 - Date: 2026-05-28
 - Commit: pending
 - Scope: preserve Jetpack Ink path/pressure behavior, expose S Pen diagnostics in Debug Center, and avoid per-point Compose recomposition where possible.
 - Hardware note:
   - `DEVICE_VERIFICATION_REQUIRED`: physical Samsung S Pen feel/latency/pressure response verification.
+- Validation:
+  - `.\gradlew.bat :app:assembleDebug` -> PASS
+  - `.\gradlew.bat :app:testDebugUnitTest` -> PASS
+
+## Milestone 8 - Rich Content: Image + LaTeX
+- Status: IN PROGRESS
+- Date: 2026-05-28
+- Commit: pending
+- Scope: real clipboard image paste flow, image block handling, and LaTeX source/render path hardening.
