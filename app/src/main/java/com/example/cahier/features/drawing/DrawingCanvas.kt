@@ -345,7 +345,7 @@ private fun DrawingSurfaceWithTarget(
     val exportedUri by drawingCanvasViewModel.exportedImageUri.collectAsStateWithLifecycle()
     val currentBrush by drawingCanvasViewModel.currentBrush.collectAsStateWithLifecycle()
     val pressureCurve by drawingCanvasViewModel.pressureCurve.collectAsStateWithLifecycle()
-    val lastPressure by drawingCanvasViewModel.lastPressure.collectAsStateWithLifecycle()
+    val lastPressure by drawingCanvasViewModel.lastPressureUiSampled.collectAsStateWithLifecycle()
     val isEraserMode by drawingCanvasViewModel.isEraserMode.collectAsStateWithLifecycle()
     val isSelectionMode by drawingCanvasViewModel.selectionModeEnabled.collectAsStateWithLifecycle()
     val strokeTranslations by drawingCanvasViewModel.strokeTranslations.collectAsStateWithLifecycle()

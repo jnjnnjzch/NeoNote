@@ -77,6 +77,7 @@ import com.example.cahier.features.drawing.PressureCurveMapper
 import com.example.cahier.features.drawing.StressDocumentFactory
 import com.example.cahier.features.drawing.StrokeIdMapper
 import com.example.cahier.features.drawing.export.ExportComposer
+import com.example.cahier.features.drawing.export.TicNoteArchiveWriter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -93,8 +94,6 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.util.UUID
 import java.util.zip.GZIPInputStream
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
 import javax.inject.Inject
 
 @HiltViewModel
@@ -175,6 +174,9 @@ class DrawingCanvasViewModel @Inject constructor(
     val selectionModeEnabled: StateFlow<Boolean> = _selectionModeEnabled.asStateFlow()
     private val _lastPressure = MutableStateFlow(0.5f)
     val lastPressure: StateFlow<Float> = _lastPressure.asStateFlow()
+    private val _lastPressureUiSampled = MutableStateFlow(0.5f)
+    val lastPressureUiSampled: StateFlow<Float> = _lastPressureUiSampled.asStateFlow()
+    private var lastPressureUiSampledAtMs: Long = 0L
 
     init {
         viewModelScope.launch {
@@ -184,6 +186,8 @@ class DrawingCanvasViewModel @Inject constructor(
                     val parsedDocument = DocumentSerializer.decodeOrNull(note.text) ?: TicDocument()
                     _document.value = parsedDocument
                     _pressureCurve.value = parsedDocument.settings.pressureCurve
+                    _stylusWritesByDefault.value = parsedDocument.settings.stylusWritesByDefault
+                    _fingerPansByDefault.value = parsedDocument.settings.fingerPansByDefault
                     recomputeStrokeTranslations()
                     if (note.text.isNullOrBlank()) {
                         noteRepository.updateNote(note.copy(text = DocumentSerializer.encode(parsedDocument)))
@@ -436,7 +440,13 @@ class DrawingCanvasViewModel @Inject constructor(
         inkDebugAggregator.ingest(now, sample, _inkDebugMetrics.value)?.let { updated ->
             _inkDebugMetrics.value = updated
         }
-        _lastPressure.value = event.pressure.coerceIn(0f, 1f)
+        val clampedPressure = event.pressure.coerceIn(0f, 1f)
+        _lastPressure.value = clampedPressure
+        // Keep UI updates sampled so pressure debug widgets don't recompose on every stylus point.
+        if (now - lastPressureUiSampledAtMs >= 80L) {
+            _lastPressureUiSampled.value = clampedPressure
+            lastPressureUiSampledAtMs = now
+        }
     }
 
     private fun toolTypeName(toolType: Int): String {
@@ -910,10 +920,14 @@ class DrawingCanvasViewModel @Inject constructor(
 
     fun setStylusWritesByDefault(enabled: Boolean) {
         _stylusWritesByDefault.value = enabled
+        val current = _document.value
+        persistDocument(current.copy(settings = current.settings.copy(stylusWritesByDefault = enabled)))
     }
 
     fun setFingerPansByDefault(enabled: Boolean) {
         _fingerPansByDefault.value = enabled
+        val current = _document.value
+        persistDocument(current.copy(settings = current.settings.copy(fingerPansByDefault = enabled)))
     }
 
     fun setPressureCurve(curve: Float) {
@@ -967,50 +981,22 @@ class DrawingCanvasViewModel @Inject constructor(
             exportPdf(pdfFile, safeTitle, doc)
 
             val archiveFile = File(baseDir, "$safeTitle.ticnote")
-            ZipOutputStream(FileOutputStream(archiveFile)).use { zip ->
-                zip.putNextEntry(ZipEntry("document.json"))
-                zip.write(DocumentSerializer.encode(doc).toByteArray())
-                zip.closeEntry()
-
-                zip.putNextEntry(ZipEntry("strokes-count.txt"))
-                zip.write(_uiState.value.strokes.size.toString().toByteArray())
-                zip.closeEntry()
-                zip.putNextEntry(ZipEntry("manifest.json"))
-                zip.write(
-                    """
-                    {"title":"$safeTitle","version":1,"assets_dir":"assets","ink_file":"ink.json","document_file":"document.json"}
-                    """.trimIndent().toByteArray()
-                )
-                zip.closeEntry()
-                zip.putNextEntry(ZipEntry("ink.json"))
-                zip.write("""{"finalizedStrokeCount":$strokeCount}""".toByteArray())
-                zip.closeEntry()
-
-                File(baseDir, "$safeTitle.md").takeIf { it.exists() }?.let { file ->
-                    zip.putNextEntry(ZipEntry(file.name))
-                    zip.write(file.readBytes())
-                    zip.closeEntry()
-                }
-                File(baseDir, "$safeTitle.html").takeIf { it.exists() }?.let { file ->
-                    zip.putNextEntry(ZipEntry(file.name))
-                    zip.write(file.readBytes())
-                    zip.closeEntry()
-                }
-                File(assetsDir, "background.png").takeIf { it.exists() }?.let { file ->
-                    zip.putNextEntry(ZipEntry("assets/background.png"))
-                    zip.write(file.readBytes())
-                    zip.closeEntry()
-                }
-                doc.pages.firstOrNull()?.blocks?.filterIsInstance<ImageBlock>()?.forEach { img ->
-                    File(img.assetPath).takeIf { it.exists() }?.let { file ->
-                        val assetName = file.name
-                        File(assetsDir, assetName).writeBytes(file.readBytes())
-                        zip.putNextEntry(ZipEntry("assets/$assetName"))
-                        zip.write(file.readBytes())
-                        zip.closeEntry()
+            val imageAssets = doc.pages.firstOrNull()?.blocks?.filterIsInstance<ImageBlock>()
+                ?.mapNotNull { img ->
+                    File(img.assetPath).takeIf { it.exists() }?.also { file ->
+                        File(assetsDir, file.name).writeBytes(file.readBytes())
                     }
-                }
-            }
+                } ?: emptyList()
+            TicNoteArchiveWriter.writeArchive(
+                archiveFile = archiveFile,
+                documentJson = DocumentSerializer.encode(doc),
+                markdownFile = File(baseDir, "$safeTitle.md"),
+                htmlFile = File(baseDir, "$safeTitle.html"),
+                title = safeTitle,
+                finalizedStrokeCount = strokeCount,
+                backgroundFile = File(assetsDir, "background.png"),
+                imageAssetFiles = imageAssets
+            )
             _lastExportDirectory.value = baseDir.absolutePath
         }
     }

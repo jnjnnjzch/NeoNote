@@ -2,25 +2,25 @@
 
 - Date: 2026-05-28
 - Branch: `codex/phase-0-1-foundation`
-- Current Focus: `Gate 8`
+- Current Focus: `Gate 9-11 hardening`
 - State: `IN_PROGRESS`
 
 ## What Changed
 
-- Added stable stroke-id model fields:
-  - `CanvasPage.strokeIds`
-  - `StrokeAnchor.strokeIds`
-- Added `StrokeIdMapper` to keep stroke IDs stable after erase/insert/reorder operations.
-- Integrated stroke-id synchronization into `DrawingCanvasViewModel.updateStrokes`.
-- Updated anchor translation to prefer stroke-id mapping with legacy index fallback.
-- Added `StrokeIdMapperTest` unit tests.
+- Added `TicNoteArchiveWriter` and zip-integrity unit test coverage for required archive entries.
+- Refactored export flow to use archive writer instead of inline zip logic.
+- Sampled pressure debug UI updates to avoid Compose recomposition on every stylus point.
+- Persisted stylus/finger interaction preferences in `DocumentSettings`.
+- Added serializer test assertions for new persisted settings fields.
 
 ## Exact Files Changed
 
 - `app/src/main/java/com/example/cahier/core/document/DocumentModel.kt`
-- `app/src/main/java/com/example/cahier/features/drawing/StrokeIdMapper.kt`
+- `app/src/main/java/com/example/cahier/features/drawing/DrawingCanvas.kt`
 - `app/src/main/java/com/example/cahier/features/drawing/viewmodel/DrawingCanvasViewModel.kt`
-- `app/src/test/java/com/example/cahier/features/drawing/StrokeIdMapperTest.kt`
+- `app/src/main/java/com/example/cahier/features/drawing/export/TicNoteArchiveWriter.kt`
+- `app/src/test/java/com/example/cahier/core/document/DocumentSerializerTest.kt`
+- `app/src/test/java/com/example/cahier/features/drawing/export/TicNoteArchiveWriterTest.kt`
 
 ## Verification Status
 

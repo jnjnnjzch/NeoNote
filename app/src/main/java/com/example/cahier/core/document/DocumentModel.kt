@@ -17,7 +17,9 @@ data class TicDocument(
 
 @Serializable
 data class DocumentSettings(
-    val pressureCurve: Float = 1.0f
+    val pressureCurve: Float = 1.0f,
+    val stylusWritesByDefault: Boolean = true,
+    val fingerPansByDefault: Boolean = true
 )
 
 @Serializable

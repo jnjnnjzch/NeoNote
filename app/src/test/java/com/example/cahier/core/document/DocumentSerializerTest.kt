@@ -64,9 +64,17 @@ class DocumentSerializerTest {
 
     @Test
     fun encodeDecode_preservesPressureCurveSetting() {
-        val document = TicDocument(settings = DocumentSettings(pressureCurve = 1.7f))
+        val document = TicDocument(
+            settings = DocumentSettings(
+                pressureCurve = 1.7f,
+                stylusWritesByDefault = false,
+                fingerPansByDefault = false
+            )
+        )
         val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
         assertNotNull(decoded)
         assertEquals(1.7f, decoded!!.settings.pressureCurve)
+        assertEquals(false, decoded.settings.stylusWritesByDefault)
+        assertEquals(false, decoded.settings.fingerPansByDefault)
     }
 }
