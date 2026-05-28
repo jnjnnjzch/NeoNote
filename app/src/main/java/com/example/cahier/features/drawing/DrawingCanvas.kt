@@ -125,7 +125,6 @@ fun DrawingCanvas(
     drawingCanvasViewModel: DrawingCanvasViewModel = hiltViewModel(),
 ) {
     val uiState by drawingCanvasViewModel.uiState.collectAsStateWithLifecycle()
-    val document by drawingCanvasViewModel.document.collectAsStateWithLifecycle()
     var showConfirmationDialog by rememberSaveable { mutableStateOf(false) }
     var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -157,9 +156,8 @@ fun DrawingCanvas(
             text = stringResource(R.string.replace_image_text)
         )
     }
-    LaunchedEffect(document.pages.size) {
-        drawingCanvasViewModel.ensureDefaultTableBlock()
-    }
+    // Legacy TableBlock path is compatibility-only.
+    // New notes must not auto-insert standalone table blocks in Normal Mode.
 
     Column(
         modifier = modifier
@@ -608,6 +606,8 @@ internal fun TableBlockEditor(
     canvasTransform: CanvasTransform,
     modifier: Modifier = Modifier,
 ) {
+    // Legacy compatibility editor for standalone TableBlock.
+    // Deprecated for Normal Mode after OneNote-logic reset; keep for document compatibility.
     val focusRequesters = remember(table.rows, table.columns) {
         List(table.rows * table.columns) { FocusRequester() }
     }

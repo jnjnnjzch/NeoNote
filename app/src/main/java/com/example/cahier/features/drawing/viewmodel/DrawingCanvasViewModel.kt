@@ -707,6 +707,13 @@ class DrawingCanvasViewModel @Inject constructor(
         private const val TOOL_TYPE_PALM_COMPAT = 5
     }
 
+    /**
+     * Legacy compatibility entrypoint.
+     *
+     * Standalone TableBlock is deprecated as the primary Normal Mode workflow.
+     * Keep this only for compatibility/migration flows until TextContainer inline-table
+     * model is fully rolled out.
+     */
     fun ensureDefaultTableBlock() {
         val current = _document.value
         val page = current.pages.firstOrNull() ?: return

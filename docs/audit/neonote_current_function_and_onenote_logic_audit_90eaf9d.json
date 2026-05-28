@@ -1,0 +1,44 @@
+{
+  "commit": "90eaf9d89db16304f8e2699bda3d0c55f4f929c4",
+  "product_status": "PRODUCT_PROTOTYPE",
+  "canvas_status": "PARTIAL_CANVAS",
+  "table_model": {
+    "current": "standalone_table_block",
+    "matches_onenote_logic": false,
+    "needs_redesign": true
+  },
+  "ink_model": {
+    "freehand_layer": true,
+    "pressure_captured": true,
+    "pressure_affects_rendering": true,
+    "lasso_select": false,
+    "multi_select_move": false,
+    "automatic_anchoring": true,
+    "anchoring_should_be_removed_or_simplified": true
+  },
+  "normal_debug_split": {
+    "normal_mode_exists": false,
+    "debug_mode_exists": false,
+    "debug_leaks_into_normal": true
+  },
+  "feature_status": {
+    "home": "PASS",
+    "text_container": "FAIL",
+    "table_inside_text_container": "FAIL",
+    "table_editing": "PARTIAL",
+    "table_visual": "FAIL",
+    "s_pen_inking": "PARTIAL",
+    "infinite_canvas": "PARTIAL",
+    "image_paste": "PARTIAL",
+    "latex_rendering": "FAIL",
+    "export": "PARTIAL",
+    "release_artifacts": "PARTIAL"
+  },
+  "p0_recommendations": [
+    "Introduce TextContainer as the primary movable note unit and place table inline inside it.",
+    "Implement OneNote-like selection model: lasso/select ink, select container, multi-select and move together.",
+    "Separate Normal Mode and Debug Mode; remove debug overlays and stress controls from normal drawing UX.",
+    "Deprecate automatic block-level anchoring in Normal Mode and prefer explicit group movement.",
+    "Upgrade export from summary-style outputs to layout-preserving visual exports for table+ink composition."
+  ]
+}
