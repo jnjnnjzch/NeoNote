@@ -67,7 +67,21 @@
   - `.\gradlew.bat :app:testDebugUnitTest` -> PASS
 
 ## Milestone 8 - Rich Content: Image + LaTeX
-- Status: IN PROGRESS
+- Status: PASS
 - Date: 2026-05-28
 - Commit: pending
 - Scope: real clipboard image paste flow, image block handling, and LaTeX source/render path hardening.
+- Completed:
+  - Added real clipboard image paste into document as `ImageBlock`.
+  - Added `ImageBlock` on-canvas rendering with shared canvas coordinates/transform.
+  - Added `FormulaBlock` model (`source` + `rendered`) with on-canvas rendering and persistence.
+  - Added serializer test coverage for `FormulaBlock` source/render round-trip.
+- Validation:
+  - `.\gradlew.bat clean :app:assembleDebug` -> PASS
+  - `.\gradlew.bat :app:testDebugUnitTest` -> PASS
+
+## Milestone 9 - Layout-Preserving Export
+- Status: IN PROGRESS
+- Date: 2026-05-28
+- Commit: pending
+- Scope: enrich `.ticnote` + HTML/Markdown/PDF export for table/image/formula/ink layout fidelity.

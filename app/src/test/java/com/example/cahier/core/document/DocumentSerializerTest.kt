@@ -126,4 +126,23 @@ class DocumentSerializerTest {
         assertEquals(48f, decodedTable.x)
         assertEquals(-72f, decodedTable.y)
     }
+
+    @Test
+    fun encodeDecode_roundTripsFormulaBlockSourceAndRendered() {
+        val formula = FormulaBlock(
+            x = 220f,
+            y = 140f,
+            source = "x^2 + y^2 = z^2",
+            rendered = "f(x): x^2 + y^2 = z^2"
+        )
+        val document = TicDocument(pages = listOf(CanvasPage(blocks = listOf(formula))))
+        val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
+
+        assertNotNull(decoded)
+        val decodedFormula = decoded!!.pages.first().blocks.first() as FormulaBlock
+        assertEquals("x^2 + y^2 = z^2", decodedFormula.source)
+        assertEquals("f(x): x^2 + y^2 = z^2", decodedFormula.rendered)
+        assertEquals(220f, decodedFormula.x)
+        assertEquals(140f, decodedFormula.y)
+    }
 }

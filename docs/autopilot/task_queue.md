@@ -1,11 +1,10 @@
 # NeoNote Autopilot Task Queue
 
 ## Active
-Milestone 8: Rich content: image paste + LaTeX rendering
+Milestone 9: Layout-preserving export
 Status: IN_PROGRESS
 
 ## Queue
-Milestone 9: Layout-preserving export
 Milestone 10: Release artifact policy
 Milestone 11: Final audit
 
@@ -18,6 +17,7 @@ Milestone 4: Normal Mode / Debug Mode separation
 Milestone 5: True infinite canvas
 Milestone 6: Lasso + multi-select group move
 Milestone 7: S Pen inking preservation
+Milestone 8: Rich content: image paste + LaTeX rendering
 
 ## Rule
 When Active is PASS, move it to Completed and promote the first Queue item to Active.

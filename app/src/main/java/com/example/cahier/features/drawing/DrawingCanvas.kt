@@ -76,6 +76,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.unit.IntOffset
@@ -110,11 +111,14 @@ import com.example.cahier.core.document.TableBlock
 import com.example.cahier.core.document.TableNode
 import com.example.cahier.core.document.TextContainerBlock
 import com.example.cahier.core.document.ParagraphNode
+import com.example.cahier.core.document.ImageBlock
+import com.example.cahier.core.document.FormulaBlock
 import com.example.cahier.features.drawing.CanvasTransformMapper.docToScreenX
 import com.example.cahier.features.drawing.CanvasTransformMapper.docToScreenY
 import com.example.cahier.features.drawing.CanvasTransformMapper.screenToDocDelta
 import com.example.cahier.features.home.AppMode
 import com.example.cahier.features.drawing.viewmodel.DrawingCanvasViewModel
+import coil3.compose.AsyncImage
 
 
 @OptIn(
@@ -273,8 +277,8 @@ private fun DrawingCanvasTopBar(
             }
             TextButton(onClick = { /* Text tool entry reserved */ }) { Text("Text") }
             TextButton(onClick = { drawingCanvasViewModel.insertInlineTableInTextContainer() }) { Text("Table") }
-            TextButton(onClick = { /* Image tool entry reserved */ }) { Text("Image") }
-            TextButton(onClick = { /* Formula tool entry reserved */ }) { Text("Formula") }
+            TextButton(onClick = { drawingCanvasViewModel.pasteImageBlockFromClipboard() }) { Text("Paste Img") }
+            TextButton(onClick = { drawingCanvasViewModel.addFormulaBlock("x^2 + y^2 = z^2") }) { Text("Formula") }
         }
     }
 }
@@ -391,18 +395,11 @@ private fun DrawingSurfaceWithTarget(
     var lastFingerX by remember { mutableStateOf(0f) }
     var lastFingerY by remember { mutableStateOf(0f) }
     var lastFingerDistance by remember { mutableStateOf(0f) }
-    val tableBlock = drawingCanvasViewModel.document.collectAsStateWithLifecycle().value
-        .pages
-        .firstOrNull()
-        ?.blocks
-        ?.filterIsInstance<TableBlock>()
-        ?.firstOrNull()
-    val textContainer = drawingCanvasViewModel.document.collectAsStateWithLifecycle().value
-        .pages
-        .firstOrNull()
-        ?.blocks
-        ?.filterIsInstance<TextContainerBlock>()
-        ?.firstOrNull()
+    val page = drawingCanvasViewModel.document.collectAsStateWithLifecycle().value.pages.firstOrNull()
+    val tableBlock = page?.blocks?.filterIsInstance<TableBlock>()?.firstOrNull()
+    val textContainer = page?.blocks?.filterIsInstance<TextContainerBlock>()?.firstOrNull()
+    val imageBlocks = page?.blocks?.filterIsInstance<ImageBlock>().orEmpty()
+    val formulaBlocks = page?.blocks?.filterIsInstance<FormulaBlock>().orEmpty()
     var selectedCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val context = LocalContext.current
 
@@ -640,6 +637,53 @@ private fun DrawingSurfaceWithTarget(
                     .height((container.height * canvasTransform.scale).dp)
             )
         }
+
+        imageBlocks.forEachIndexed { index, image ->
+            AsyncImage(
+                model = image.assetPath,
+                contentDescription = "Image block $index",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .offset {
+                        IntOffset(
+                            docToScreenX(image.x, canvasTransform).toInt(),
+                            docToScreenY(image.y, canvasTransform).toInt()
+                        )
+                    }
+                    .width((image.width * canvasTransform.scale).dp)
+                    .height((image.height * canvasTransform.scale).dp)
+                    .border(1.dp, NeoNoteVisualTokens.subtleBorder)
+            )
+        }
+
+        formulaBlocks.forEachIndexed { index, formula ->
+            Surface(
+                color = NeoNoteVisualTokens.containerSurface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, NeoNoteVisualTokens.subtleBorder),
+                modifier = Modifier
+                    .offset {
+                        IntOffset(
+                            docToScreenX(formula.x, canvasTransform).toInt(),
+                            docToScreenY(formula.y, canvasTransform).toInt()
+                        )
+                    }
+                    .width((formula.width * canvasTransform.scale).dp)
+                    .height((formula.height * canvasTransform.scale).dp)
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Text(
+                        text = formula.rendered,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = NeoNoteVisualTokens.normalText
+                    )
+                    Text(
+                        text = formula.source,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = NeoNoteVisualTokens.secondaryText
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -749,15 +793,7 @@ private fun InlineTableNodeEditor(
             Row {
                 rowCells.forEachIndexed { col, cell ->
                     val index = row * table.columns + col
-                    TextField(
-                        value = cell.text,
-                        onValueChange = { onCellChange(row, col, it) },
-                        textStyle = MaterialTheme.typography.bodySmall.copy(
-                            fontWeight = if (cell.bold) FontWeight.Bold else FontWeight.Normal,
-                            fontStyle = if (cell.italic) FontStyle.Italic else FontStyle.Normal,
-                            textDecoration = if (cell.underline) TextDecoration.Underline else TextDecoration.None
-                        ),
-                        singleLine = false,
+                    Column(
                         modifier = Modifier
                             .weight(1f)
                             .padding(3.dp)
@@ -766,54 +802,75 @@ private fun InlineTableNodeEditor(
                                 color = if (activeCell == row to col) NeoNoteVisualTokens.activeCellOutline
                                 else NeoNoteVisualTokens.tableGridLine
                             )
-                            .testTag("table-cell-$row-$col")
-                            .focusRequester(focusRequesters[index])
-                            .onFocusChanged {
-                                if (it.isFocused) {
-                                    activeCell = row to col
-                                    onSelectCell(row, col)
-                                }
-                            }
-                            .onPreviewKeyEvent { event ->
-                                val nativeEvent = event.nativeKeyEvent
-                                if (
-                                    nativeEvent.action == AndroidKeyEvent.ACTION_DOWN &&
-                                    nativeEvent.keyCode == AndroidKeyEvent.KEYCODE_TAB
-                                ) {
-                                    val isLast = row == table.rows - 1 && col == table.columns - 1
-                                    if (isLast) {
-                                        onAppendRow()
-                                    } else {
-                                        val next = (index + 1).coerceAtMost(focusRequesters.lastIndex)
-                                        focusRequesters[next].requestFocus()
+                    ) {
+                        TextField(
+                            value = cell.text,
+                            onValueChange = { onCellChange(row, col, it) },
+                            textStyle = MaterialTheme.typography.bodySmall.copy(
+                                fontWeight = if (cell.bold) FontWeight.Bold else FontWeight.Normal,
+                                fontStyle = if (cell.italic) FontStyle.Italic else FontStyle.Normal,
+                                textDecoration = if (cell.underline) TextDecoration.Underline else TextDecoration.None
+                            ),
+                            singleLine = false,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("table-cell-$row-$col")
+                                .focusRequester(focusRequesters[index])
+                                .onFocusChanged {
+                                    if (it.isFocused) {
+                                        activeCell = row to col
+                                        onSelectCell(row, col)
                                     }
-                                    true
-                                } else if (
-                                    nativeEvent.action == AndroidKeyEvent.ACTION_DOWN &&
-                                    nativeEvent.keyCode == AndroidKeyEvent.KEYCODE_B &&
-                                    nativeEvent.isCtrlPressed
-                                ) {
-                                    onToggleBold(row, col)
-                                    true
-                                } else if (
-                                    nativeEvent.action == AndroidKeyEvent.ACTION_DOWN &&
-                                    nativeEvent.keyCode == AndroidKeyEvent.KEYCODE_I &&
-                                    nativeEvent.isCtrlPressed
-                                ) {
-                                    onToggleItalic(row, col)
-                                    true
-                                } else if (
-                                    nativeEvent.action == AndroidKeyEvent.ACTION_DOWN &&
-                                    nativeEvent.keyCode == AndroidKeyEvent.KEYCODE_U &&
-                                    nativeEvent.isCtrlPressed
-                                ) {
-                                    onToggleUnderline(row, col)
-                                    true
-                                } else {
-                                    false
                                 }
-                            }
-                    )
+                                .onPreviewKeyEvent { event ->
+                                    val nativeEvent = event.nativeKeyEvent
+                                    if (
+                                        nativeEvent.action == AndroidKeyEvent.ACTION_DOWN &&
+                                        nativeEvent.keyCode == AndroidKeyEvent.KEYCODE_TAB
+                                    ) {
+                                        val isLast = row == table.rows - 1 && col == table.columns - 1
+                                        if (isLast) {
+                                            onAppendRow()
+                                        } else {
+                                            val next = (index + 1).coerceAtMost(focusRequesters.lastIndex)
+                                            focusRequesters[next].requestFocus()
+                                        }
+                                        true
+                                    } else if (
+                                        nativeEvent.action == AndroidKeyEvent.ACTION_DOWN &&
+                                        nativeEvent.keyCode == AndroidKeyEvent.KEYCODE_B &&
+                                        nativeEvent.isCtrlPressed
+                                    ) {
+                                        onToggleBold(row, col)
+                                        true
+                                    } else if (
+                                        nativeEvent.action == AndroidKeyEvent.ACTION_DOWN &&
+                                        nativeEvent.keyCode == AndroidKeyEvent.KEYCODE_I &&
+                                        nativeEvent.isCtrlPressed
+                                    ) {
+                                        onToggleItalic(row, col)
+                                        true
+                                    } else if (
+                                        nativeEvent.action == AndroidKeyEvent.ACTION_DOWN &&
+                                        nativeEvent.keyCode == AndroidKeyEvent.KEYCODE_U &&
+                                        nativeEvent.isCtrlPressed
+                                    ) {
+                                        onToggleUnderline(row, col)
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
+                        )
+                        cell.latex?.takeIf { it.isNotBlank() }?.let { formula ->
+                            Text(
+                                text = "f(x): $formula",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = NeoNoteVisualTokens.secondaryText,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
                 }
             }
         }

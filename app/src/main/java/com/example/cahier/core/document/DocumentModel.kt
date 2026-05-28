@@ -125,6 +125,18 @@ data class ImageBlock(
 ) : Block
 
 @Serializable
+@SerialName("formula")
+data class FormulaBlock(
+    override val id: String = UUID.randomUUID().toString(),
+    override val x: Float = 96f,
+    override val y: Float = 96f,
+    override val width: Float = 360f,
+    override val height: Float = 96f,
+    val source: String,
+    val rendered: String = source
+) : Block
+
+@Serializable
 data class TableCell(
     val text: String = "",
     val bold: Boolean = false,

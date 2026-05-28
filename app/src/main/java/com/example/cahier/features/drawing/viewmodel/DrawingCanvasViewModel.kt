@@ -18,6 +18,7 @@ package com.example.cahier.features.drawing.viewmodel
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.ClipboardManager
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -58,6 +59,7 @@ import com.example.cahier.core.data.NotesRepository
 import com.example.cahier.core.document.DocumentSerializer
 import com.example.cahier.core.document.DocumentSettings
 import com.example.cahier.core.document.ImageBlock
+import com.example.cahier.core.document.FormulaBlock
 import com.example.cahier.core.document.StrokeAnchor
 import com.example.cahier.core.document.TableBlock
 import com.example.cahier.core.document.TableCell
@@ -904,6 +906,15 @@ class DrawingCanvasViewModel @Inject constructor(
         persistDocument(current.copy(pages = listOf(page.copy(blocks = page.blocks + imageBlock))))
     }
 
+    fun addFormulaBlock(source: String) {
+        val trimmed = source.trim()
+        if (trimmed.isBlank()) return
+        val current = _document.value
+        val page = current.pages.firstOrNull() ?: return
+        val formulaBlock = FormulaBlock(source = trimmed, rendered = "f(x): $trimmed")
+        persistDocument(current.copy(pages = listOf(page.copy(blocks = page.blocks + formulaBlock))))
+    }
+
     fun importImageFromUriToAssets(uriString: String): String? {
         return runCatching {
             val uri = uriString.toUri()
@@ -916,6 +927,15 @@ class DrawingCanvasViewModel @Inject constructor(
                 outFile.absolutePath
             }
         }.getOrNull()
+    }
+
+    fun pasteImageBlockFromClipboard(): Boolean {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return false
+        val item = clipboard.primaryClip?.getItemAt(0) ?: return false
+        val uri = item.uri ?: return false
+        val asset = importImageFromUriToAssets(uri.toString()) ?: return false
+        addImageBlock(asset)
+        return true
     }
 
     fun toggleTableCellBold(row: Int, col: Int) {
