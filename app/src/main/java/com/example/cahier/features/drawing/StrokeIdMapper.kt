@@ -1,12 +1,11 @@
 package com.example.cahier.features.drawing
 
-import androidx.ink.strokes.Stroke
 import java.util.UUID
 
 object StrokeIdMapper {
-    fun remapIds(
-        oldStrokes: List<Stroke>,
-        newStrokes: List<Stroke>,
+    fun <T> remapIds(
+        oldStrokes: List<T>,
+        newStrokes: List<T>,
         oldIds: List<String>
     ): List<String> {
         if (newStrokes.isEmpty()) return emptyList()
