@@ -1,6 +1,7 @@
 package com.example.cahier.features.drawing
 
 import androidx.ink.brush.StockBrushes
+import androidx.ink.brush.Brush
 import androidx.ink.strokes.ImmutableStrokeInputBatch
 import androidx.ink.strokes.Stroke
 import org.junit.Assert.assertEquals
@@ -8,7 +9,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class StrokeIdMapperTest {
-    private fun stroke() = Stroke(StockBrushes.marker(), ImmutableStrokeInputBatch.EMPTY)
+    private fun stroke() = Stroke(Brush(StockBrushes.marker(), 10f, 1f), ImmutableStrokeInputBatch.EMPTY)
 
     @Test
     fun remapIds_preservesIdsForUnchangedOrder() {
