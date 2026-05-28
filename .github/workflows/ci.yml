@@ -159,7 +159,16 @@ jobs:
           SHORT_SHA="${{ needs.verify.outputs.short_sha }}"
           VNAME="${{ needs.verify.outputs.version_name }}"
           VCODE="${{ needs.verify.outputs.version_code }}"
-          cp app/build/outputs/apk/release/app-release.apk "dist/NeoNote-release-unsigned-NOT-INSTALLABLE-v${VNAME}-${VCODE}-${SHORT_SHA}.apk"
+          RELEASE_APK="$(ls app/build/outputs/apk/release/*-unsigned.apk 2>/dev/null | head -n1)"
+          if [[ -z "$RELEASE_APK" ]]; then
+            RELEASE_APK="$(ls app/build/outputs/apk/release/*.apk 2>/dev/null | head -n1)"
+          fi
+          if [[ -z "$RELEASE_APK" ]]; then
+            echo "No release APK found under app/build/outputs/apk/release/"
+            ls -la app/build/outputs/apk/release/ || true
+            exit 1
+          fi
+          cp "$RELEASE_APK" "dist/NeoNote-release-unsigned-NOT-INSTALLABLE-v${VNAME}-${VCODE}-${SHORT_SHA}.apk"
           cp app/build/outputs/bundle/release/app-release.aab "dist/NeoNote-release-bundle-NOT-INSTALLABLE-DIRECTLY-v${VNAME}-${VCODE}-${SHORT_SHA}.aab"
 
       - name: Validate release unsigned APK and AAB
