@@ -31,16 +31,20 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
@@ -67,6 +71,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -411,9 +417,10 @@ private fun DrawingSurfaceWithTarget(
                 onCellChange = drawingCanvasViewModel::updateTableCell,
                 onToggleBold = drawingCanvasViewModel::toggleTableCellBold,
                 onAppendRow = drawingCanvasViewModel::appendTableRow,
+                onMove = drawingCanvasViewModel::moveTableBlockBy,
+                onResize = drawingCanvasViewModel::resizeTableBlockBy,
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(horizontal = 8.dp, vertical = 12.dp)
+                    .offset { IntOffset(table.x.toInt(), table.y.toInt()) }
             )
         }
     }
@@ -425,13 +432,23 @@ private fun TableBlockEditor(
     onCellChange: (Int, Int, String) -> Unit,
     onToggleBold: (Int, Int) -> Unit,
     onAppendRow: () -> Unit,
+    onMove: (Float, Float) -> Unit,
+    onResize: (Float, Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val focusRequesters = remember(table.rows, table.columns) {
         List(table.rows * table.columns) { FocusRequester() }
     }
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .width(table.width.dp)
+            .height(table.height.dp)
+            .pointerInput(table.id) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    onMove(dragAmount.x, dragAmount.y)
+                }
+            },
         color = Color(0xCC202020),
         tonalElevation = 2.dp
     ) {
@@ -477,6 +494,19 @@ private fun TableBlockEditor(
                     }
                 }
             }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.End)
+                    .width(18.dp)
+                    .height(18.dp)
+                    .background(Color(0xFF66D9EF))
+                    .pointerInput(table.id) {
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            onResize(dragAmount.x, dragAmount.y)
+                        }
+                    }
+            )
         }
     }
 }

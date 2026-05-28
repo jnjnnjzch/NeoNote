@@ -696,4 +696,22 @@ class DrawingCanvasViewModel @Inject constructor(
             noteRepository.updateNote(note.copy(text = DocumentSerializer.encode(document)))
         }
     }
+
+    fun moveTableBlockBy(dx: Float, dy: Float) {
+        updateFirstTableBlock { table ->
+            table.copy(
+                x = table.x + dx,
+                y = table.y + dy
+            )
+        }
+    }
+
+    fun resizeTableBlockBy(dw: Float, dh: Float) {
+        updateFirstTableBlock { table ->
+            table.copy(
+                width = (table.width + dw).coerceAtLeast(320f),
+                height = (table.height + dh).coerceAtLeast(160f)
+            )
+        }
+    }
 }
