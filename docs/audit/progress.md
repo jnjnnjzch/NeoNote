@@ -60,3 +60,20 @@
 ### Remaining for Milestone 2 acceptance
 - Dedicated persistence tests for before/after paragraph + inline table edits.
 - CI/instrumentation run confirmation.
+
+## Milestone 3 — Visual Quality Gate
+- milestone: 3
+- status: PARTIAL
+- local_build: PASS
+- unit_tests: PASS
+- visual_evidence: available
+- remaining_visual_issues:
+  - inline table still inherits some TextField/form affordances
+  - toolbar can be further reduced to icon-led calm controls
+  - full screenshot golden pipeline not yet established
+
+### Completed
+- Added centralized visual token set (`NeoNoteVisualTokens`).
+- Applied paper-like canvas and container/table styling.
+- Removed debug overlays from normal drawing surface.
+- Added preview evidence for required normal-mode visual states.

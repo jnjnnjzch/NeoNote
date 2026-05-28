@@ -52,7 +52,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -104,6 +103,7 @@ import com.example.cahier.core.ui.ConfirmationDialog
 import com.example.cahier.core.ui.DrawingSurface
 import com.example.cahier.core.ui.FocusedFieldEnum
 import com.example.cahier.core.ui.LocalTextureStore
+import com.example.cahier.core.ui.theme.NeoNoteVisualTokens
 import com.example.cahier.core.ui.theme.CahierAppTheme
 import com.example.cahier.core.utils.createDropTarget
 import com.example.cahier.core.document.TableBlock
@@ -166,6 +166,7 @@ fun DrawingCanvas(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .background(NeoNoteVisualTokens.paperBackground)
             .statusBarsPadding()
             .navigationBarsPadding()
             .imePadding()
@@ -204,7 +205,12 @@ private fun DrawingCanvasTopBar(
     }
 
     Column(modifier = modifier) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .background(NeoNoteVisualTokens.mutedToolbarBackground)
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+        ) {
             TextField(
                 value = titleState,
                 onValueChange = { newTitle ->
@@ -225,12 +231,11 @@ private fun DrawingCanvasTopBar(
                 keyboardActions = KeyboardActions(onDone = { })
             )
             TextButton(onClick = drawingCanvasViewModel::exportAllFormats) { Text("Export") }
-            TextButton(onClick = drawingCanvasViewModel::generateStressDocument) { Text("Stress") }
             TextButton(onClick = { drawingCanvasViewModel.setEraserMode(!isEraserMode) }) {
                 Text(if (isEraserMode) "Pen" else "Eraser")
             }
             TextButton(onClick = { drawingCanvasViewModel.setSelectionMode(!selectionMode) }) {
-                Text(if (selectionMode) "Select:On" else "Select:Off")
+                Text(if (selectionMode) "Select" else "Select")
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -240,16 +245,10 @@ private fun DrawingCanvasTopBar(
             TextButton(onClick = { drawingCanvasViewModel.setFingerPansByDefault(!fingerPans) }) {
                 Text(if (fingerPans) "Finger:Pan" else "Finger:Touch")
             }
-            Text(
-                text = "Pressure ${String.format("%.2f", pressureCurve)}",
-                style = MaterialTheme.typography.bodySmall
-            )
-            Slider(
-                value = pressureCurve,
-                onValueChange = drawingCanvasViewModel::setPressureCurve,
-                valueRange = 0.5f..2.0f,
-                modifier = Modifier.weight(1f)
-            )
+            TextButton(onClick = { /* Text tool entry reserved */ }) { Text("Text") }
+            TextButton(onClick = { drawingCanvasViewModel.insertInlineTableInTextContainer() }) { Text("Table") }
+            TextButton(onClick = { /* Image tool entry reserved */ }) { Text("Image") }
+            TextButton(onClick = { /* Formula tool entry reserved */ }) { Text("Formula") }
         }
     }
 }
@@ -345,9 +344,6 @@ private fun DrawingSurfaceWithTarget(
 ) {
     val uiState by drawingCanvasViewModel.uiState.collectAsStateWithLifecycle()
     val exportedUri by drawingCanvasViewModel.exportedImageUri.collectAsStateWithLifecycle()
-    val currentBrush by drawingCanvasViewModel.currentBrush.collectAsStateWithLifecycle()
-    val pressureCurve by drawingCanvasViewModel.pressureCurve.collectAsStateWithLifecycle()
-    val lastPressure by drawingCanvasViewModel.lastPressureUiSampled.collectAsStateWithLifecycle()
     val isEraserMode by drawingCanvasViewModel.isEraserMode.collectAsStateWithLifecycle()
     val isSelectionMode by drawingCanvasViewModel.selectionModeEnabled.collectAsStateWithLifecycle()
     val strokeTranslations by drawingCanvasViewModel.strokeTranslations.collectAsStateWithLifecycle()
@@ -512,22 +508,7 @@ private fun DrawingSurfaceWithTarget(
             modifier = Modifier.fillMaxSize()
         )
 
-        InkDebugOverlay(
-            metrics = drawingCanvasViewModel.inkDebugMetrics.collectAsStateWithLifecycle().value,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(8.dp)
-        )
-
-        PressureTestPanel(
-            baseSize = currentBrush.size,
-            pressure = lastPressure,
-            curve = pressureCurve,
-            scale = drawingCanvasViewModel.mapPressureToScale(lastPressure, pressureCurve),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(8.dp)
-        )
+        // Debug overlays intentionally hidden in Milestone 3 Normal Mode visual gate.
 
         if (textContainer == null) tableBlock?.let { table ->
             TableBlockEditor(
@@ -615,19 +596,25 @@ private fun TextContainerEditor(
     onMove: (Float, Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        modifier = modifier
-            .pointerInput(Unit) {
-                detectDragGestures { change, dragAmount ->
+            var containerFocused by remember { mutableStateOf(false) }
+            Surface(
+                modifier = modifier
+                    .pointerInput(Unit) {
+                        detectDragGestures { change, dragAmount ->
                     change.consume()
                     onMove(
                         screenToDocDelta(dragAmount.x, canvasTransform),
                         screenToDocDelta(dragAmount.y, canvasTransform)
                     )
                 }
-            },
-        color = Color(0xFFFCFCFB),
-        tonalElevation = 1.dp
+                    },
+        color = NeoNoteVisualTokens.containerSurface,
+        tonalElevation = 1.dp,
+        shape = MaterialTheme.shapes.medium,
+        border = androidx.compose.foundation.BorderStroke(
+            width = if (containerFocused) 1.4.dp else 0.8.dp,
+            color = if (containerFocused) NeoNoteVisualTokens.selectedBorder else NeoNoteVisualTokens.subtleBorder
+        )
     ) {
         Column(
             modifier = Modifier
@@ -642,6 +629,7 @@ private fun TextContainerEditor(
                 singleLine = false,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .onFocusChanged { containerFocused = it.isFocused || containerFocused }
                     .testTag("tc-paragraph-before")
             )
             if (tableNode == null) {
@@ -669,6 +657,7 @@ private fun TextContainerEditor(
                 singleLine = false,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .onFocusChanged { containerFocused = it.isFocused || containerFocused }
                     .testTag("tc-paragraph-after")
             )
         }
@@ -684,11 +673,13 @@ private fun InlineTableNodeEditor(
     onToggleItalic: (Int, Int) -> Unit,
     onToggleUnderline: (Int, Int) -> Unit,
     onAppendRow: () -> Unit,
+    forcedActiveCell: Pair<Int, Int>? = null,
     modifier: Modifier = Modifier,
 ) {
     val focusRequesters = remember(table.rows, table.columns) {
         List(table.rows * table.columns) { FocusRequester() }
     }
+    var activeCell by remember(forcedActiveCell) { mutableStateOf<Pair<Int, Int>?>(forcedActiveCell) }
     Column(modifier = modifier.padding(vertical = 8.dp)) {
         table.cells.forEachIndexed { row, rowCells ->
             Row {
@@ -705,11 +696,20 @@ private fun InlineTableNodeEditor(
                         singleLine = false,
                         modifier = Modifier
                             .weight(1f)
-                            .padding(2.dp)
-                            .border(1.dp, Color(0xFFD8DDE3))
+                            .padding(3.dp)
+                            .border(
+                                width = if (activeCell == row to col) 1.4.dp else 0.8.dp,
+                                color = if (activeCell == row to col) NeoNoteVisualTokens.activeCellOutline
+                                else NeoNoteVisualTokens.tableGridLine
+                            )
                             .testTag("table-cell-$row-$col")
                             .focusRequester(focusRequesters[index])
-                            .onFocusChanged { if (it.isFocused) onSelectCell(row, col) }
+                            .onFocusChanged {
+                                if (it.isFocused) {
+                                    activeCell = row to col
+                                    onSelectCell(row, col)
+                                }
+                            }
                             .onPreviewKeyEvent { event ->
                                 val nativeEvent = event.nativeKeyEvent
                                 if (
@@ -990,6 +990,140 @@ fun DrawingCanvasPreview() {
                 ) {
                     Text("Toolbox Placeholder", modifier = Modifier.padding(8.dp))
                 }
+            }
+        }
+    }
+}
+
+@Preview(showBackground = true, name = "Normal Editor Empty")
+@Composable
+private fun NormalEditorEmptyPreview() {
+    CahierAppTheme {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(NeoNoteVisualTokens.paperBackground)
+                .padding(16.dp)
+        )
+    }
+}
+
+@Preview(showBackground = true, name = "TextContainer Paragraph")
+@Composable
+private fun TextContainerParagraphPreview() {
+    CahierAppTheme {
+        TextContainerEditor(
+            paragraphBefore = "Research notes for seminar.",
+            paragraphAfter = "",
+            tableNode = null,
+            canvasTransform = CanvasTransform(),
+            onParagraphBeforeChange = {},
+            onParagraphAfterChange = {},
+            onInsertTable = {},
+            onInlineTableCellChange = { _, _, _ -> },
+            onInlineTableAppendRow = {},
+            onInlineToggleBold = { _, _ -> },
+            onInlineToggleItalic = { _, _ -> },
+            onInlineToggleUnderline = { _, _ -> },
+            onMove = { _, _ -> },
+            modifier = Modifier
+                .padding(20.dp)
+                .width(360.dp)
+                .height(240.dp)
+        )
+    }
+}
+
+@Preview(showBackground = true, name = "TextContainer Inline Table")
+@Composable
+private fun TextContainerInlineTablePreview() {
+    CahierAppTheme {
+        val table = TableNode(
+            rows = 2,
+            columns = 3,
+            cells = listOf(
+                listOf(
+                    com.example.cahier.core.document.TableCell(text = "Topic"),
+                    com.example.cahier.core.document.TableCell(text = "Claim"),
+                    com.example.cahier.core.document.TableCell(text = "Evidence")
+                ),
+                listOf(
+                    com.example.cahier.core.document.TableCell(text = "Hydrology"),
+                    com.example.cahier.core.document.TableCell(text = "Rainfall rises"),
+                    com.example.cahier.core.document.TableCell(text = "Field notebook 03")
+                )
+            )
+        )
+        TextContainerEditor(
+            paragraphBefore = "Draft outline:",
+            paragraphAfter = "Add final inference below.",
+            tableNode = table,
+            canvasTransform = CanvasTransform(),
+            onParagraphBeforeChange = {},
+            onParagraphAfterChange = {},
+            onInsertTable = {},
+            onInlineTableCellChange = { _, _, _ -> },
+            onInlineTableAppendRow = {},
+            onInlineToggleBold = { _, _ -> },
+            onInlineToggleItalic = { _, _ -> },
+            onInlineToggleUnderline = { _, _ -> },
+            onMove = { _, _ -> },
+            modifier = Modifier
+                .padding(20.dp)
+                .width(440.dp)
+                .height(320.dp)
+        )
+    }
+}
+
+@Preview(showBackground = true, name = "Active Cell")
+@Composable
+private fun ActiveCellPreview() {
+    CahierAppTheme {
+        val table = TableNode(
+            rows = 2,
+            columns = 2,
+            cells = listOf(
+                listOf(
+                    com.example.cahier.core.document.TableCell(text = "A1"),
+                    com.example.cahier.core.document.TableCell(text = "B1")
+                ),
+                listOf(
+                    com.example.cahier.core.document.TableCell(text = "A2"),
+                    com.example.cahier.core.document.TableCell(text = "B2")
+                )
+            )
+        )
+        InlineTableNodeEditor(
+            table = table,
+            onCellChange = { _, _, _ -> },
+            onSelectCell = { _, _ -> },
+            onToggleBold = { _, _ -> },
+            onToggleItalic = { _, _ -> },
+            onToggleUnderline = { _, _ -> },
+            onAppendRow = {},
+            forcedActiveCell = 0 to 1,
+            modifier = Modifier.padding(16.dp)
+        )
+    }
+}
+
+@Preview(showBackground = true, name = "Selected TextContainer")
+@Composable
+private fun SelectedTextContainerPreview() {
+    CahierAppTheme {
+        Surface(
+            color = NeoNoteVisualTokens.containerSurface,
+            border = androidx.compose.foundation.BorderStroke(1.4.dp, NeoNoteVisualTokens.selectedBorder),
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier
+                .padding(20.dp)
+                .width(420.dp)
+                .height(220.dp)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text("Selected note container", color = NeoNoteVisualTokens.normalText)
+                Text("Drag to move on canvas", color = NeoNoteVisualTokens.secondaryText)
             }
         }
     }
