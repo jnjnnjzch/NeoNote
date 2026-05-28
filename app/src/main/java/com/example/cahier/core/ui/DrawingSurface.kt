@@ -56,6 +56,7 @@ import com.example.cahier.core.utils.pointerInputWithSiblingFallthrough
 @Composable
 fun DrawingSurface(
     strokes: List<Stroke>,
+    strokeTranslations: Map<Int, Pair<Float, Float>> = emptyMap(),
     canvasStrokeRenderer: CanvasStrokeRenderer,
     onStrokesFinished: (List<Stroke>) -> Unit,
     onErase: (offsetX: Float, offsetY: Float) -> Unit,
@@ -89,11 +90,15 @@ fun DrawingSurface(
                 }
         ) {
             val canvas = drawContext.canvas.nativeCanvas
-            strokes.forEach { stroke ->
+            strokes.forEachIndexed { index, stroke ->
                 val blendMode = if (stroke.brush.family == StockBrushes.highlighter()) {
                     BlendMode.Multiply
                 } else {
                     BlendMode.SrcOver
+                }
+                val matrix = Matrix()
+                strokeTranslations[index]?.let { (dx, dy) ->
+                    matrix.postTranslate(dx, dy)
                 }
                 drawContext.canvas.withSaveLayer(
                     drawContext.size.toRect(),
@@ -103,7 +108,7 @@ fun DrawingSurface(
                         canvasStrokeRenderer.draw(
                             stroke = stroke,
                             canvas = this,
-                            strokeToScreenTransform = Matrix()
+                            strokeToScreenTransform = matrix
                         )
                     }
                 }

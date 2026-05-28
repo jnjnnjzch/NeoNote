@@ -54,6 +54,7 @@ import coil3.toBitmap
 import com.example.cahier.core.data.CustomBrush
 import com.example.cahier.core.data.NotesRepository
 import com.example.cahier.core.document.DocumentSerializer
+import com.example.cahier.core.document.StrokeAnchor
 import com.example.cahier.core.document.TableBlock
 import com.example.cahier.core.document.TableCell
 import com.example.cahier.core.document.TicDocument
@@ -139,6 +140,8 @@ class DrawingCanvasViewModel @Inject constructor(
     val customBrushes: StateFlow<List<CustomBrush>> = _customBrushes.asStateFlow()
     private val _document = MutableStateFlow(TicDocument())
     val document: StateFlow<TicDocument> = _document.asStateFlow()
+    private val _strokeTranslations = MutableStateFlow<Map<Int, Pair<Float, Float>>>(emptyMap())
+    val strokeTranslations: StateFlow<Map<Int, Pair<Float, Float>>> = _strokeTranslations.asStateFlow()
     private val _inkDebugMetrics = MutableStateFlow(InkDebugMetrics())
     val inkDebugMetrics: StateFlow<InkDebugMetrics> = _inkDebugMetrics.asStateFlow()
     private var eventCounterSinceWindow = 0
@@ -153,6 +156,7 @@ class DrawingCanvasViewModel @Inject constructor(
                 .collect { note ->
                     val parsedDocument = DocumentSerializer.decodeOrNull(note.text) ?: TicDocument()
                     _document.value = parsedDocument
+                    recomputeStrokeTranslations()
                     if (note.text.isNullOrBlank()) {
                         noteRepository.updateNote(note.copy(text = DocumentSerializer.encode(parsedDocument)))
                     }
@@ -344,9 +348,11 @@ class DrawingCanvasViewModel @Inject constructor(
     @UiThread
     fun onStrokesFinished(finishedStrokes: List<Stroke>) {
         val currentStrokes = history.getOrElse(historyIndex) { emptyList() }
+        val startIndex = currentStrokes.size
         val newStrokes = currentStrokes + finishedStrokes
         updateStrokes(newStrokes)
         _inkDebugMetrics.update { it.copy(finalizedStrokeCount = newStrokes.size) }
+        anchorNewStrokes(startIndex, finishedStrokes.size)
         viewModelScope.launch {
             saveStrokes()
         }
@@ -736,6 +742,7 @@ class DrawingCanvasViewModel @Inject constructor(
                 y = table.y + dy
             )
         }
+        recomputeStrokeTranslations()
     }
 
     fun resizeTableBlockBy(dw: Float, dh: Float) {
@@ -755,5 +762,39 @@ class DrawingCanvasViewModel @Inject constructor(
     private fun extractLatex(text: String): String? {
         val regex = Regex("""\$\$([^$]+)\$\$""")
         return regex.find(text)?.groupValues?.getOrNull(1)
+    }
+
+    private fun anchorNewStrokes(startIndex: Int, count: Int) {
+        if (count <= 0) return
+        val current = _document.value
+        val page = current.pages.firstOrNull() ?: return
+        val table = page.blocks.filterIsInstance<TableBlock>().firstOrNull() ?: return
+        val anchor = StrokeAnchor(
+            blockId = table.id,
+            startStrokeIndex = startIndex,
+            endStrokeIndexInclusive = startIndex + count - 1,
+            anchorOriginX = table.x,
+            anchorOriginY = table.y
+        )
+        val updated = current.copy(
+            pages = listOf(page.copy(strokeAnchors = page.strokeAnchors + anchor))
+        )
+        persistDocument(updated)
+        recomputeStrokeTranslations()
+    }
+
+    private fun recomputeStrokeTranslations() {
+        val page = _document.value.pages.firstOrNull() ?: return
+        val tableById = page.blocks.filterIsInstance<TableBlock>().associateBy { it.id }
+        val translations = mutableMapOf<Int, Pair<Float, Float>>()
+        page.strokeAnchors.forEach { anchor ->
+            val table = tableById[anchor.blockId] ?: return@forEach
+            val dx = table.x - anchor.anchorOriginX
+            val dy = table.y - anchor.anchorOriginY
+            for (i in anchor.startStrokeIndex..anchor.endStrokeIndexInclusive) {
+                translations[i] = dx to dy
+            }
+        }
+        _strokeTranslations.value = translations
     }
 }

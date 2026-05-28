@@ -18,12 +18,22 @@ data class TicDocument(
 data class CanvasPage(
     val id: String = UUID.randomUUID().toString(),
     val blocks: List<Block> = emptyList(),
-    val inkLayer: InkLayerRef = InkLayerRef()
+    val inkLayer: InkLayerRef = InkLayerRef(),
+    val strokeAnchors: List<StrokeAnchor> = emptyList(),
 )
 
 @Serializable
 data class InkLayerRef(
     val source: String = "note_strokes_data_v1"
+)
+
+@Serializable
+data class StrokeAnchor(
+    val blockId: String,
+    val startStrokeIndex: Int,
+    val endStrokeIndexInclusive: Int,
+    val anchorOriginX: Float,
+    val anchorOriginY: Float,
 )
 
 @Serializable

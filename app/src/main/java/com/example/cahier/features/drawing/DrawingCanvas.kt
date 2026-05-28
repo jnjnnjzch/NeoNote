@@ -306,6 +306,7 @@ private fun DrawingSurfaceWithTarget(
     val exportedUri by drawingCanvasViewModel.exportedImageUri.collectAsStateWithLifecycle()
     val currentBrush by drawingCanvasViewModel.currentBrush.collectAsStateWithLifecycle()
     val isEraserMode by drawingCanvasViewModel.isEraserMode.collectAsStateWithLifecycle()
+    val strokeTranslations by drawingCanvasViewModel.strokeTranslations.collectAsStateWithLifecycle()
     val strokes = remember { mutableStateListOf<Stroke>() }
     val textureStore = LocalTextureStore.current
     val cacheGen by textureStore.generation.collectAsState()
@@ -362,6 +363,7 @@ private fun DrawingSurfaceWithTarget(
     ) {
         DrawingSurface(
             strokes = strokes,
+            strokeTranslations = strokeTranslations,
             canvasStrokeRenderer = canvasStrokeRenderer,
             onStrokesFinished = { newStrokes ->
                 strokes.addAll(newStrokes)
