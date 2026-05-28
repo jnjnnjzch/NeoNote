@@ -1292,19 +1292,42 @@ class DrawingCanvasViewModel @Inject constructor(
             color = android.graphics.Color.BLACK
             textSize = 28f
         }
-        canvas.drawText(title, 64f, 80f, paint)
-        canvas.drawText("Tables:", 64f, 140f, paint)
-        var y = 190f
-        document.pages.firstOrNull()?.blocks?.filterIsInstance<TableBlock>()?.forEachIndexed { idx, table ->
-            canvas.drawText("Table ${idx + 1} (${table.rows}x${table.columns})", 64f, y, paint)
-            y += 40f
-            table.cells.forEach { row ->
-                canvas.drawText(row.joinToString(" | ") { it.text.ifBlank { " " } }, 80f, y, paint)
-                y += 34f
-            }
-            y += 20f
+        val subPaint = Paint().apply {
+            color = android.graphics.Color.DKGRAY
+            textSize = 20f
         }
-        canvas.drawText("Finalized strokes: ${_uiState.value.strokes.size}", 64f, y + 40f, paint)
+        val boxPaint = Paint().apply {
+            color = android.graphics.Color.argb(255, 200, 200, 200)
+            style = Paint.Style.STROKE
+            strokeWidth = 2f
+        }
+        canvas.drawText(title, 48f, 64f, paint)
+        val contentTop = 96f
+        val blocks = document.pages.firstOrNull()?.blocks.orEmpty()
+        blocks.forEach { block ->
+            val left = 48f + block.x
+            val top = contentTop + block.y
+            val right = left + block.width
+            val bottom = top + block.height
+            canvas.drawRect(left, top, right, bottom, boxPaint)
+            when (block) {
+                is TableBlock -> {
+                    canvas.drawText("Table ${block.rows}x${block.columns}", left + 8f, top + 24f, subPaint)
+                    val preview = block.cells.firstOrNull()?.joinToString(" | ") { it.text.ifBlank { " " } }.orEmpty()
+                    canvas.drawText(preview.take(60), left + 8f, top + 48f, subPaint)
+                }
+                is ImageBlock -> {
+                    canvas.drawText("Image: ${File(block.assetPath).name}", left + 8f, top + 24f, subPaint)
+                }
+                is FormulaBlock -> {
+                    canvas.drawText(block.rendered, left + 8f, top + 24f, subPaint)
+                }
+                else -> {
+                    canvas.drawText(block::class.simpleName.orEmpty(), left + 8f, top + 24f, subPaint)
+                }
+            }
+        }
+        canvas.drawText("Finalized strokes: ${_uiState.value.strokes.size}", 48f, 1860f, subPaint)
         pdf.finishPage(page)
         pdf.writeTo(FileOutputStream(pdfFile))
         pdf.close()

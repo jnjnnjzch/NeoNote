@@ -7,7 +7,7 @@ import java.util.zip.ZipOutputStream
 
 object TicNoteArchiveWriter {
     fun manifestJson(title: String): String {
-        return """{"title":"$title","version":1,"assets_dir":"assets","ink_file":"ink.json","document_file":"document.json"}"""
+        return """{"title":"$title","version":2,"assets_dir":"assets","ink_file":"ink.json","document_file":"document.json","layout_preserving_exports":[".html",".md",".pdf"]}"""
     }
 
     fun inkJson(finalizedStrokeCount: Int): String {

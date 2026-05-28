@@ -81,7 +81,21 @@
   - `.\gradlew.bat :app:testDebugUnitTest` -> PASS
 
 ## Milestone 9 - Layout-Preserving Export
-- Status: IN PROGRESS
+- Status: PASS
 - Date: 2026-05-28
 - Commit: pending
 - Scope: enrich `.ticnote` + HTML/Markdown/PDF export for table/image/formula/ink layout fidelity.
+- Completed:
+  - Markdown export now emits block layout coordinates and formula source/render pairs.
+  - HTML export now emits positioned canvas blocks (table/image/formula) with layout CSS.
+  - PDF export now draws block outlines/content at document coordinates rather than only counts.
+  - `.ticnote` manifest updated with layout-preserving export capability metadata.
+- Validation:
+  - `.\gradlew.bat :app:assembleDebug` -> PASS
+  - `.\gradlew.bat :app:testDebugUnitTest` -> PASS
+
+## Milestone 10 - Release Artifact Policy
+- Status: IN PROGRESS
+- Date: 2026-05-28
+- Commit: pending
+- Scope: classify installability rules for debug/release/APK/AAB artifacts and add verification metadata/checksums.

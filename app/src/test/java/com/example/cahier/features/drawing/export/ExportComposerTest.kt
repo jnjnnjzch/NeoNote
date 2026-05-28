@@ -1,6 +1,7 @@
 package com.example.cahier.features.drawing.export
 
 import com.example.cahier.core.document.CanvasPage
+import com.example.cahier.core.document.FormulaBlock
 import com.example.cahier.core.document.ImageBlock
 import com.example.cahier.core.document.TableBlock
 import com.example.cahier.core.document.TableCell
@@ -13,8 +14,10 @@ class ExportComposerTest {
     fun markdown_contains_table_image_formula_and_ink_count() {
         val doc = sampleDoc()
         val md = ExportComposer.toMarkdown("Neo", doc, 12)
+        assertTrue(md.contains("## Layout"))
         assertTrue(md.contains("| alpha `${'$'}x^2${'$'}` |"))
         assertTrue(md.contains("![image-0](assets/sample.png)"))
+        assertTrue(md.contains("formula-0"))
         assertTrue(md.contains("Finalized stroke count: 12"))
     }
 
@@ -25,6 +28,8 @@ class ExportComposerTest {
         assertTrue(html.contains("<h1>Neo&lt;Note&gt;</h1>"))
         assertTrue(html.contains("class=\"latex\""))
         assertTrue(html.contains("data-latex=\"x^2\""))
+        assertTrue(html.contains("class=\"canvas\""))
+        assertTrue(html.contains("class=\"formula\""))
         assertTrue(html.contains("Finalized stroke count: 3"))
     }
 
@@ -37,6 +42,7 @@ class ExportComposerTest {
             )
         )
         val image = ImageBlock(assetPath = "/tmp/sample.png")
-        return TicDocument(pages = listOf(CanvasPage(blocks = listOf(table, image))))
+        val formula = FormulaBlock(source = "x^2 + y^2 = z^2", rendered = "f(x): x^2 + y^2 = z^2")
+        return TicDocument(pages = listOf(CanvasPage(blocks = listOf(table, image, formula))))
     }
 }
