@@ -50,6 +50,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.cahier.BuildConfig
 import com.example.cahier.R
 import com.example.cahier.features.home.viewmodel.SettingsViewModel
 import kotlinx.coroutines.launch
@@ -232,6 +233,24 @@ fun SettingsScreen(
                                 enabled = true
                             )
                         }
+                    }
+                }
+
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(text = "NeoNote", style = MaterialTheme.typography.titleMedium)
+                        Text(text = "applicationId: ${BuildConfig.APPLICATION_ID_VALUE}")
+                        Text(text = "versionName: ${BuildConfig.VERSION_NAME}")
+                        Text(text = "versionCode: ${BuildConfig.VERSION_CODE}")
+                        Text(text = "buildType: ${BuildConfig.BUILD_TYPE}")
+                        Text(text = "gitSha: ${BuildConfig.GIT_SHA}")
+                        Text(text = "buildTime: ${BuildConfig.BUILD_TIME_UTC}")
+                        Text(text = "githubRunNumber: ${BuildConfig.GITHUB_RUN_NUMBER}")
                     }
                 }
             }

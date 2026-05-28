@@ -12,6 +12,73 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    outputs:
+      version_name: ${{ steps.meta.outputs.version_name }}
+      version_code: ${{ steps.meta.outputs.version_code }}
+      app_id: ${{ steps.meta.outputs.application_id }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK tools
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Verify debug build
+        run: ./gradlew :app:assembleDebug
+
+      - name: Verify unit tests
+        run: ./gradlew :app:testDebugUnitTest
+
+      - name: Collect APK metadata
+        id: meta
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          SHORT_SHA="$(git rev-parse --short=7 HEAD)"
+          BADGING="$(aapt dump badging "$APK")"
+          VERSION_NAME="$(echo "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -n1)"
+          VERSION_CODE="$(echo "$BADGING" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" | head -n1)"
+          APP_ID="$(echo "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n1)"
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "application_id=$APP_ID" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Validate debug APK
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          unzip -t "$APK"
+          apksigner verify --verbose --print-certs "$APK"
+          aapt dump badging "$APK" > debug.badging.txt
+
+      - name: Rename installable debug APK
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/NeoNote-debug-installable-v${{ steps.meta.outputs.version_name }}-${{ steps.meta.outputs.version_code }}-${{ steps.meta.outputs.short_sha }}.apk"
+
+      - name: Upload installable debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: neonote-debug-installable
+          path: dist/NeoNote-debug-installable-*.apk
+          if-no-files-found: error
+
+  install_smoke_debug:
+    needs: verify
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,32 +93,25 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Make gradlew executable
-        run: chmod +x ./gradlew
-
-      - name: Verify debug build
+      - name: Build debug APK for smoke
         run: ./gradlew :app:assembleDebug
 
-      - name: Verify unit tests
-        run: ./gradlew :app:testDebugUnitTest
+      - name: ADB install smoke
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          profile: pixel_7
+          script: |
+            adb install -r app/build/outputs/apk/debug/app-debug.apk | tee adb-install-output.txt
+            adb shell am start -n com.example.cahier/com.example.cahier.MainActivity
 
-      - name: Verify debug APK signature
-        run: |
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk
-
-      - name: Upload installable debug APK
+      - name: Upload install smoke logs
         uses: actions/upload-artifact@v4
         with:
-          name: neonote-debug-apk-installable
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: neonote-install-smoke-logs
+          path: adb-install-output.txt
           if-no-files-found: error
-
-  publish_debug:
-    needs: verify
-    runs-on: ubuntu-latest
-    steps:
-      - name: Debug APK already produced in verify
-        run: echo "Debug APK artifact was published by verify job."
 
   build_release:
     needs: verify
@@ -72,53 +132,165 @@ jobs:
           java-version: "17"
           cache: gradle
 
+      - name: Set up Android SDK tools
+        uses: android-actions/setup-android@v3
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-
-      - name: Make gradlew executable
-        run: chmod +x ./gradlew
 
       - name: Build release APK and AAB
         run: ./gradlew :app:assembleRelease :app:bundleRelease
 
-      - name: Sign artifacts (optional)
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+      - name: Prepare release artifacts with clear names
         run: |
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > keystore.jks
-          jarsigner -keystore keystore.jks -storepass "$ANDROID_KEYSTORE_PASSWORD" -keypass "$ANDROID_KEY_PASSWORD" app/build/outputs/apk/release/*.apk "$ANDROID_KEY_ALIAS"
-          jarsigner -keystore keystore.jks -storepass "$ANDROID_KEYSTORE_PASSWORD" -keypass "$ANDROID_KEY_PASSWORD" app/build/outputs/bundle/release/*.aab "$ANDROID_KEY_ALIAS"
+          mkdir -p dist
+          SHORT_SHA="${{ needs.verify.outputs.short_sha }}"
+          VNAME="${{ needs.verify.outputs.version_name }}"
+          VCODE="${{ needs.verify.outputs.version_code }}"
+          cp app/build/outputs/apk/release/app-release.apk "dist/NeoNote-release-unsigned-NOT-INSTALLABLE-v${VNAME}-${VCODE}-${SHORT_SHA}.apk"
+          cp app/build/outputs/bundle/release/app-release.aab "dist/NeoNote-release-bundle-NOT-INSTALLABLE-DIRECTLY-v${VNAME}-${VCODE}-${SHORT_SHA}.aab"
+
+      - name: Validate release unsigned APK and AAB
+        run: |
+          set +e
+          UNSIGNED="$(ls dist/NeoNote-release-unsigned-NOT-INSTALLABLE-*.apk)"
+          AAB="$(ls dist/NeoNote-release-bundle-NOT-INSTALLABLE-DIRECTLY-*.aab)"
+          unzip -t "$UNSIGNED" | tee release-unsigned-unzip.txt
+          apksigner verify --verbose --print-certs "$UNSIGNED" | tee release-unsigned-signing.txt
+          aapt dump badging "$UNSIGNED" | tee release-unsigned.badging.txt
+          SHA_UNSIGNED="$(sha256sum "$UNSIGNED" | awk '{print $1}')"
+          SHA_AAB="$(sha256sum "$AAB" | awk '{print $1}')"
+          echo "$SHA_UNSIGNED  $UNSIGNED" > release-sha256.txt
+          echo "$SHA_AAB  $AAB" >> release-sha256.txt
+
+      - name: Optionally sign release APK
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && env.ANDROID_KEYSTORE_PASSWORD != '' && env.ANDROID_KEY_ALIAS != '' && env.ANDROID_KEY_PASSWORD != '' }}
+        run: |
+          SHORT_SHA="${{ needs.verify.outputs.short_sha }}"
+          VNAME="${{ needs.verify.outputs.version_name }}"
+          VCODE="${{ needs.verify.outputs.version_code }}"
+          UNSIGNED="$(ls dist/NeoNote-release-unsigned-NOT-INSTALLABLE-*.apk)"
+          SIGNED="dist/NeoNote-release-signed-installable-v${VNAME}-${VCODE}-${SHORT_SHA}.apk"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release-signing.jks
+          apksigner sign \
+            --ks release-signing.jks \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass pass:"$ANDROID_KEYSTORE_PASSWORD" \
+            --key-pass pass:"$ANDROID_KEY_PASSWORD" \
+            --out "$SIGNED" \
+            "$UNSIGNED"
+          unzip -t "$SIGNED" | tee release-signed-unzip.txt
+          apksigner verify --verbose --print-certs "$SIGNED" | tee release-signed-signing.txt
+          aapt dump badging "$SIGNED" | tee release-signed.badging.txt
+          sha256sum "$SIGNED" >> release-sha256.txt
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: neonote-release
+          name: neonote-release-artifacts
           path: |
-            app/build/outputs/apk/release/*.apk
-            app/build/outputs/bundle/release/*.aab
+            dist/NeoNote-release-unsigned-NOT-INSTALLABLE-*.apk
+            dist/NeoNote-release-signed-installable-*.apk
+            dist/NeoNote-release-bundle-NOT-INSTALLABLE-DIRECTLY-*.aab
+            release-*.txt
+            release-*.badging.txt
           if-no-files-found: error
 
-      - name: Generate checksums and metadata
-        run: |
-          sha256sum app/build/outputs/apk/release/*.apk > release-sha256.txt
-          sha256sum app/build/outputs/bundle/release/*.aab >> release-sha256.txt
-          ls -lh app/build/outputs/apk/release/*.apk > release-artifacts.txt
-          ls -lh app/build/outputs/bundle/release/*.aab >> release-artifacts.txt
+  artifact_inventory:
+    needs: [verify, build_release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Android SDK tools
+        uses: android-actions/setup-android@v3
 
-      - name: Upload release verification files
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: collected
+          merge-multiple: true
+
+      - name: Build inventory files
+        run: |
+          mkdir -p docs/audit
+          python - <<'PY'
+          import json, os, subprocess, hashlib
+          root="collected"
+          out=[]
+          def run(cmd):
+              p=subprocess.run(cmd, shell=True, text=True, capture_output=True)
+              return p.returncode, p.stdout+p.stderr
+          for fn in sorted(os.listdir(root)):
+              path=os.path.join(root, fn)
+              if os.path.isdir(path): 
+                  continue
+              ext=os.path.splitext(fn)[1].lower()
+              size=os.path.getsize(path)
+              sha=hashlib.sha256(open(path,'rb').read()).hexdigest()
+              item={
+                  "exact_file_name": fn,
+                  "extension": ext,
+                  "size": size,
+                  "job_that_produced_it": "verify/build_release",
+                  "installable_on_android": False,
+                  "reason": "",
+                  "versionName": "",
+                  "versionCode": "",
+                  "applicationId": "",
+                  "buildType": "",
+                  "signed": False,
+                  "sha256": sha
+              }
+              if ext==".apk":
+                  rc1,o1=run(f'unzip -t "{path}"')
+                  rc2,o2=run(f'apksigner verify --verbose --print-certs "{path}"')
+                  rc3,o3=run(f'aapt dump badging "{path}"')
+                  badging=o3
+                  def pick(key):
+                      import re
+                      m=re.search(rf"{key}='([^']+)'", badging)
+                      return m.group(1) if m else ""
+                  item["versionCode"]=pick("versionCode")
+                  item["versionName"]=pick("versionName")
+                  import re
+                  m=re.search(r"package: name='([^']+)'", badging)
+                  item["applicationId"]=m.group(1) if m else ""
+                  item["buildType"]="debug" if "-debug-" in fn else "release"
+                  item["signed"]=rc2==0
+                  if "debug-installable" in fn and rc1==0 and rc2==0 and rc3==0:
+                      item["installable_on_android"]=True
+                      item["reason"]="passes unzip/apksigner/aapt checks"
+                      item["classification"]="debug_apk_installable"
+                  elif "signed-installable" in fn and rc1==0 and rc2==0 and rc3==0:
+                      item["installable_on_android"]=True
+                      item["reason"]="signed release passes unzip/apksigner/aapt checks"
+                      item["classification"]="release_apk_signed_installable"
+                  else:
+                      item["installable_on_android"]=False
+                      item["reason"]=f"APK verification failed or intentionally non-installable; unzip={rc1}, apksigner={rc2}, aapt={rc3}"
+                      item["classification"]="release_apk_unsigned_not_installable"
+              elif ext==".aab":
+                  item["classification"]="aab_not_directly_installable"
+                  item["reason"]="AAB requires Play/App Bundle toolchain, not direct device install"
+              elif ext==".zip":
+                  item["classification"]="artifact_zip_extract_first"
+                  item["reason"]="Extract first to access contained files"
+              else:
+                  item["classification"]="report_or_checksum"
+                  item["reason"]="report/checksum/log artifact"
+              out.append(item)
+          with open("docs/audit/current_artifact_inventory.json","w",encoding="utf-8") as f:
+              json.dump({"artifacts":out},f,ensure_ascii=False,indent=2)
+          with open("docs/audit/current_artifact_inventory.md","w",encoding="utf-8") as f:
+              f.write("# Current Artifact Inventory\n\n")
+              for i in out:
+                  f.write(f"- {i['exact_file_name']} | {i['classification']} | installable={str(i['installable_on_android']).lower()} | {i['reason']}\n")
+          PY
+
+      - name: Upload inventory docs
         uses: actions/upload-artifact@v4
         with:
-          name: neonote-release-verification
+          name: neonote-artifact-inventory
           path: |
-            release-sha256.txt
-            release-artifacts.txt
+            docs/audit/current_artifact_inventory.md
+            docs/audit/current_artifact_inventory.json
           if-no-files-found: error
-
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            app/build/outputs/apk/release/*.apk
-            app/build/outputs/bundle/release/*.aab
-            release-sha256.txt
-            release-artifacts.txt

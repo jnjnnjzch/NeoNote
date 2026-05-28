@@ -23,6 +23,37 @@ plugins {
     id("com.google.dagger.hilt.android")
 }
 
+fun env(name: String): String? = System.getenv(name)?.takeIf { it.isNotBlank() }
+
+fun gitShortSha(): String {
+    return env("GITHUB_SHA")?.take(7) ?: runCatching {
+        val stdout = java.io.ByteArrayOutputStream()
+        exec {
+            commandLine("git", "rev-parse", "--short=7", "HEAD")
+            standardOutput = stdout
+        }
+        stdout.toString().trim()
+    }.getOrDefault("localdev")
+}
+
+fun ciRunNumber(): Int = env("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0
+
+fun ciTagVersion(): String {
+    val refName = env("GITHUB_REF_NAME")
+    return if (refName != null && refName.startsWith("v")) {
+        refName.removePrefix("v")
+    } else {
+        "0.1.0-dev"
+    }
+}
+
+val gitSha = gitShortSha()
+val runNumber = ciRunNumber()
+val baseVersionCode = 1000
+val computedVersionCode = baseVersionCode + if (runNumber > 0) runNumber else 1
+val computedVersionName = "${ciTagVersion()}-$gitSha"
+val buildTimeUtc = java.time.Instant.now().toString()
+
 android {
     namespace = "com.example.cahier"
     compileSdk = 36
@@ -31,8 +62,12 @@ android {
         applicationId = "com.example.cahier"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.1.10"
+        versionCode = computedVersionCode
+        versionName = computedVersionName
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
+        buildConfigField("String", "BUILD_TIME_UTC", "\"$buildTimeUtc\"")
+        buildConfigField("String", "GITHUB_RUN_NUMBER", "\"${env("GITHUB_RUN_NUMBER") ?: "local"}\"")
+        buildConfigField("String", "APPLICATION_ID_VALUE", "\"com.example.cahier\"")
 
         testInstrumentationRunner = "com.example.cahier.HiltTestRunner"
         vectorDrawables {
@@ -66,6 +101,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {
