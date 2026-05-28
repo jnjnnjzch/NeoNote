@@ -61,6 +61,9 @@ import com.example.cahier.core.document.ImageBlock
 import com.example.cahier.core.document.StrokeAnchor
 import com.example.cahier.core.document.TableBlock
 import com.example.cahier.core.document.TableCell
+import com.example.cahier.core.document.ParagraphNode
+import com.example.cahier.core.document.TextContainerBlock
+import com.example.cahier.core.document.TextContainerContent
 import com.example.cahier.core.document.TicDocument
 import com.example.cahier.core.navigation.DrawingCanvasDestination
 import com.example.cahier.core.ui.CahierTextureBitmapStore
@@ -726,6 +729,44 @@ class DrawingCanvasViewModel @Inject constructor(
         persistDocument(updated)
     }
 
+    fun ensureDefaultTextContainer() {
+        val current = _document.value
+        val page = current.pages.firstOrNull() ?: return
+        if (page.blocks.any { it is TextContainerBlock }) return
+        val updated = current.copy(
+            pages = listOf(
+                page.copy(
+                    blocks = page.blocks + TextContainerBlock(
+                        content = TextContainerContent(nodes = listOf(ParagraphNode("")))
+                    )
+                )
+            )
+        )
+        persistDocument(updated)
+    }
+
+    fun updateTextContainerParagraph(text: String) {
+        updateFirstTextContainer { container ->
+            val nodes = container.content.nodes.toMutableList()
+            val firstParagraph = nodes.indexOfFirst { it is ParagraphNode }
+            if (firstParagraph >= 0) {
+                nodes[firstParagraph] = ParagraphNode(text)
+            } else {
+                nodes.add(0, ParagraphNode(text))
+            }
+            container.copy(content = container.content.copy(nodes = nodes))
+        }
+    }
+
+    fun moveTextContainerBy(dx: Float, dy: Float) {
+        updateFirstTextContainer { container ->
+            container.copy(
+                x = container.x + dx,
+                y = container.y + dy
+            )
+        }
+    }
+
     fun updateTableCell(
         row: Int,
         col: Int,
@@ -832,6 +873,18 @@ class DrawingCanvasViewModel @Inject constructor(
         val idx = page.blocks.indexOfFirst { it is TableBlock }
         if (idx < 0) return
         val target = page.blocks[idx] as TableBlock
+        val updatedBlocks = page.blocks.toMutableList()
+        updatedBlocks[idx] = transform(target)
+        val updated = current.copy(pages = listOf(page.copy(blocks = updatedBlocks)))
+        persistDocument(updated)
+    }
+
+    private fun updateFirstTextContainer(transform: (TextContainerBlock) -> TextContainerBlock) {
+        val current = _document.value
+        val page = current.pages.firstOrNull() ?: return
+        val idx = page.blocks.indexOfFirst { it is TextContainerBlock }
+        if (idx < 0) return
+        val target = page.blocks[idx] as TextContainerBlock
         val updatedBlocks = page.blocks.toMutableList()
         updatedBlocks[idx] = transform(target)
         val updated = current.copy(pages = listOf(page.copy(blocks = updatedBlocks)))

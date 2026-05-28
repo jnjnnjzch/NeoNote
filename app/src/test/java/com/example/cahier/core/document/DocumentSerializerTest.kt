@@ -77,4 +77,30 @@ class DocumentSerializerTest {
         assertEquals(false, decoded.settings.stylusWritesByDefault)
         assertEquals(false, decoded.settings.fingerPansByDefault)
     }
+
+    @Test
+    fun encodeDecode_roundTripsTextContainerBlock() {
+        val container = TextContainerBlock(
+            x = 320f,
+            y = 240f,
+            width = 800f,
+            height = 420f,
+            content = TextContainerContent(
+                nodes = listOf(
+                    ParagraphNode("before table"),
+                    TableNode(rows = 2, columns = 2),
+                    ParagraphNode("after table")
+                )
+            )
+        )
+        val document = TicDocument(pages = listOf(CanvasPage(blocks = listOf(container))))
+        val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
+
+        assertNotNull(decoded)
+        val decodedContainer = decoded!!.pages.first().blocks.first() as TextContainerBlock
+        assertEquals(320f, decodedContainer.x)
+        assertEquals(240f, decodedContainer.y)
+        assertEquals(3, decodedContainer.content.nodes.size)
+        assertEquals("before table", (decodedContainer.content.nodes[0] as ParagraphNode).text)
+    }
 }

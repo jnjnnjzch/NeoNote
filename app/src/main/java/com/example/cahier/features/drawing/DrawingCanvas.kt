@@ -107,6 +107,8 @@ import com.example.cahier.core.ui.LocalTextureStore
 import com.example.cahier.core.ui.theme.CahierAppTheme
 import com.example.cahier.core.utils.createDropTarget
 import com.example.cahier.core.document.TableBlock
+import com.example.cahier.core.document.TextContainerBlock
+import com.example.cahier.core.document.ParagraphNode
 import com.example.cahier.features.drawing.CanvasTransformMapper.docToScreenX
 import com.example.cahier.features.drawing.CanvasTransformMapper.docToScreenY
 import com.example.cahier.features.drawing.CanvasTransformMapper.screenToDocDelta
@@ -156,8 +158,9 @@ fun DrawingCanvas(
             text = stringResource(R.string.replace_image_text)
         )
     }
-    // Legacy TableBlock path is compatibility-only.
-    // New notes must not auto-insert standalone table blocks in Normal Mode.
+    LaunchedEffect(Unit) {
+        drawingCanvasViewModel.ensureDefaultTextContainer()
+    }
 
     Column(
         modifier = modifier
@@ -367,6 +370,12 @@ private fun DrawingSurfaceWithTarget(
         ?.blocks
         ?.filterIsInstance<TableBlock>()
         ?.firstOrNull()
+    val textContainer = drawingCanvasViewModel.document.collectAsStateWithLifecycle().value
+        .pages
+        .firstOrNull()
+        ?.blocks
+        ?.filterIsInstance<TextContainerBlock>()
+        ?.firstOrNull()
     var selectedCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val context = LocalContext.current
 
@@ -556,6 +565,60 @@ private fun DrawingSurfaceWithTarget(
                     }
             )
         }
+
+        textContainer?.let { container ->
+            val paragraphText = container.content.nodes.filterIsInstance<ParagraphNode>().firstOrNull()?.text ?: ""
+            TextContainerEditor(
+                text = paragraphText,
+                canvasTransform = canvasTransform,
+                onTextChange = drawingCanvasViewModel::updateTextContainerParagraph,
+                onMove = drawingCanvasViewModel::moveTextContainerBy,
+                modifier = Modifier
+                    .offset {
+                        IntOffset(
+                            docToScreenX(container.x, canvasTransform).toInt(),
+                            docToScreenY(container.y, canvasTransform).toInt()
+                        )
+                    }
+                    .width((container.width * canvasTransform.scale).dp)
+                    .height((container.height * canvasTransform.scale).dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun TextContainerEditor(
+    text: String,
+    canvasTransform: CanvasTransform,
+    onTextChange: (String) -> Unit,
+    onMove: (Float, Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .pointerInput(text) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    onMove(
+                        screenToDocDelta(dragAmount.x, canvasTransform),
+                        screenToDocDelta(dragAmount.y, canvasTransform)
+                    )
+                }
+            },
+        color = Color(0xFFFCFCFB),
+        tonalElevation = 1.dp
+    ) {
+        TextField(
+            value = text,
+            onValueChange = onTextChange,
+            placeholder = { Text("Type your note…") },
+            singleLine = false,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp)
+                .testTag("text-container-editor")
+        )
     }
 }
 

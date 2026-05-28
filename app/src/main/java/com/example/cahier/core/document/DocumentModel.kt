@@ -56,6 +56,51 @@ sealed interface Block {
 }
 
 @Serializable
+sealed interface ContentNode
+
+@Serializable
+@SerialName("paragraph")
+data class ParagraphNode(
+    val text: String = ""
+) : ContentNode
+
+@Serializable
+@SerialName("table_node")
+data class TableNode(
+    val rows: Int = 3,
+    val columns: Int = 3,
+    val cells: List<List<TableCell>> = List(3) { List(3) { TableCell() } }
+) : ContentNode
+
+@Serializable
+@SerialName("formula_node")
+data class FormulaNode(
+    val source: String = ""
+) : ContentNode
+
+@Serializable
+@SerialName("image_node")
+data class ImageNode(
+    val assetPath: String
+) : ContentNode
+
+@Serializable
+data class TextContainerContent(
+    val nodes: List<ContentNode> = listOf(ParagraphNode())
+)
+
+@Serializable
+@SerialName("text_container")
+data class TextContainerBlock(
+    override val id: String = UUID.randomUUID().toString(),
+    override val x: Float = 96f,
+    override val y: Float = 96f,
+    override val width: Float = 720f,
+    override val height: Float = 420f,
+    val content: TextContainerContent = TextContainerContent(),
+) : Block
+
+@Serializable
 @SerialName("table")
 data class TableBlock(
     override val id: String = UUID.randomUUID().toString(),
