@@ -61,9 +61,10 @@ jobs:
       - name: Validate debug APK
         run: |
           APK="app/build/outputs/apk/debug/app-debug.apk"
+          APKSIGNER_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n1)"
           AAPT_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/aapt | sort -V | tail -n1)"
           unzip -t "$APK"
-          apksigner verify --verbose --print-certs "$APK"
+          "$APKSIGNER_BIN" verify --verbose --print-certs "$APK"
           "$AAPT_BIN" dump badging "$APK" > debug.badging.txt
 
       - name: Rename installable debug APK
@@ -155,11 +156,12 @@ jobs:
       - name: Validate release unsigned APK and AAB
         run: |
           set +e
+          APKSIGNER_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n1)"
           AAPT_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/aapt | sort -V | tail -n1)"
           UNSIGNED="$(ls dist/NeoNote-release-unsigned-NOT-INSTALLABLE-*.apk)"
           AAB="$(ls dist/NeoNote-release-bundle-NOT-INSTALLABLE-DIRECTLY-*.aab)"
           unzip -t "$UNSIGNED" | tee release-unsigned-unzip.txt
-          apksigner verify --verbose --print-certs "$UNSIGNED" | tee release-unsigned-signing.txt
+          "$APKSIGNER_BIN" verify --verbose --print-certs "$UNSIGNED" | tee release-unsigned-signing.txt
           "$AAPT_BIN" dump badging "$UNSIGNED" | tee release-unsigned.badging.txt
           SHA_UNSIGNED="$(sha256sum "$UNSIGNED" | awk '{print $1}')"
           SHA_AAB="$(sha256sum "$AAB" | awk '{print $1}')"
@@ -169,6 +171,7 @@ jobs:
       - name: Optionally sign release APK
         if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && env.ANDROID_KEYSTORE_PASSWORD != '' && env.ANDROID_KEY_ALIAS != '' && env.ANDROID_KEY_PASSWORD != '' }}
         run: |
+          APKSIGNER_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n1)"
           AAPT_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/aapt | sort -V | tail -n1)"
           SHORT_SHA="${{ needs.verify.outputs.short_sha }}"
           VNAME="${{ needs.verify.outputs.version_name }}"
@@ -176,7 +179,7 @@ jobs:
           UNSIGNED="$(ls dist/NeoNote-release-unsigned-NOT-INSTALLABLE-*.apk)"
           SIGNED="dist/NeoNote-release-signed-installable-v${VNAME}-${VCODE}-${SHORT_SHA}.apk"
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release-signing.jks
-          apksigner sign \
+          "$APKSIGNER_BIN" sign \
             --ks release-signing.jks \
             --ks-key-alias "$ANDROID_KEY_ALIAS" \
             --ks-pass pass:"$ANDROID_KEYSTORE_PASSWORD" \
@@ -184,7 +187,7 @@ jobs:
             --out "$SIGNED" \
             "$UNSIGNED"
           unzip -t "$SIGNED" | tee release-signed-unzip.txt
-          apksigner verify --verbose --print-certs "$SIGNED" | tee release-signed-signing.txt
+          "$APKSIGNER_BIN" verify --verbose --print-certs "$SIGNED" | tee release-signed-signing.txt
           "$AAPT_BIN" dump badging "$SIGNED" | tee release-signed.badging.txt
           sha256sum "$SIGNED" >> release-sha256.txt
 
@@ -256,8 +259,9 @@ jobs:
               }
               if ext==".apk":
                   aapt_bin = subprocess.run('ls -1d "$ANDROID_HOME"/build-tools/*/aapt | sort -V | tail -n1', shell=True, text=True, capture_output=True).stdout.strip()
+                  apksigner_bin = subprocess.run('ls -1d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n1', shell=True, text=True, capture_output=True).stdout.strip()
                   rc1,o1=run(f'unzip -t "{path}"')
-                  rc2,o2=run(f'apksigner verify --verbose --print-certs "{path}"')
+                  rc2,o2=run(f'"{apksigner_bin}" verify --verbose --print-certs "{path}"')
                   rc3,o3=run(f'"{aapt_bin}" dump badging "{path}"')
                   badging=o3
                   def pick(key):
@@ -326,6 +330,7 @@ jobs:
       - name: Enforce artifact naming and installability policy
         run: |
           set -e
+          APKSIGNER_BIN="$(ls -1d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n1)"
           ls -la collected
           DEBUG_APK=$(ls collected/NeoNote-debug-installable-*.apk)
           UNSIGNED_APK=$(ls collected/NeoNote-release-unsigned-NOT-INSTALLABLE-*.apk)
@@ -334,11 +339,11 @@ jobs:
           if [[ -z "$UNSIGNED_APK" ]]; then echo "Missing unsigned release apk with NOT-INSTALLABLE naming"; exit 1; fi
           if [[ -z "$AAB_FILE" ]]; then echo "Missing AAB with NOT-INSTALLABLE-DIRECTLY naming"; exit 1; fi
 
-          apksigner verify --verbose --print-certs "$DEBUG_APK"
+          "$APKSIGNER_BIN" verify --verbose --print-certs "$DEBUG_APK"
 
           if ls collected/NeoNote-release-signed-installable-*.apk 1> /dev/null 2>&1; then
-            for f in collected/NeoNote-release-signed-installable-*.apk; do
-              apksigner verify --verbose --print-certs "$f"
+              for f in collected/NeoNote-release-signed-installable-*.apk; do
+              "$APKSIGNER_BIN" verify --verbose --print-certs "$f"
             done
           fi
 
