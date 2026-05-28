@@ -208,6 +208,7 @@ private fun DrawingCanvasTopBar(
     val uiState by drawingCanvasViewModel.uiState.collectAsStateWithLifecycle()
     val isEraserMode by drawingCanvasViewModel.isEraserMode.collectAsStateWithLifecycle()
     val selectionMode by drawingCanvasViewModel.selectionModeEnabled.collectAsStateWithLifecycle()
+    val textContainerSelected by drawingCanvasViewModel.selectedTextContainer.collectAsStateWithLifecycle()
     val stylusWrites by drawingCanvasViewModel.stylusWritesByDefault.collectAsStateWithLifecycle()
     val fingerPans by drawingCanvasViewModel.fingerPansByDefault.collectAsStateWithLifecycle()
     val pressureCurve by drawingCanvasViewModel.pressureCurve.collectAsStateWithLifecycle()
@@ -255,6 +256,12 @@ private fun DrawingCanvasTopBar(
             }
             TextButton(onClick = { drawingCanvasViewModel.setSelectionMode(!selectionMode) }) {
                 Text(if (selectionMode) "Select" else "Select")
+            }
+            if (selectionMode) {
+                TextButton(onClick = drawingCanvasViewModel::toggleTextContainerSelection) {
+                    Text(if (textContainerSelected) "Text:On" else "Text:Off")
+                }
+                TextButton(onClick = drawingCanvasViewModel::clearSelection) { Text("Clear Sel") }
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -368,6 +375,7 @@ private fun DrawingSurfaceWithTarget(
     val exportedUri by drawingCanvasViewModel.exportedImageUri.collectAsStateWithLifecycle()
     val isEraserMode by drawingCanvasViewModel.isEraserMode.collectAsStateWithLifecycle()
     val isSelectionMode by drawingCanvasViewModel.selectionModeEnabled.collectAsStateWithLifecycle()
+    val hasSelection by drawingCanvasViewModel.hasSelection.collectAsStateWithLifecycle()
     val strokeTranslations by drawingCanvasViewModel.strokeTranslations.collectAsStateWithLifecycle()
     val fingerPanZoomEnabled by drawingCanvasViewModel.fingerPansByDefault.collectAsStateWithLifecycle()
     val strokes = remember { mutableStateListOf<Stroke>() }
@@ -525,7 +533,24 @@ private fun DrawingSurfaceWithTarget(
             onGetNextBrush = drawingCanvasViewModel::getCurrentBrushWithPressureCurve,
             isEraserMode = isEraserMode,
             isSelectionMode = isSelectionMode,
+            hasSelection = hasSelection,
             backgroundImageUri = uiState.note.imageUriList?.firstOrNull(),
+            onSelectionLasso = { start, end ->
+                drawingCanvasViewModel.selectStrokesInScreenRect(
+                    startX = start.x,
+                    startY = start.y,
+                    endX = end.x,
+                    endY = end.y,
+                    canvasTransform = canvasTransform,
+                    replace = false
+                )
+            },
+            onMoveSelection = { dxScreen, dyScreen ->
+                drawingCanvasViewModel.moveSelectionBy(
+                    dx = screenToDocDelta(dxScreen, canvasTransform),
+                    dy = screenToDocDelta(dyScreen, canvasTransform)
+                )
+            },
             onRawMotionEvent = drawingCanvasViewModel::onRawMotionEvent,
             modifier = Modifier.fillMaxSize()
         )

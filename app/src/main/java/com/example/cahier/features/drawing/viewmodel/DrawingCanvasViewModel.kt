@@ -74,6 +74,8 @@ import com.example.cahier.developer.brushdesigner.data.AUTOSAVE_KEY
 import com.example.cahier.developer.brushdesigner.data.CustomBrushDao
 import com.example.cahier.developer.brushdesigner.data.CustomBrushEntity
 import com.example.cahier.features.drawing.CustomBrushes
+import com.example.cahier.features.drawing.CanvasTransform
+import com.example.cahier.features.drawing.CanvasTransformMapper
 import com.example.cahier.features.drawing.InkDebugAggregator
 import com.example.cahier.features.drawing.InkDebugMetrics
 import com.example.cahier.features.drawing.InkDebugSample
@@ -161,6 +163,13 @@ class DrawingCanvasViewModel @Inject constructor(
     val document: StateFlow<TicDocument> = _document.asStateFlow()
     private val _strokeTranslations = MutableStateFlow<Map<Int, Pair<Float, Float>>>(emptyMap())
     val strokeTranslations: StateFlow<Map<Int, Pair<Float, Float>>> = _strokeTranslations.asStateFlow()
+    private val _manualStrokeTranslations = MutableStateFlow<Map<Int, Pair<Float, Float>>>(emptyMap())
+    private val _selectedStrokeIndices = MutableStateFlow<Set<Int>>(emptySet())
+    val selectedStrokeIndices: StateFlow<Set<Int>> = _selectedStrokeIndices.asStateFlow()
+    private val _selectedTextContainer = MutableStateFlow(false)
+    val selectedTextContainer: StateFlow<Boolean> = _selectedTextContainer.asStateFlow()
+    private val _hasSelection = MutableStateFlow(false)
+    val hasSelection: StateFlow<Boolean> = _hasSelection.asStateFlow()
     private val _inkDebugMetrics = MutableStateFlow(InkDebugMetrics())
     val inkDebugMetrics: StateFlow<InkDebugMetrics> = _inkDebugMetrics.asStateFlow()
     private val inkDebugAggregator = InkDebugAggregator()
@@ -254,6 +263,10 @@ class DrawingCanvasViewModel @Inject constructor(
 
         syncStrokeIds(oldStrokes = oldStrokes, newStrokes = newStrokes)
         _uiState.update { it.copy(strokes = newStrokes) }
+        val maxIndex = newStrokes.lastIndex
+        _selectedStrokeIndices.value = _selectedStrokeIndices.value.filter { it in 0..maxIndex }.toSet()
+        _manualStrokeTranslations.value = _manualStrokeTranslations.value.filterKeys { it in 0..maxIndex }
+        refreshSelectionState()
         updateUndoRedoState()
         recomputeStrokeTranslations()
     }
@@ -418,11 +431,11 @@ class DrawingCanvasViewModel @Inject constructor(
     @UiThread
     fun onStrokesFinished(finishedStrokes: List<Stroke>) {
         val currentStrokes = history.getOrElse(historyIndex) { emptyList() }
-        val startIndex = currentStrokes.size
         val newStrokes = currentStrokes + finishedStrokes
         updateStrokes(newStrokes)
         _inkDebugMetrics.update { it.copy(finalizedStrokeCount = newStrokes.size) }
-        anchorNewStrokes(startIndex, finishedStrokes.size)
+        // Normal Mode no longer uses automatic ink anchoring as primary behavior.
+        // Keep legacy anchor data compatible via recompute/read paths.
         viewModelScope.launch {
             saveStrokes()
         }
@@ -1076,7 +1089,15 @@ class DrawingCanvasViewModel @Inject constructor(
                 }
             }
         }
+        _manualStrokeTranslations.value.forEach { (index, delta) ->
+            val base = translations[index] ?: (0f to 0f)
+            translations[index] = (base.first + delta.first) to (base.second + delta.second)
+        }
         _strokeTranslations.value = translations
+    }
+
+    private fun refreshSelectionState() {
+        _hasSelection.value = _selectedStrokeIndices.value.isNotEmpty() || _selectedTextContainer.value
     }
 
     fun setStylusWritesByDefault(enabled: Boolean) {
@@ -1102,6 +1123,71 @@ class DrawingCanvasViewModel @Inject constructor(
         _selectionModeEnabled.value = enabled
         if (enabled) {
             setEraserMode(false)
+        } else {
+            clearSelection()
+        }
+    }
+
+    fun clearSelection() {
+        _selectedStrokeIndices.value = emptySet()
+        _selectedTextContainer.value = false
+        refreshSelectionState()
+    }
+
+    fun toggleTextContainerSelection() {
+        _selectedTextContainer.value = !_selectedTextContainer.value
+        refreshSelectionState()
+    }
+
+    fun selectStrokesInScreenRect(
+        startX: Float,
+        startY: Float,
+        endX: Float,
+        endY: Float,
+        canvasTransform: CanvasTransform,
+        replace: Boolean = false,
+    ) {
+        val left = minOf(startX, endX)
+        val right = maxOf(startX, endX)
+        val top = minOf(startY, endY)
+        val bottom = maxOf(startY, endY)
+        if ((right - left) < 3f || (bottom - top) < 3f) return
+
+        val docLeft = CanvasTransformMapper.screenToCanvasX(left, canvasTransform)
+        val docRight = CanvasTransformMapper.screenToCanvasX(right, canvasTransform)
+        val docTop = CanvasTransformMapper.screenToCanvasY(top, canvasTransform)
+        val docBottom = CanvasTransformMapper.screenToCanvasY(bottom, canvasTransform)
+
+        val segment = MutableSegment(
+            MutableVec(docLeft, docTop),
+            MutableVec(docRight, docTop)
+        )
+        val lasso = MutableParallelogram().populateFromSegmentAndPadding(
+            segment,
+            maxOf(docBottom - docTop, 1f)
+        )
+
+        val hit = _uiState.value.strokes.mapIndexedNotNull { index, stroke ->
+            if (stroke.shape.intersects(lasso, AffineTransform.IDENTITY)) index else null
+        }.toSet()
+
+        _selectedStrokeIndices.value = if (replace) hit else (_selectedStrokeIndices.value + hit)
+        refreshSelectionState()
+    }
+
+    fun moveSelectionBy(dx: Float, dy: Float) {
+        if (_selectedStrokeIndices.value.isEmpty() && !_selectedTextContainer.value) return
+        if (_selectedTextContainer.value) {
+            moveTextContainerBy(dx, dy)
+        }
+        if (_selectedStrokeIndices.value.isNotEmpty()) {
+            val updated = _manualStrokeTranslations.value.toMutableMap()
+            _selectedStrokeIndices.value.forEach { index ->
+                val prev = updated[index] ?: (0f to 0f)
+                updated[index] = (prev.first + dx) to (prev.second + dy)
+            }
+            _manualStrokeTranslations.value = updated
+            recomputeStrokeTranslations()
         }
     }
 

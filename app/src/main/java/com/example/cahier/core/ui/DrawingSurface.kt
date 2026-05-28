@@ -34,8 +34,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.toRect
 import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.withSaveLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -68,8 +71,11 @@ fun DrawingSurface(
     onGetNextBrush: () -> Brush,
     isEraserMode: Boolean,
     isSelectionMode: Boolean = false,
+    hasSelection: Boolean = false,
     backgroundImageUri: String?,
     onStartDrag: () -> Unit,
+    onSelectionLasso: (Offset, Offset) -> Unit = { _, _ -> },
+    onMoveSelection: (Float, Float) -> Unit = { _, _ -> },
     onRawMotionEvent: (MotionEvent) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -138,7 +144,59 @@ fun DrawingSurface(
         )
 
         if (isSelectionMode) {
-            // Selection mode intentionally suspends inking overlays in beta.
+            var dragStart by remember { mutableStateOf<Offset?>(null) }
+            var dragEnd by remember { mutableStateOf<Offset?>(null) }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(hasSelection) {
+                        detectDragGestures(
+                            onDragStart = { start ->
+                                dragStart = start
+                                dragEnd = start
+                            },
+                            onDragEnd = {
+                                val start = dragStart
+                                val end = dragEnd
+                                if (start != null && end != null) {
+                                    if (hasSelection) {
+                                        // Drag already applied incrementally as group move.
+                                    } else {
+                                        onSelectionLasso(start, end)
+                                    }
+                                }
+                                dragStart = null
+                                dragEnd = null
+                            }
+                        ) { change, dragAmount ->
+                            if (hasSelection) {
+                                onMoveSelection(dragAmount.x, dragAmount.y)
+                            } else {
+                                dragEnd = change.position
+                            }
+                            change.consume()
+                        }
+                    }
+            ) {
+                val start = dragStart
+                val end = dragEnd
+                if (start != null && end != null && !hasSelection) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val rect = Rect(start, end)
+                        drawRect(
+                            color = Color(0x3347A9FF),
+                            topLeft = rect.topLeft,
+                            size = rect.size
+                        )
+                        drawRect(
+                            color = Color(0xFF47A9FF),
+                            topLeft = rect.topLeft,
+                            size = rect.size,
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
+                        )
+                    }
+                }
+            }
         } else if (isEraserMode) {
             Box(
                 modifier = Modifier
@@ -197,6 +255,7 @@ fun DrawingSurfacePreview() {
         onGetNextBrush = { currentBrush },
         isEraserMode = false,
         isSelectionMode = false,
+        hasSelection = false,
         backgroundImageUri = null,
         onStartDrag = {}
     )

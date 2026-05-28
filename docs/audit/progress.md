@@ -43,7 +43,22 @@
   - `.\gradlew.bat :app:testDebugUnitTest` -> PASS
 
 ## Milestone 6 - Lasso + Multi-Select Group Move
-- Status: IN PROGRESS
+- Status: PASS
 - Date: 2026-05-28
 - Commit: pending
 - Scope: lasso-select ink strokes, select TextContainer + ink together, and move selected group in Normal Mode without automatic anchoring behavior.
+- Completed:
+  - Added lasso rectangle gesture for ink selection in selection mode.
+  - Added multi-select state (`TextContainer` + selected ink strokes) and group move drag behavior.
+  - Stopped default auto-anchoring of newly written ink (legacy anchor read compatibility retained).
+- Validation:
+  - `.\gradlew.bat :app:assembleDebug` -> PASS
+  - `.\gradlew.bat :app:testDebugUnitTest` -> PASS
+
+## Milestone 7 - S Pen Inking Preservation
+- Status: IN PROGRESS
+- Date: 2026-05-28
+- Commit: pending
+- Scope: preserve Jetpack Ink path/pressure behavior, expose S Pen diagnostics in Debug Center, and avoid per-point Compose recomposition where possible.
+- Hardware note:
+  - `DEVICE_VERIFICATION_REQUIRED`: physical Samsung S Pen feel/latency/pressure response verification.
