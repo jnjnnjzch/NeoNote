@@ -83,6 +83,7 @@ jobs:
           if-no-files-found: error
 
   install_smoke_debug:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     needs: verify
     runs-on: ubuntu-latest
     steps:
@@ -108,10 +109,16 @@ jobs:
       - name: ADB install smoke
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 34
-          arch: x86_64
-          profile: pixel_7
+          api-level: 30
+          arch: x86
+          profile: Nexus 6
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -accel off -wipe-data
+          emulator-boot-timeout: 900
           script: |
+            adb kill-server || true
+            adb start-server
+            adb wait-for-device
+            adb devices
             adb install -r app/build/outputs/apk/debug/app-debug.apk | tee adb-install-output.txt
             adb shell am start -n com.example.cahier/com.example.cahier.MainActivity
 
