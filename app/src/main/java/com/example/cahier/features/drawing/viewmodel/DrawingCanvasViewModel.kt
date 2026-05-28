@@ -74,6 +74,7 @@ import com.example.cahier.features.drawing.InkDebugAggregator
 import com.example.cahier.features.drawing.InkDebugMetrics
 import com.example.cahier.features.drawing.InkDebugSample
 import com.example.cahier.features.drawing.PressureCurveMapper
+import com.example.cahier.features.drawing.StressDocumentFactory
 import com.example.cahier.features.drawing.StrokeIdMapper
 import com.example.cahier.features.drawing.export.ExportComposer
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -1015,27 +1016,19 @@ class DrawingCanvasViewModel @Inject constructor(
     }
 
     fun generateStressDocument(
-        tableCount: Int = 24,
-        rowsPerTable: Int = 40,
+        tableCount: Int = 10,
+        rowsPerTable: Int = 20,
         columnsPerTable: Int = 6,
+        imageCount: Int = 50,
     ) {
-        val tables = (0 until tableCount).map { i ->
-            TableBlock(
-                x = 64f + (i % 3) * 720f,
-                y = 64f + (i / 3) * 540f,
-                width = 680f,
-                height = 480f,
-                rows = rowsPerTable,
-                columns = columnsPerTable,
-                cells = List(rowsPerTable) { r ->
-                    List(columnsPerTable) { c ->
-                        TableCell(text = "R${r + 1}C${c + 1}")
-                    }
-                }
-            )
-        }
+        val blocks = StressDocumentFactory.createBlocks(
+            tableCount = tableCount,
+            rowsPerTable = rowsPerTable,
+            columnsPerTable = columnsPerTable,
+            imageCount = imageCount
+        )
         val page = _document.value.pages.firstOrNull() ?: return
-        persistDocument(_document.value.copy(pages = listOf(page.copy(blocks = tables))))
+        persistDocument(_document.value.copy(pages = listOf(page.copy(blocks = blocks))))
     }
 
     private fun exportPdf(pdfFile: File, title: String, document: TicDocument) {
