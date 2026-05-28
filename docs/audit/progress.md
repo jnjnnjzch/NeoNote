@@ -30,7 +30,20 @@
   - `.\gradlew.bat :app:testDebugUnitTest` -> PASS
 
 ## Milestone 5 - True Infinite Canvas
-- Status: IN PROGRESS
+- Status: PASS
 - Date: 2026-05-28
 - Commit: pending
 - Scope: single canvas transform and shared coordinates for TextContainer, ink, image, and formula with persistence/no-drift tests.
+- Progress:
+  - Added explicit `canvasToScreenX/Y` and `screenToCanvasX/Y` APIs in `CanvasTransformMapper`.
+  - Added no-drift roundtrip tests for repeated screen/canvas coordinate conversion.
+  - Added serializer test to preserve shared canvas coordinates across `TextContainerBlock`, `ImageBlock`, and `TableBlock`.
+- Validation:
+  - `.\gradlew.bat :app:assembleDebug` -> PASS
+  - `.\gradlew.bat :app:testDebugUnitTest` -> PASS
+
+## Milestone 6 - Lasso + Multi-Select Group Move
+- Status: IN PROGRESS
+- Date: 2026-05-28
+- Commit: pending
+- Scope: lasso-select ink strokes, select TextContainer + ink together, and move selected group in Normal Mode without automatic anchoring behavior.

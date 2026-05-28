@@ -103,4 +103,27 @@ class DocumentSerializerTest {
         assertEquals(3, decodedContainer.content.nodes.size)
         assertEquals("before table", (decodedContainer.content.nodes[0] as ParagraphNode).text)
     }
+
+    @Test
+    fun encodeDecode_preservesSharedCanvasCoordinatesAcrossBlockTypes() {
+        val text = TextContainerBlock(x = 300f, y = 220f, width = 700f, height = 380f)
+        val image = ImageBlock(x = -140f, y = 96f, width = 256f, height = 192f, assetPath = "/tmp/a.png")
+        val table = TableBlock(x = 48f, y = -72f, width = 640f, height = 320f, rows = 2, columns = 2)
+        val document = TicDocument(pages = listOf(CanvasPage(blocks = listOf(text, image, table))))
+
+        val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
+        assertNotNull(decoded)
+        val blocks = decoded!!.pages.first().blocks
+
+        val decodedText = blocks[0] as TextContainerBlock
+        val decodedImage = blocks[1] as ImageBlock
+        val decodedTable = blocks[2] as TableBlock
+
+        assertEquals(300f, decodedText.x)
+        assertEquals(220f, decodedText.y)
+        assertEquals(-140f, decodedImage.x)
+        assertEquals(96f, decodedImage.y)
+        assertEquals(48f, decodedTable.x)
+        assertEquals(-72f, decodedTable.y)
+    }
 }
