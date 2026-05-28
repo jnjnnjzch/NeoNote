@@ -3,7 +3,8 @@ name: Build And Verify
 on:
   workflow_dispatch:
   push:
-  pull_request:
+    tags:
+      - "v*"
 
 jobs:
   build:
