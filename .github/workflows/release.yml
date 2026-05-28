@@ -53,6 +53,22 @@ jobs:
             app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
 
+      - name: Generate checksums and metadata
+        run: |
+          sha256sum app/build/outputs/apk/release/*.apk > release-sha256.txt
+          sha256sum app/build/outputs/bundle/release/*.aab >> release-sha256.txt
+          ls -lh app/build/outputs/apk/release/*.apk > release-artifacts.txt
+          ls -lh app/build/outputs/bundle/release/*.aab >> release-artifacts.txt
+
+      - name: Upload release verification files
+        uses: actions/upload-artifact@v4
+        with:
+          name: table-ink-canvas-release-verification
+          path: |
+            release-sha256.txt
+            release-artifacts.txt
+          if-no-files-found: error
+
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
@@ -60,3 +76,5 @@ jobs:
           files: |
             app/build/outputs/apk/release/*.apk
             app/build/outputs/bundle/release/*.aab
+            release-sha256.txt
+            release-artifacts.txt
