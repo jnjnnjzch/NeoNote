@@ -65,6 +65,7 @@ fun DrawingSurface(
     currentBrush: Brush,
     onGetNextBrush: () -> Brush,
     isEraserMode: Boolean,
+    isSelectionMode: Boolean = false,
     backgroundImageUri: String?,
     onStartDrag: () -> Unit,
     onRawMotionEvent: (MotionEvent) -> Unit = {},
@@ -133,7 +134,9 @@ fun DrawingSurface(
                 }
         )
 
-        if (isEraserMode) {
+        if (isSelectionMode) {
+            // Selection mode intentionally suspends inking overlays in beta.
+        } else if (isEraserMode) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -189,6 +192,7 @@ fun DrawingSurfacePreview() {
         currentBrush = currentBrush,
         onGetNextBrush = { currentBrush },
         isEraserMode = false,
+        isSelectionMode = false,
         backgroundImageUri = null,
         onStartDrag = {}
     )

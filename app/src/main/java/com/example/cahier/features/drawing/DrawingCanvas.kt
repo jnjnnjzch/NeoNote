@@ -48,6 +48,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -176,6 +177,11 @@ private fun DrawingCanvasTopBar(
     modifier: Modifier = Modifier,
 ) {
     val uiState by drawingCanvasViewModel.uiState.collectAsStateWithLifecycle()
+    val isEraserMode by drawingCanvasViewModel.isEraserMode.collectAsStateWithLifecycle()
+    val selectionMode by drawingCanvasViewModel.selectionModeEnabled.collectAsStateWithLifecycle()
+    val stylusWrites by drawingCanvasViewModel.stylusWritesByDefault.collectAsStateWithLifecycle()
+    val fingerPans by drawingCanvasViewModel.fingerPansByDefault.collectAsStateWithLifecycle()
+    val pressureCurve by drawingCanvasViewModel.pressureCurve.collectAsStateWithLifecycle()
     var titleState by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(uiState.note.title))
     }
@@ -188,34 +194,53 @@ private fun DrawingCanvasTopBar(
         }
     }
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = modifier
-    ) {
-        TextField(
-            value = titleState,
-            onValueChange = { newTitle ->
-                titleState = newTitle
-                drawingCanvasViewModel.onTitleChanged(newTitle.text)
-            },
-            placeholder = { Text(text = stringResource(R.string.drawing_title)) },
-            modifier = Modifier
-                .weight(1f)
-                .focusRequester(titleFocusRequester)
-                .onFocusChanged { focusState ->
-                    if (focusState.isFocused) {
-                        focusedFieldEnum = FocusedFieldEnum.Title
-                    }
+    Column(modifier = modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextField(
+                value = titleState,
+                onValueChange = { newTitle ->
+                    titleState = newTitle
+                    drawingCanvasViewModel.onTitleChanged(newTitle.text)
                 },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { })
-        )
-        TextButton(onClick = drawingCanvasViewModel::exportAllFormats) {
-            Text("Export")
+                placeholder = { Text(text = stringResource(R.string.drawing_title)) },
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(titleFocusRequester)
+                    .onFocusChanged { focusState ->
+                        if (focusState.isFocused) {
+                            focusedFieldEnum = FocusedFieldEnum.Title
+                        }
+                    },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { })
+            )
+            TextButton(onClick = drawingCanvasViewModel::exportAllFormats) { Text("Export") }
+            TextButton(onClick = drawingCanvasViewModel::generateStressDocument) { Text("Stress") }
+            TextButton(onClick = { drawingCanvasViewModel.setEraserMode(!isEraserMode) }) {
+                Text(if (isEraserMode) "Pen" else "Eraser")
+            }
+            TextButton(onClick = { drawingCanvasViewModel.setSelectionMode(!selectionMode) }) {
+                Text(if (selectionMode) "Select:On" else "Select:Off")
+            }
         }
-        TextButton(onClick = drawingCanvasViewModel::generateStressDocument) {
-            Text("Stress")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = { drawingCanvasViewModel.setStylusWritesByDefault(!stylusWrites) }) {
+                Text(if (stylusWrites) "Stylus:Write" else "Stylus:Tool")
+            }
+            TextButton(onClick = { drawingCanvasViewModel.setFingerPansByDefault(!fingerPans) }) {
+                Text(if (fingerPans) "Finger:Pan" else "Finger:Touch")
+            }
+            Text(
+                text = "Pressure ${String.format("%.2f", pressureCurve)}",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Slider(
+                value = pressureCurve,
+                onValueChange = drawingCanvasViewModel::setPressureCurve,
+                valueRange = 0.5f..2.0f,
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
@@ -313,6 +338,7 @@ private fun DrawingSurfaceWithTarget(
     val exportedUri by drawingCanvasViewModel.exportedImageUri.collectAsStateWithLifecycle()
     val currentBrush by drawingCanvasViewModel.currentBrush.collectAsStateWithLifecycle()
     val isEraserMode by drawingCanvasViewModel.isEraserMode.collectAsStateWithLifecycle()
+    val isSelectionMode by drawingCanvasViewModel.selectionModeEnabled.collectAsStateWithLifecycle()
     val strokeTranslations by drawingCanvasViewModel.strokeTranslations.collectAsStateWithLifecycle()
     val strokes = remember { mutableStateListOf<Stroke>() }
     val textureStore = LocalTextureStore.current
@@ -410,6 +436,7 @@ private fun DrawingSurfaceWithTarget(
             currentBrush = currentBrush,
             onGetNextBrush = drawingCanvasViewModel::getCurrentBrush,
             isEraserMode = isEraserMode,
+            isSelectionMode = isSelectionMode,
             backgroundImageUri = uiState.note.imageUriList?.firstOrNull(),
             onRawMotionEvent = drawingCanvasViewModel::onRawMotionEvent,
             modifier = Modifier.fillMaxSize()

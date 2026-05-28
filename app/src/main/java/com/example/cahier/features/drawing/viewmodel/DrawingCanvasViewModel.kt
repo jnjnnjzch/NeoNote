@@ -162,6 +162,14 @@ class DrawingCanvasViewModel @Inject constructor(
     private var isBrushSelectedInSession = false
     private val _lastExportDirectory = MutableStateFlow<String?>(null)
     val lastExportDirectory: StateFlow<String?> = _lastExportDirectory.asStateFlow()
+    private val _stylusWritesByDefault = MutableStateFlow(true)
+    val stylusWritesByDefault: StateFlow<Boolean> = _stylusWritesByDefault.asStateFlow()
+    private val _fingerPansByDefault = MutableStateFlow(true)
+    val fingerPansByDefault: StateFlow<Boolean> = _fingerPansByDefault.asStateFlow()
+    private val _pressureCurve = MutableStateFlow(1.0f)
+    val pressureCurve: StateFlow<Float> = _pressureCurve.asStateFlow()
+    private val _selectionModeEnabled = MutableStateFlow(false)
+    val selectionModeEnabled: StateFlow<Boolean> = _selectionModeEnabled.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -820,6 +828,25 @@ class DrawingCanvasViewModel @Inject constructor(
             }
         }
         _strokeTranslations.value = translations
+    }
+
+    fun setStylusWritesByDefault(enabled: Boolean) {
+        _stylusWritesByDefault.value = enabled
+    }
+
+    fun setFingerPansByDefault(enabled: Boolean) {
+        _fingerPansByDefault.value = enabled
+    }
+
+    fun setPressureCurve(curve: Float) {
+        _pressureCurve.value = curve.coerceIn(0.5f, 2.0f)
+    }
+
+    fun setSelectionMode(enabled: Boolean) {
+        _selectionModeEnabled.value = enabled
+        if (enabled) {
+            setEraserMode(false)
+        }
     }
 
     fun exportAllFormats() {
