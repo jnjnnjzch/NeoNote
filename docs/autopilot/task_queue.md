@@ -1,8 +1,7 @@
 # NeoNote Autopilot Task Queue
 
 ## Active
-Milestone 11: Final audit
-Status: IN_PROGRESS
+None
 
 ## Queue
 None
@@ -19,6 +18,7 @@ Milestone 7: S Pen inking preservation
 Milestone 8: Rich content: image paste + LaTeX rendering
 Milestone 9: Layout-preserving export
 Milestone 10: Release artifact policy
+Milestone 11: Final audit
 
 ## Rule
 When Active is PASS, move it to Completed and promote the first Queue item to Active.

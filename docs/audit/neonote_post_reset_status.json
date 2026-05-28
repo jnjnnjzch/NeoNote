@@ -1,8 +1,8 @@
 {
-  "current_goal": "USABLE_ALPHA_REACHED",
-  "mode": "AUTOPILOT",
-  "stop_policy": "stop_only_on_real_blocker",
-  "current_milestone": "completed",
+  "project": "NeoNote",
+  "date": "2026-05-28",
+  "target": "USABLE_ALPHA",
+  "overall_status": "REACHED_WITH_CAVEATS",
   "milestones": {
     "0_legacy_tableblock_boundary": "PASS",
     "1_textcontainer_foundation": "PASS",
@@ -11,21 +11,20 @@
     "4_normal_debug_split": "PASS",
     "5_true_infinite_canvas": "PASS",
     "6_lasso_multiselect_group_move": "PASS",
-    "7_spen_inking_preservation": "PASS",
+    "7_spen_inking_preservation": "PASS_WITH_DEVICE_VERIFICATION_REQUIRED",
     "8_rich_content_image_formula": "PASS",
     "9_layout_preserving_export": "PASS",
     "10_release_artifact_policy": "PASS",
     "11_final_audit": "PASS"
   },
-  "validation_policy": {
-    "run_assembleDebug_after_each_milestone": true,
-    "run_testDebugUnitTest_after_each_milestone": true,
-    "commit_after_each_milestone": true,
-    "continue_automatically": true
-  },
-  "last_known_validation": {
+  "validation": {
     "assembleDebug": "PASS",
     "testDebugUnitTest": "PASS"
   },
+  "non_blocking_caveats": [
+    "Physical Samsung S Pen tactile validation pending.",
+    "Visual debt from Milestone 3 intentionally deferred.",
+    "Signed-release installability depends on external signing secrets."
+  ],
   "blockers": []
 }
