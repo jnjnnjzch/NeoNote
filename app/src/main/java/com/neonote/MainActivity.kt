@@ -49,12 +49,15 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.neonote.engine.InputMode
+import com.neonote.engine.InkStrokeWidthMapper
 import com.neonote.engine.InputRouter
 import com.neonote.engine.PointerEventType
+import com.neonote.engine.toPlainText
 import com.neonote.input.AndroidPointerSnapshot
 import com.neonote.input.ComposeInputAdapter
 import com.neonote.input.InputDiagnostics
@@ -64,8 +67,6 @@ import com.neonote.model.CanvasObject
 import com.neonote.model.CanvasPoint
 import com.neonote.model.InkLayer as ModelInkLayer
 import com.neonote.model.InkStroke
-import com.neonote.model.InlineText
-import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContentBox
 import kotlin.math.roundToInt
 
@@ -211,7 +212,7 @@ private fun InkLayer(
                     color = Color(0xFF0F172A),
                     start = Offset(start.x, start.y),
                     end = Offset(end.x, end.y),
-                    strokeWidth = 3f,
+                    strokeWidth = InkStrokeWidthMapper.widthForPressure((start.pressure + end.pressure) / 2f),
                     cap = StrokeCap.Round,
                 )
             }
@@ -246,8 +247,11 @@ private fun RichContentBoxView(
 ) {
     val density = LocalDensity.current
     val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(box.isFocused, selectionMode) {
-        if (box.isFocused && !selectionMode) {
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(box.isFocused, selectionMode, selected) {
+        if (selectionMode || selected) {
+            focusManager.clearFocus()
+        } else if (box.isFocused) {
             focusRequester.requestFocus()
         }
     }
@@ -268,9 +272,9 @@ private fun RichContentBoxView(
 
     Box(modifier = modifier.padding(8.dp)) {
         TextField(
-            value = box.plainText(),
+            value = box.toPlainText(),
             onValueChange = { controller.updateRichContentText(box.id, it) },
-            enabled = !selectionMode,
+            enabled = !selectionMode && !selected,
             modifier = Modifier
                 .fillMaxSize()
                 .focusRequester(focusRequester),
@@ -382,16 +386,4 @@ private fun routePointerEvent(
         event = inputEvent,
         mode = if (selectionMode) InputMode.Selection else InputMode.Write,
     )
-}
-
-private fun RichContentBox.plainText(): String = content.blocks.joinToString("\n") { block ->
-    when (block) {
-        is ParagraphNode -> block.inlines.joinToString("") { inline ->
-            when (inline) {
-                is InlineText -> inline.text
-                else -> ""
-            }
-        }
-        else -> ""
-    }
 }

@@ -27,8 +27,8 @@ class InputRouterTest {
         val result = router.route(canvas, event)
 
         val action = assertIs<InputAction.ContinueInk>(result.action)
-        assertEquals(CanvasPoint(4f, 5f), action.position)
-        assertEquals(0.75f, action.pressure)
+        assertEquals(CanvasPoint(4f, 5f), action.samples.single().position)
+        assertEquals(0.75f, action.samples.single().pressure)
     }
 
     @Test

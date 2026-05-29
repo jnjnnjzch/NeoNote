@@ -15,5 +15,8 @@ data class InkStroke(
 data class InkPoint(
     val x: Float,
     val y: Float,
+    /** Normalized pressure used by renderers, in the 0..1 range. */
     val pressure: Float = 1f,
+    /** Original hardware pressure before normalization, when available. */
+    val rawPressure: Float? = null,
 )

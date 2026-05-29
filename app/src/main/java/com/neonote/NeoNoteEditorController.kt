@@ -14,9 +14,13 @@ import com.neonote.engine.InkEngine
 import com.neonote.engine.InkSession
 import com.neonote.engine.InputAction
 import com.neonote.engine.InputEvent
+import com.neonote.engine.InputInkSample
 import com.neonote.engine.InputMode
 import com.neonote.engine.InputRouteResult
 import com.neonote.engine.InputRouter
+import com.neonote.engine.RichContentCommand
+import com.neonote.engine.RichContentCommandResult
+import com.neonote.engine.RichContentEngine
 import com.neonote.engine.SelectionCommand
 import com.neonote.engine.SelectionCommandResult
 import com.neonote.engine.SelectionEngine
@@ -30,11 +34,8 @@ import com.neonote.model.EditorTool
 import com.neonote.model.InfiniteCanvas
 import com.neonote.model.InkPoint
 import com.neonote.model.InkStroke
-import com.neonote.model.InkStrokeRef
-import com.neonote.model.InlineText
 import com.neonote.model.NeoNoteDocument
 import com.neonote.model.NotePage
-import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
 import com.neonote.model.SelectionState
@@ -54,6 +55,7 @@ public class NeoNoteEditorController(
     private val canvasEngine: CanvasEngine = CanvasEngine(),
     private val selectionEngine: SelectionEngine = SelectionEngine(),
     private val inkEngine: InkEngine = InkEngine(SequentialIdGenerator()),
+    private val richContentEngine: RichContentEngine = RichContentEngine(),
 ) {
     public var state: EditorState by mutableStateOf(initialState)
         private set
@@ -87,8 +89,10 @@ public class NeoNoteEditorController(
     ): InputRouteResult {
         val result = router.route(canvas = currentCanvas, event = event, mode = mode)
         when (val action = result.action) {
-            is InputAction.BeginInk -> beginInk(action.position, action.pressure)
-            is InputAction.ContinueInk -> continueInk(action.position, action.pressure)
+            is InputAction.BeginInk -> beginInk(action.position, action.pressure, action.rawPressure)
+            is InputAction.ContinueInk -> continueInk(action.samples)
+            InputAction.EndInteraction -> endInkIfActive()
+            InputAction.CancelInteraction -> cancelInkIfActive()
             is InputAction.PanBy -> panViewportBy(action.dx, action.dy)
             is InputAction.CreateOrFocusRichContentBox -> focusOrCreateRichContentBox(screenToDocument(action.position))
             is InputAction.FocusExisting -> action.objectId?.let(::focusRichContentBox)
@@ -102,8 +106,8 @@ public class NeoNoteEditorController(
     }
 
 
-    private fun beginInk(screenPosition: CanvasPoint, pressure: Float) {
-        val point = screenPosition.toInkPoint(pressure)
+    private fun beginInk(screenPosition: CanvasPoint, pressure: Float, rawPressure: Float?) {
+        val point = screenPosition.toInkPoint(pressure, rawPressure)
         val result = inkEngine.execute(
             session = InkSession.fromCanvas(currentCanvas),
             command = InkCommand.BeginStroke(point),
@@ -111,13 +115,15 @@ public class NeoNoteEditorController(
         inkSession = result.session
     }
 
-    private fun continueInk(screenPosition: CanvasPoint, pressure: Float) {
+    private fun continueInk(samples: List<InputInkSample>) {
         if (inkSession.activeStroke == null) return
-        val result = inkEngine.execute(
-            session = inkSession,
-            command = InkCommand.AppendPoint(screenPosition.toInkPoint(pressure)),
-        ) as InkCommandResult.PointAppended
-        inkSession = result.session
+        samples.forEach { sample ->
+            val result = inkEngine.execute(
+                session = inkSession,
+                command = InkCommand.AppendPoint(sample.position.toInkPoint(sample.pressure, sample.rawPressure)),
+            ) as InkCommandResult.PointAppended
+            inkSession = result.session
+        }
     }
 
     private fun endInkIfActive() {
@@ -133,9 +139,14 @@ public class NeoNoteEditorController(
         inkSession = result.session
     }
 
-    private fun CanvasPoint.toInkPoint(pressure: Float): InkPoint {
+    private fun CanvasPoint.toInkPoint(pressure: Float, rawPressure: Float?): InkPoint {
         val documentPosition = screenToDocument(this)
-        return InkPoint(x = documentPosition.x, y = documentPosition.y, pressure = pressure)
+        return InkPoint(
+            x = documentPosition.x,
+            y = documentPosition.y,
+            pressure = pressure,
+            rawPressure = rawPressure,
+        )
     }
 
     private fun commitInkLayer(inkLayer: com.neonote.model.InkLayer) {
@@ -146,7 +157,7 @@ public class NeoNoteEditorController(
     public fun setSelectionMode(enabled: Boolean) {
         state = state.copy(
             currentTool = if (enabled) EditorTool.Selection else EditorTool.Text,
-            focusedRichContentBoxId = if (enabled) null else state.focusedRichContentBoxId,
+            focusedRichContentBoxId = null,
             selection = if (enabled) state.selection else SelectionState(),
             document = state.document.withCanvas(currentCanvas.setFocusedRichContentBox(null)),
         )
@@ -186,7 +197,7 @@ public class NeoNoteEditorController(
             position = documentPosition,
             size = CanvasSize(DefaultBoxWidth, DefaultBoxHeight),
             zIndex = (currentCanvas.objects.maxOfOrNull { it.zIndex } ?: 0) + 1,
-            content = RichContent(blocks = listOf(ParagraphNode(inlines = listOf(InlineText(""))))),
+            content = RichContent(),
             isFocused = true,
         )
         val added = canvasEngine.execute(currentCanvas, CanvasCommand.AddObject(box)) as CanvasCommandResult.ObjectAdded
@@ -208,15 +219,15 @@ public class NeoNoteEditorController(
     }
 
     public fun updateRichContentText(boxId: String, text: String) {
-        val updatedCanvas = currentCanvas.copy(
-            objects = currentCanvas.objects.map { canvasObject ->
-                if (canvasObject.id == boxId && canvasObject is RichContentBox) {
-                    canvasObject.copy(content = RichContent(blocks = listOf(ParagraphNode(inlines = listOf(InlineText(text))))))
-                } else {
-                    canvasObject
-                }
-            },
-        )
+        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+
+        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val result = richContentEngine.execute(
+                box = box,
+                command = RichContentCommand.ReplacePlainText(text),
+            ) as RichContentCommandResult.ContentReplaced
+            result.box
+        }
         state = state.copy(document = state.document.withCanvas(updatedCanvas))
     }
 
@@ -366,6 +377,14 @@ public fun createTestEditorState(): EditorState = EditorState(
     currentTool = EditorTool.Text,
 )
 
+private fun InfiniteCanvas.updateRichContentBox(
+    boxId: String,
+    edit: (RichContentBox) -> RichContentBox,
+): InfiniteCanvas = copy(
+    objects = objects.map { canvasObject ->
+        if (canvasObject.id == boxId && canvasObject is RichContentBox) edit(canvasObject) else canvasObject
+    },
+)
 
 public fun InfiniteCanvas.topMostObjectAt(position: CanvasPoint): CanvasObject? = objects
     .sortedWith(compareBy<CanvasObject> { it.zIndex }.thenBy { it.id })
