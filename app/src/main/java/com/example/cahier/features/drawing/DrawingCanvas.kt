@@ -858,6 +858,9 @@ private fun DrawingSurfaceWithTarget(
                     onInlineTableCellFocused(it)
                 },
                 onInlineTableAppendRow = drawingCanvasViewModel::appendInlineTableRow,
+                onContainerFocused = { focused ->
+                    if (focused) drawingCanvasViewModel.setFocusedBlockId(container.id)
+                },
                 onInlineToggleBold = drawingCanvasViewModel::toggleInlineTableCellBold,
                 onInlineToggleItalic = drawingCanvasViewModel::toggleInlineTableCellItalic,
                 onInlineToggleUnderline = drawingCanvasViewModel::toggleInlineTableCellUnderline,
@@ -990,6 +993,7 @@ private fun TextContainerEditor(
     onInlineTableCellChange: (Int, Int, String) -> Unit,
     onInlineCellFocused: (Pair<Int, Int>?) -> Unit,
     onInlineTableAppendRow: () -> Unit,
+    onContainerFocused: (Boolean) -> Unit = {},
     onInlineToggleBold: (Int, Int) -> Unit,
     onInlineToggleItalic: (Int, Int) -> Unit,
     onInlineToggleUnderline: (Int, Int) -> Unit,
@@ -1040,7 +1044,10 @@ private fun TextContainerEditor(
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusRequester(paragraphBeforeFocusRequester)
-                    .onFocusChanged { containerFocused = it.isFocused || containerFocused }
+                    .onFocusChanged {
+                        containerFocused = it.isFocused || containerFocused
+                        if (it.isFocused) onContainerFocused(true)
+                    }
                     .testTag("tc-paragraph-before")
             )
             if (tableNode == null) {
@@ -1051,7 +1058,10 @@ private fun TextContainerEditor(
                 InlineTableNodeEditor(
                     table = tableNode,
                     onCellChange = onInlineTableCellChange,
-                    onSelectCell = { r, c -> onInlineCellFocused(r to c) },
+                    onSelectCell = { r, c ->
+                        onContainerFocused(true)
+                        onInlineCellFocused(r to c)
+                    },
                     onToggleBold = onInlineToggleBold,
                     onToggleItalic = onInlineToggleItalic,
                     onToggleUnderline = onInlineToggleUnderline,
@@ -1068,7 +1078,10 @@ private fun TextContainerEditor(
                 singleLine = false,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .onFocusChanged { containerFocused = it.isFocused || containerFocused }
+                    .onFocusChanged {
+                        containerFocused = it.isFocused || containerFocused
+                        if (it.isFocused) onContainerFocused(true)
+                    }
                     .testTag("tc-paragraph-after")
             )
         }
@@ -1485,6 +1498,7 @@ private fun TextContainerParagraphPreview() {
             onInlineTableCellChange = { _, _, _ -> },
             onInlineCellFocused = {},
             onInlineTableAppendRow = {},
+            onContainerFocused = {},
             onInlineToggleBold = { _, _ -> },
             onInlineToggleItalic = { _, _ -> },
             onInlineToggleUnderline = { _, _ -> },
@@ -1530,6 +1544,7 @@ private fun TextContainerInlineTablePreview() {
             onInlineTableCellChange = { _, _, _ -> },
             onInlineCellFocused = {},
             onInlineTableAppendRow = {},
+            onContainerFocused = {},
             onInlineToggleBold = { _, _ -> },
             onInlineToggleItalic = { _, _ -> },
             onInlineToggleUnderline = { _, _ -> },

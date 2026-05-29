@@ -105,7 +105,6 @@ enum class AppDestinations(
 )
 @Composable
 fun HomePane(
-    navigateToCanvas: (Long) -> Unit,
     navigateToDrawingCanvas: (Long) -> Unit,
     navigateToBrushDesigner: () -> Unit = {},
     navigateToBrushGraph: () -> Unit = {},
@@ -181,7 +180,6 @@ fun HomePane(
         noteList = noteList,
         isCompact = isCompact,
         selectedNoteUIState = selectedNoteUIState,
-        navigateToCanvas = navigateToCanvas,
         navigateToDrawingCanvas = navigateToDrawingCanvas,
         navigateToDebugDrawingCanvas = navigateToDebugDrawingCanvas,
         navigateToBrushDesigner = navigateToBrushDesigner,
@@ -208,7 +206,6 @@ private fun CahierNavigationSuite(
     noteList: NoteListUiState,
     isCompact: Boolean,
     selectedNoteUIState: CahierUiState,
-    navigateToCanvas: (Long) -> Unit,
     navigateToDrawingCanvas: (Long) -> Unit,
     navigateToDebugDrawingCanvas: (Long) -> Unit,
     navigateToBrushDesigner: () -> Unit,
@@ -296,35 +293,6 @@ private fun CahierNavigationSuite(
                                 onToggleFavorite = { noteId ->
                                     homeScreenViewModel.toggleFavorite(noteId)
                                 },
-                                onOpenLastNote = {
-                                    val latest = noteList.noteList.maxByOrNull { it.id }
-                                    latest?.let { note -> navigateToDrawingCanvas(note.id) }
-                                },
-                                onStressTest = {
-                                    val drawing = noteList.noteList
-                                        .filter { it.type == NoteType.Drawing }
-                                        .maxByOrNull { it.id }
-                                    if (drawing != null) {
-                                        navigateToDebugDrawingCanvas(drawing.id)
-                                    } else {
-                                        homeScreenViewModel.addUnifiedNote { noteId ->
-                                            navigateToDebugDrawingCanvas(noteId)
-                                        }
-                                    }
-                                },
-                                onExportTest = {
-                                    val drawing = noteList.noteList
-                                        .filter { it.type == NoteType.Drawing }
-                                        .maxByOrNull { it.id }
-                                    if (drawing != null) {
-                                        navigateToDebugDrawingCanvas(drawing.id)
-                                    } else {
-                                        homeScreenViewModel.addUnifiedNote { noteId ->
-                                            navigateToDebugDrawingCanvas(noteId)
-                                        }
-                                    }
-                                },
-                                onBuildInfo = { onDestinationChanged(AppDestinations.DebugCenter) },
                                 showDebugControls = appMode == AppMode.DEBUG,
                                 onNewWindow = { note ->
                                     homeScreenViewModel.openInNewWindow(note)
@@ -358,67 +326,35 @@ private fun CahierNavigationSuite(
                     )
                 }
                 AppDestinations.DebugCenter -> {
+                    val openLatestDrawingInDebug = {
+                        val drawing = noteList.noteList
+                            .filter { it.type == NoteType.Drawing }
+                            .maxByOrNull { it.id }
+                        if (drawing != null) {
+                            navigateToDebugDrawingCanvas(drawing.id)
+                        } else {
+                            homeScreenViewModel.addUnifiedNote { noteId ->
+                                navigateToDebugDrawingCanvas(noteId)
+                            }
+                        }
+                    }
                     DebugCenterScreen(
                         onOpenBuildInfo = { onDestinationChanged(AppDestinations.Settings) },
-                        onOpenSPenMetrics = {
-                            val drawing = noteList.noteList
-                                .filter { it.type == NoteType.Drawing }
-                                .maxByOrNull { it.id }
-                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
-                        },
-                        onOpenPressureTest = {
-                            val drawing = noteList.noteList
-                                .filter { it.type == NoteType.Drawing }
-                                .maxByOrNull { it.id }
-                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
-                        },
-                        onOpenStrokeLatencyLab = {
-                            val drawing = noteList.noteList
-                                .filter { it.type == NoteType.Drawing }
-                                .maxByOrNull { it.id }
-                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
-                        },
-                        onOpenCanvasTransformLab = {
-                            val drawing = noteList.noteList
-                                .filter { it.type == NoteType.Drawing }
-                                .maxByOrNull { it.id }
-                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
-                        },
+                        onOpenDebugDrawing = openLatestDrawingInDebug,
+                        onOpenSPenMetrics = openLatestDrawingInDebug,
+                        onOpenPressureTest = openLatestDrawingInDebug,
+                        onOpenStrokeLatencyLab = openLatestDrawingInDebug,
+                        onOpenCanvasTransformLab = openLatestDrawingInDebug,
                         onOpenTextContainerTableLab = {
                             homeScreenViewModel.addTableInkNote { noteId ->
                                 navigateToDebugDrawingCanvas(noteId)
                             }
                         },
-                        onOpenImagePasteLab = {
-                            val drawing = noteList.noteList
-                                .filter { it.type == NoteType.Drawing }
-                                .maxByOrNull { it.id }
-                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
-                        },
-                        onOpenLatexLab = {
-                            val drawing = noteList.noteList
-                                .filter { it.type == NoteType.Drawing }
-                                .maxByOrNull { it.id }
-                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
-                        },
-                        onOpenExportLab = {
-                            val drawing = noteList.noteList
-                                .filter { it.type == NoteType.Drawing }
-                                .maxByOrNull { it.id }
-                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
-                        },
-                        onOpenStressGenerator = {
-                            val drawing = noteList.noteList
-                                .filter { it.type == NoteType.Drawing }
-                                .maxByOrNull { it.id }
-                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
-                        },
-                        onOpenRawDocumentInspector = {
-                            val drawing = noteList.noteList
-                                .filter { it.type == NoteType.Drawing }
-                                .maxByOrNull { it.id }
-                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
-                        },
+                        onOpenImagePasteLab = openLatestDrawingInDebug,
+                        onOpenLatexLab = openLatestDrawingInDebug,
+                        onOpenExportLab = openLatestDrawingInDebug,
+                        onOpenStressGenerator = openLatestDrawingInDebug,
+                        onOpenRawDocumentInspector = openLatestDrawingInDebug,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -437,10 +373,6 @@ private fun ListPaneContent(
     onNoteClick: (Note) -> Unit,
     onAddNewNote: () -> Unit,
     onToggleFavorite: (Long) -> Unit,
-    onOpenLastNote: () -> Unit,
-    onStressTest: () -> Unit,
-    onExportTest: () -> Unit,
-    onBuildInfo: () -> Unit,
     showDebugControls: Boolean,
     modifier: Modifier = Modifier,
     onDeleteNote: (Note) -> Unit,
@@ -458,10 +390,6 @@ private fun ListPaneContent(
         onDeleteNote = onDeleteNote,
         onToggleFavorite = onToggleFavorite,
         onNewWindow = onNewWindow,
-        onOpenLastNote = onOpenLastNote,
-        onStressTest = onStressTest,
-        onExportTest = onExportTest,
-        onBuildInfo = onBuildInfo,
         showDebugControls = showDebugControls,
         modifier = modifier.testTag("List")
     )

@@ -92,10 +92,6 @@ fun NoteList(
     onNoteClick: (Note) -> Unit,
     onToggleFavorite: (Long) -> Unit,
     onNewWindow: (Note) -> Unit,
-    onOpenLastNote: () -> Unit,
-    onStressTest: () -> Unit,
-    onExportTest: () -> Unit,
-    onBuildInfo: () -> Unit,
     showDebugControls: Boolean,
     modifier: Modifier = Modifier,
     onDeleteNote: (Note) -> Unit = {},
@@ -136,25 +132,7 @@ fun NoteList(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedButton(onClick = onAddNewNote, modifier = Modifier.testTag("btn-new-note")) {
-                        Text("New Note")
-                    }
-                }
-                if (showDebugControls) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(onClick = onStressTest, modifier = Modifier.testTag("btn-stress-test")) {
-                            Text(stringResource(R.string.stress_test))
-                        }
-                        OutlinedButton(onClick = onExportTest, modifier = Modifier.testTag("btn-export-test")) {
-                            Text(stringResource(R.string.export_test))
-                        }
-                        OutlinedButton(onClick = onBuildInfo, modifier = Modifier.testTag("btn-build-info")) {
-                            Text(stringResource(R.string.build_info))
-                        }
+                        Text("新建笔记")
                     }
                 }
                 NoteListContent(
@@ -614,10 +592,6 @@ fun NoteListPreview(
             onNoteClick = {},
             onToggleFavorite = {},
             onNewWindow = {},
-            onOpenLastNote = {},
-            onStressTest = {},
-            onExportTest = {},
-            onBuildInfo = {},
             showDebugControls = true,
             onDeleteNote = {},
             modifier = modifier

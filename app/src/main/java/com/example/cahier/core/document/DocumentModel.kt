@@ -30,6 +30,7 @@ data class CanvasPage(
     val inkLayer: InkLayerRef = InkLayerRef(),
     val strokeIds: List<String> = emptyList(),
     val strokeAnchors: List<StrokeAnchor> = emptyList(),
+    val strokeTransforms: List<StrokeTransform> = emptyList(),
 )
 
 @Serializable
@@ -47,6 +48,14 @@ data class StrokeAnchor(
     val endStrokeIndexInclusive: Int? = null,
     val anchorOriginX: Float,
     val anchorOriginY: Float,
+)
+
+
+@Serializable
+data class StrokeTransform(
+    val strokeId: String,
+    val translateX: Float = 0f,
+    val translateY: Float = 0f,
 )
 
 @Serializable
