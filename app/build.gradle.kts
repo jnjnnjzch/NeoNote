@@ -3,6 +3,7 @@ import org.gradle.api.tasks.testing.Test
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 android {
@@ -29,6 +30,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

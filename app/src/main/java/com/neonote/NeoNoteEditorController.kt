@@ -18,6 +18,8 @@ import com.neonote.engine.InputInkSample
 import com.neonote.engine.InputMode
 import com.neonote.engine.InputRouteResult
 import com.neonote.engine.InputRouter
+import com.neonote.engine.PersistenceResult
+import com.neonote.engine.PersistenceStore
 import com.neonote.engine.RichContentCommand
 import com.neonote.engine.RichContentCommandResult
 import com.neonote.engine.RichContentEngine
@@ -66,6 +68,9 @@ public class NeoNoteEditorController(
     public var inkSession: InkSession by mutableStateOf(InkSession.fromCanvas(currentCanvas))
         private set
 
+    public var persistenceStatus: String by mutableStateOf("Not saved")
+        private set
+
     public val activeInkStroke: InkStroke?
         get() = inkSession.activeStroke
 
@@ -77,6 +82,36 @@ public class NeoNoteEditorController(
     private val currentPage: NotePage
         get() = state.document.pages.first { it.id == state.currentPageId }
 
+
+
+    public suspend fun saveDocument(store: PersistenceStore): PersistenceResult.Saved {
+        val saved = store.save(state.document)
+        persistenceStatus = "Saved ${saved.documentId} at revision ${saved.revision}"
+        return saved
+    }
+
+    public suspend fun loadDocument(
+        store: PersistenceStore,
+        documentId: String = state.document.id,
+    ): PersistenceResult.Loaded {
+        val loaded = store.load(documentId)
+        val document = loaded.document
+        if (document == null) {
+            persistenceStatus = "No local document found for $documentId"
+            return loaded
+        }
+
+        val nextPageId = document.pages.firstOrNull()?.id
+        state = state.copy(
+            document = document,
+            currentPageId = nextPageId,
+            focusedRichContentBoxId = null,
+            selection = SelectionState(),
+        )
+        inkSession = document.pages.firstOrNull()?.canvas?.let(InkSession::fromCanvas) ?: InkSession()
+        persistenceStatus = "Loaded ${document.id} at revision ${document.revision}"
+        return loaded
+    }
 
     public fun updateInputDiagnostics(diagnostics: InputDiagnostics) {
         inputDiagnostics = diagnostics

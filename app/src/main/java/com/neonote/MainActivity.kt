@@ -25,6 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -48,13 +49,15 @@ import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.neonote.engine.InputMode
 import com.neonote.engine.InkStrokeWidthMapper
+import com.neonote.engine.InputMode
+import com.neonote.engine.JsonFilePersistenceStore
 import com.neonote.engine.InputRouter
 import com.neonote.engine.PointerEventType
 import com.neonote.engine.toPlainText
@@ -69,6 +72,7 @@ import com.neonote.model.InkLayer as ModelInkLayer
 import com.neonote.model.InkStroke
 import com.neonote.model.RichContentBox
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 public class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,13 +94,19 @@ public fun NeoNoteApp(controller: NeoNoteEditorController = remember { NeoNoteEd
 private fun NeoNoteEditorScreen(controller: NeoNoteEditorController) {
     val state = controller.state
     val selectionMode = state.currentTool == com.neonote.model.EditorTool.Selection
+    val context = LocalContext.current
+    val persistenceStore = remember(context) { JsonFilePersistenceStore(context.filesDir.resolve("documents")) }
+    val coroutineScope = rememberCoroutineScope()
     Column(modifier = Modifier.fillMaxSize()) {
         EditorToolbar(
             title = state.document.title,
             selectionMode = selectionMode,
             viewportLabel = "pan=(${state.viewport.panOffsetX.roundToInt()}, ${state.viewport.panOffsetY.roundToInt()}) zoom=${"%.2f".format(state.viewport.zoomScale)}x",
             diagnosticsLabel = controller.inputDiagnostics.asToolbarText(),
+            persistenceStatus = controller.persistenceStatus,
             onToggleSelectionMode = { controller.setSelectionMode(!selectionMode) },
+            onSave = { coroutineScope.launch { controller.saveDocument(persistenceStore) } },
+            onLoad = { coroutineScope.launch { controller.loadDocument(persistenceStore) } },
         )
         InfiniteCanvasViewport(
             controller = controller,
@@ -112,7 +122,10 @@ private fun EditorToolbar(
     selectionMode: Boolean,
     viewportLabel: String,
     diagnosticsLabel: String,
+    persistenceStatus: String,
     onToggleSelectionMode: () -> Unit,
+    onSave: () -> Unit,
+    onLoad: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -125,8 +138,15 @@ private fun EditorToolbar(
             Text(text = title, fontWeight = FontWeight.SemiBold, color = Color(0xFF0F172A))
             Text(text = viewportLabel, style = MaterialTheme.typography.bodySmall, color = Color(0xFF64748B))
             Text(text = diagnosticsLabel, style = MaterialTheme.typography.bodySmall, color = Color(0xFF475569))
+            Text(text = persistenceStatus, style = MaterialTheme.typography.bodySmall, color = Color(0xFF0369A1))
         }
-        Button(onClick = onToggleSelectionMode) {
+        Button(onClick = onSave) {
+            Text("Save")
+        }
+        Button(onClick = onLoad, modifier = Modifier.padding(start = 8.dp)) {
+            Text("Load")
+        }
+        Button(onClick = onToggleSelectionMode, modifier = Modifier.padding(start = 8.dp)) {
             Text(if (selectionMode) "Selection: ON" else "Selection: OFF")
         }
     }

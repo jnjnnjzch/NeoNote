@@ -1,8 +1,12 @@
 package com.neonote.model
 
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
 /**
  * A point in the shared infinite canvas coordinate system.
  */
+@Serializable
 data class CanvasPoint(
     val x: Float,
     val y: Float,
@@ -15,6 +19,7 @@ data class CanvasPoint(
 /**
  * A two-dimensional size in infinite canvas units.
  */
+@Serializable
 data class CanvasSize(
     val width: Float,
     val height: Float,
@@ -53,6 +58,7 @@ data class CanvasRect(
  * shared infinite-canvas coordinate system. Canvas objects deliberately do not
  * expose any parallel coordinate state.
  */
+@Serializable
 sealed interface CanvasObject {
     val id: String
     val position: CanvasPoint
@@ -65,6 +71,8 @@ sealed interface CanvasObject {
 /**
  * Rich text/content container placed on the canvas.
  */
+@Serializable
+@SerialName("richContentBox")
 data class RichContentBox(
     override val id: String,
     override val position: CanvasPoint = CanvasPoint.Zero,
@@ -77,6 +85,8 @@ data class RichContentBox(
 /**
  * Floating image object placed directly on the canvas.
  */
+@Serializable
+@SerialName("floatingImage")
 data class FloatingImage(
     override val id: String,
     override val position: CanvasPoint = CanvasPoint.Zero,
