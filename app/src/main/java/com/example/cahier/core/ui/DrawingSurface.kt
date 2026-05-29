@@ -21,6 +21,7 @@ package com.example.cahier.core.ui
 import android.annotation.SuppressLint
 import android.graphics.Matrix
 import android.view.MotionEvent
+import android.view.ViewConfiguration
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -43,6 +44,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.withSaveLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInteropFilter
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.core.graphics.withSave
@@ -55,6 +57,51 @@ import androidx.ink.strokes.Stroke
 import coil3.compose.AsyncImage
 import com.example.cahier.core.utils.pointerInputWithSiblingFallthrough
 import com.example.cahier.features.drawing.CanvasTransform
+import kotlin.math.hypot
+
+enum class DrawingInputRoute {
+    StylusInk,
+    FingerPanZoom,
+    FingerTapToFocus,
+    Selection,
+    Eraser
+}
+
+data class DrawingInputRoutingConfig(
+    val stylusWritesByDefault: Boolean = true,
+    val fingerPansByDefault: Boolean = true,
+    val isSelectionMode: Boolean = false,
+    val isEraserMode: Boolean = false
+)
+
+object DrawingInputRouter {
+    fun routeFor(event: MotionEvent, config: DrawingInputRoutingConfig): DrawingInputRoute {
+        if (config.isSelectionMode) return DrawingInputRoute.Selection
+        if (config.isEraserMode) return DrawingInputRoute.Eraser
+        val toolType = event.getToolType(event.actionIndex.coerceAtMost(event.pointerCount - 1))
+        return when (toolType) {
+            MotionEvent.TOOL_TYPE_FINGER -> {
+                if (config.fingerPansByDefault) {
+                    DrawingInputRoute.FingerPanZoom
+                } else {
+                    DrawingInputRoute.FingerTapToFocus
+                }
+            }
+
+            MotionEvent.TOOL_TYPE_STYLUS -> {
+                if (config.stylusWritesByDefault) {
+                    DrawingInputRoute.StylusInk
+                } else {
+                    DrawingInputRoute.FingerPanZoom
+                }
+            }
+
+            MotionEvent.TOOL_TYPE_ERASER -> DrawingInputRoute.Eraser
+
+            else -> DrawingInputRoute.StylusInk
+        }
+    }
+}
 
 @SuppressLint("RestrictedApi", "VisibleForTests")
 @Composable
@@ -78,10 +125,20 @@ fun DrawingSurface(
     onMoveSelection: (Float, Float) -> Unit = { _, _ -> },
     onRawMotionEvent: (MotionEvent) -> Unit = {},
     onFingerTap: (Float, Float) -> Unit = { _, _ -> },
-    consumeFingerInkInput: Boolean = true,
+    inputRoutingConfig: DrawingInputRoutingConfig = DrawingInputRoutingConfig(
+        isSelectionMode = isSelectionMode,
+        isEraserMode = isEraserMode
+    ),
     modifier: Modifier = Modifier,
 ) {
     val textureStore = LocalTextureStore.current
+    val viewConfiguration = ViewConfiguration.get(LocalContext.current)
+    val fingerTapSlop = viewConfiguration.scaledTouchSlop.toFloat()
+    val fingerTapTimeoutMillis = ViewConfiguration.getTapTimeout().toLong()
+    var fingerTapDownX by remember { mutableStateOf(0f) }
+    var fingerTapDownY by remember { mutableStateOf(0f) }
+    var fingerTapDownTimeMillis by remember { mutableStateOf(0L) }
+    var fingerTapCandidate by remember { mutableStateOf(false) }
     Box(modifier = modifier) {
         backgroundImageUri?.let {
             AsyncImage(
@@ -97,11 +154,36 @@ fun DrawingSurface(
                 .fillMaxSize()
                 .pointerInteropFilter { event ->
                     onRawMotionEvent(event)
-                    val isFinger = event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER
-                    if (isFinger && event.actionMasked == MotionEvent.ACTION_UP) {
-                        onFingerTap(event.x, event.y)
+                    val route = DrawingInputRouter.routeFor(event, inputRoutingConfig)
+                    if (route == DrawingInputRoute.FingerTapToFocus) {
+                        when (event.actionMasked) {
+                            MotionEvent.ACTION_DOWN -> {
+                                fingerTapDownX = event.x
+                                fingerTapDownY = event.y
+                                fingerTapDownTimeMillis = event.eventTime
+                                fingerTapCandidate = true
+                            }
+
+                            MotionEvent.ACTION_POINTER_DOWN -> fingerTapCandidate = false
+                            MotionEvent.ACTION_MOVE -> {
+                                if (hypot(event.x - fingerTapDownX, event.y - fingerTapDownY) > fingerTapSlop) {
+                                    fingerTapCandidate = false
+                                }
+                            }
+
+                            MotionEvent.ACTION_UP -> {
+                                val moved = hypot(event.x - fingerTapDownX, event.y - fingerTapDownY)
+                                val duration = event.eventTime - fingerTapDownTimeMillis
+                                if (fingerTapCandidate && moved <= fingerTapSlop && duration <= fingerTapTimeoutMillis) {
+                                    onFingerTap(event.x, event.y)
+                                }
+                                fingerTapCandidate = false
+                            }
+
+                            MotionEvent.ACTION_CANCEL -> fingerTapCandidate = false
+                        }
                     }
-                    consumeFingerInkInput && isFinger && !isSelectionMode && !isEraserMode
+                    route == DrawingInputRoute.FingerTapToFocus
                 }
         ) {
             val canvas = drawContext.canvas.nativeCanvas

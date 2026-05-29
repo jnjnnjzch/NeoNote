@@ -24,6 +24,7 @@ import android.net.Uri
 import android.view.KeyEvent as AndroidKeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -110,6 +111,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.cahier.R
 import com.example.cahier.core.ui.ColorPickerDialog
 import com.example.cahier.core.ui.ConfirmationDialog
+import com.example.cahier.core.ui.DrawingInputRoute
+import com.example.cahier.core.ui.DrawingInputRouter
+import com.example.cahier.core.ui.DrawingInputRoutingConfig
 import com.example.cahier.core.ui.DrawingSurface
 import com.example.cahier.core.ui.FocusedFieldEnum
 import com.example.cahier.core.ui.LocalTextureStore
@@ -130,7 +134,81 @@ import com.example.cahier.features.drawing.CanvasTransformMapper.screenToDocDelt
 import com.example.cahier.features.home.AppMode
 import com.example.cahier.features.drawing.viewmodel.DrawingCanvasViewModel
 import coil3.compose.AsyncImage
+import kotlin.math.hypot
 
+internal data class FingerTapThresholds(
+    val touchSlop: Float,
+    val maxDurationMillis: Long = ViewConfiguration.getTapTimeout().toLong()
+)
+
+internal class FingerTapGestureTracker(
+    private val thresholds: FingerTapThresholds
+) {
+    private var downX = 0f
+    private var downY = 0f
+    private var downTimeMillis = 0L
+    private var tapCandidate = false
+
+    fun onDown(x: Float, y: Float, eventTimeMillis: Long) {
+        downX = x
+        downY = y
+        downTimeMillis = eventTimeMillis
+        tapCandidate = true
+    }
+
+    fun onMove(x: Float, y: Float) {
+        if (hypot(x - downX, y - downY) > thresholds.touchSlop) {
+            tapCandidate = false
+        }
+    }
+
+    fun onMultiPointerGesture() {
+        tapCandidate = false
+    }
+
+    fun onUp(x: Float, y: Float, eventTimeMillis: Long): Boolean {
+        onMove(x, y)
+        val isTap = tapCandidate && eventTimeMillis - downTimeMillis <= thresholds.maxDurationMillis
+        tapCandidate = false
+        return isTap
+    }
+
+    fun onCancel() {
+        tapCandidate = false
+    }
+}
+
+internal fun routeForDrawingCanvasFingerEvent(
+    event: MotionEvent,
+    config: DrawingInputRoutingConfig
+): DrawingInputRoute = DrawingInputRouter.routeFor(event, config)
+
+internal sealed interface FingerTapTextTarget {
+    data object FocusExisting : FingerTapTextTarget
+    data class PlaceAt(val docX: Float, val docY: Float) : FingerTapTextTarget
+}
+
+internal fun resolveFingerTapTextTarget(
+    sx: Float,
+    sy: Float,
+    textContainer: TextContainerBlock?,
+    canvasTransform: CanvasTransform
+): FingerTapTextTarget {
+    val container = textContainer
+    if (container != null) {
+        val left = docToScreenX(container.x, canvasTransform)
+        val top = docToScreenY(container.y, canvasTransform)
+        val right = left + (container.width * canvasTransform.scale)
+        val bottom = top + (container.height * canvasTransform.scale)
+        if (sx in left..right && sy in top..bottom) {
+            return FingerTapTextTarget.FocusExisting
+        }
+    }
+    return FingerTapTextTarget.PlaceAt(
+        docX = screenToCanvasX(sx, canvasTransform),
+        docY = screenToCanvasY(sy, canvasTransform)
+    )
+}
 
 @OptIn(
     ExperimentalFoundationApi::class,
@@ -586,6 +664,7 @@ private fun DrawingSurfaceWithTarget(
     val hasSelection by drawingCanvasViewModel.hasSelection.collectAsStateWithLifecycle()
     val textContainerSelected by drawingCanvasViewModel.selectedTextContainer.collectAsStateWithLifecycle()
     val strokeTranslations by drawingCanvasViewModel.strokeTranslations.collectAsStateWithLifecycle()
+    val stylusWritesByDefault by drawingCanvasViewModel.stylusWritesByDefault.collectAsStateWithLifecycle()
     val fingerPanZoomEnabled by drawingCanvasViewModel.fingerPansByDefault.collectAsStateWithLifecycle()
     val strokes = remember { mutableStateListOf<Stroke>() }
     val textureStore = LocalTextureStore.current
@@ -609,6 +688,29 @@ private fun DrawingSurfaceWithTarget(
     var selectedInlineCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var selectedImageIndex by remember { mutableStateOf<Int?>(null) }
     var requestTextFocusNonce by remember { mutableStateOf(0) }
+    val inputRoutingConfig = DrawingInputRoutingConfig(
+        stylusWritesByDefault = stylusWritesByDefault,
+        fingerPansByDefault = fingerPanZoomEnabled,
+        isSelectionMode = isSelectionMode,
+        isEraserMode = isEraserMode
+    )
+    val fingerTapTracker = remember(view.context) {
+        FingerTapGestureTracker(
+            FingerTapThresholds(
+                touchSlop = ViewConfiguration.get(view.context).scaledTouchSlop.toFloat()
+            )
+        )
+    }
+
+    fun handleFingerTap(sx: Float, sy: Float) {
+        when (val target = resolveFingerTapTextTarget(sx, sy, textContainer, canvasTransform)) {
+            FingerTapTextTarget.FocusExisting -> requestTextFocusNonce++
+            is FingerTapTextTarget.PlaceAt -> {
+                drawingCanvasViewModel.placePrimaryTextContainerAt(target.docX, target.docY)
+                requestTextFocusNonce++
+            }
+        }
+    }
 
     val dropTarget = remember {
         createDropTarget(activity) { uri, permissions ->
@@ -644,23 +746,24 @@ private fun DrawingSurfaceWithTarget(
         modifier = modifier
             .fillMaxSize()
             .pointerInteropFilter { event ->
-                if (!fingerPanZoomEnabled || isSelectionMode || selectedImageIndex != null) {
+                val route = routeForDrawingCanvasFingerEvent(event, inputRoutingConfig)
+                if (route != DrawingInputRoute.FingerPanZoom || selectedImageIndex != null) {
                     return@pointerInteropFilter false
                 }
-                val toolType = event.getToolType(0)
-                val isFinger = toolType == MotionEvent.TOOL_TYPE_FINGER
-                if (!isFinger) return@pointerInteropFilter false
+
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
                         lastFingerX = event.x
                         lastFingerY = event.y
+                        fingerTapTracker.onDown(event.x, event.y, event.eventTime)
                         true
                     }
                     MotionEvent.ACTION_POINTER_DOWN -> {
+                        fingerTapTracker.onMultiPointerGesture()
                         if (event.pointerCount >= 2) {
                             val dx = event.getX(0) - event.getX(1)
                             val dy = event.getY(0) - event.getY(1)
-                            lastFingerDistance = kotlin.math.sqrt(dx * dx + dy * dy)
+                            lastFingerDistance = hypot(dx, dy)
                             lastCentroid = GesturePoint(
                                 x = (event.getX(0) + event.getX(1)) / 2f,
                                 y = (event.getY(0) + event.getY(1)) / 2f
@@ -670,9 +773,10 @@ private fun DrawingSurfaceWithTarget(
                     }
                     MotionEvent.ACTION_MOVE -> {
                         if (event.pointerCount >= 2) {
+                            fingerTapTracker.onMultiPointerGesture()
                             val dx = event.getX(0) - event.getX(1)
                             val dy = event.getY(0) - event.getY(1)
-                            val distance = kotlin.math.sqrt(dx * dx + dy * dy)
+                            val distance = hypot(dx, dy)
                             val centroid = GesturePoint(
                                 x = (event.getX(0) + event.getX(1)) / 2f,
                                 y = (event.getY(0) + event.getY(1)) / 2f
@@ -687,6 +791,7 @@ private fun DrawingSurfaceWithTarget(
                             lastFingerDistance = distance
                             lastCentroid = centroid
                         } else {
+                            fingerTapTracker.onMove(event.x, event.y)
                             val dx = event.x - lastFingerX
                             val dy = event.y - lastFingerY
                             canvasTransform = CanvasTransformGesture.applyOneFingerPan(
@@ -697,6 +802,16 @@ private fun DrawingSurfaceWithTarget(
                             lastFingerX = event.x
                             lastFingerY = event.y
                         }
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (fingerTapTracker.onUp(event.x, event.y, event.eventTime)) {
+                            handleFingerTap(event.x, event.y)
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        fingerTapTracker.onCancel()
                         true
                     }
                     else -> false
@@ -773,25 +888,8 @@ private fun DrawingSurfaceWithTarget(
                 )
             },
             onRawMotionEvent = drawingCanvasViewModel::onRawMotionEvent,
-            consumeFingerInkInput = true,
-            onFingerTap = { sx, sy ->
-                val container = textContainer
-                if (container != null) {
-                    val left = docToScreenX(container.x, canvasTransform)
-                    val top = docToScreenY(container.y, canvasTransform)
-                    val right = left + (container.width * canvasTransform.scale)
-                    val bottom = top + (container.height * canvasTransform.scale)
-                    val hitsContainer = sx in left..right && sy in top..bottom
-                    if (hitsContainer) {
-                        requestTextFocusNonce++
-                        return@DrawingSurface
-                    }
-                }
-                val docX = screenToCanvasX(sx, canvasTransform)
-                val docY = screenToCanvasY(sy, canvasTransform)
-                drawingCanvasViewModel.placePrimaryTextContainerAt(docX, docY)
-                requestTextFocusNonce++
-            },
+            inputRoutingConfig = inputRoutingConfig,
+            onFingerTap = ::handleFingerTap,
             modifier = Modifier.fillMaxSize()
         )
 
