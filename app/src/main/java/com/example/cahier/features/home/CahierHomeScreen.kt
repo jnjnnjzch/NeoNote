@@ -220,32 +220,36 @@ private fun CahierNavigationSuite(
     NavigationSuiteScaffold(
         modifier = modifier,
         navigationItems = {
-            AppDestinations.entries.forEach { destination ->
-                val isSelected = currentDestination == destination
-                NavigationSuiteItem(
-                    icon = {
-                        Icon(
-                            painter = painterResource(id = destination.icon),
-                            contentDescription = stringResource(
-                                destination.contentDescription
+            AppDestinations.entries
+                .filter { destination ->
+                    destination != AppDestinations.DebugCenter || appMode == AppMode.DEBUG
+                }
+                .forEach { destination ->
+                    val isSelected = currentDestination == destination
+                    NavigationSuiteItem(
+                        icon = {
+                            Icon(
+                                painter = painterResource(id = destination.icon),
+                                contentDescription = stringResource(
+                                    destination.contentDescription
+                                )
                             )
-                        )
-                    },
-                    label = { Text(stringResource(destination.label)) },
-                    selected = isSelected,
-                    onClick = {
-                        if (currentDestination != destination) {
-                            onDestinationChanged(destination)
-                            if (destination != AppDestinations.Home
-                                && navigator.currentDestination?.pane ==
-                                ListDetailPaneScaffoldRole.Detail
-                            ) {
-                                homeScreenViewModel.clearSelection()
+                        },
+                        label = { Text(stringResource(destination.label)) },
+                        selected = isSelected,
+                        onClick = {
+                            if (currentDestination != destination) {
+                                onDestinationChanged(destination)
+                                if (destination != AppDestinations.Home
+                                    && navigator.currentDestination?.pane ==
+                                    ListDetailPaneScaffoldRole.Detail
+                                ) {
+                                    homeScreenViewModel.clearSelection()
+                                }
                             }
                         }
-                    }
-                )
-            }
+                    )
+                }
         },
         navigationItemVerticalArrangement = Arrangement.Center,
         content = {
@@ -282,11 +286,6 @@ private fun CahierNavigationSuite(
                                 },
                                 onAddNewNote = {
                                     homeScreenViewModel.addUnifiedNote { noteId ->
-                                        navigateToDrawingCanvas(noteId)
-                                    }
-                                },
-                                onAddNewTableNote = {
-                                    homeScreenViewModel.addTableInkNote { noteId ->
                                         navigateToDrawingCanvas(noteId)
                                     }
                                 },
@@ -386,10 +385,9 @@ private fun CahierNavigationSuite(
                             drawing?.let { navigateToDebugDrawingCanvas(it.id) }
                         },
                         onOpenTextContainerTableLab = {
-                            val drawing = noteList.noteList
-                                .filter { it.type == NoteType.Drawing }
-                                .maxByOrNull { it.id }
-                            drawing?.let { navigateToDebugDrawingCanvas(it.id) }
+                            homeScreenViewModel.addTableInkNote { noteId ->
+                                navigateToDebugDrawingCanvas(noteId)
+                            }
                         },
                         onOpenImagePasteLab = {
                             val drawing = noteList.noteList
@@ -438,7 +436,6 @@ private fun ListPaneContent(
     selectedNoteId: Long?,
     onNoteClick: (Note) -> Unit,
     onAddNewNote: () -> Unit,
-    onAddNewTableNote: () -> Unit,
     onToggleFavorite: (Long) -> Unit,
     onOpenLastNote: () -> Unit,
     onStressTest: () -> Unit,
@@ -458,7 +455,6 @@ private fun ListPaneContent(
         selectedNoteId = selectedNoteId,
         onNoteClick = onNoteClick,
         onAddNewNote = onAddNewNote,
-        onAddNewTableNote = onAddNewTableNote,
         onDeleteNote = onDeleteNote,
         onToggleFavorite = onToggleFavorite,
         onNewWindow = onNewWindow,

@@ -103,7 +103,11 @@ class HomeScreenViewModel @Inject constructor(
 
     fun addUnifiedNote(callback: (id: Long) -> Unit) {
         viewModelScope.launch {
-            val initialDoc = TicDocument(pages = listOf(CanvasPage(blocks = emptyList())))
+            val initialDoc = TicDocument(
+                pages = listOf(
+                    CanvasPage(blocks = listOf(TextContainerBlock()))
+                )
+            )
             val newNote = Note(
                 id = 0,
                 title = "",

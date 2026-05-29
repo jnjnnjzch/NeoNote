@@ -45,6 +45,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -156,85 +157,87 @@ fun SettingsScreen(
                     }
                 }
 
-                // ── Developer Tools ──
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                if (appMode == AppMode.DEBUG) {
+                    // ── Developer Tools ──
+                    ElevatedCard(
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Icon(
-                                painterResource(R.drawable.brush_24px),
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Column {
-                                Text(
-                                    text = stringResource(R.string.settings_developer_tools),
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                Text(
-                                    text = stringResource(R.string
-                                        .settings_developer_tools_description),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = stringResource(R.string.settings_brush_designer_title),
-                                    style = MaterialTheme.typography.bodyLarge
-                                )
-                                Text(
-                                    text = stringResource(R.string
-                                        .settings_brush_designer_description),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            FilledTonalButton(
-                                onClick = {
-                                    if (isUsingGraphUi) {
-                                        navigateToBrushGraph()
-                                    } else {
-                                        navigateToBrushDesigner()
-                                    }
-                                }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Text(stringResource(R.string.settings_launch))
+                                Icon(
+                                    painterResource(R.drawable.brush_24px),
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Column {
+                                    Text(
+                                        text = stringResource(R.string.settings_developer_tools),
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(
+                                        text = stringResource(R.string
+                                            .settings_developer_tools_description),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
-                        }
 
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = stringResource(R.string.settings_graph_ui),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = stringResource(R.string.settings_graph_description),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = stringResource(R.string.settings_brush_designer_title),
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                    Text(
+                                        text = stringResource(R.string
+                                            .settings_brush_designer_description),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                FilledTonalButton(
+                                    onClick = {
+                                        if (isUsingGraphUi) {
+                                            navigateToBrushGraph()
+                                        } else {
+                                            navigateToBrushDesigner()
+                                        }
+                                    }
+                                ) {
+                                    Text(stringResource(R.string.settings_launch))
+                                }
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = stringResource(R.string.settings_graph_ui),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.settings_graph_description),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = isUsingGraphUi,
+                                    onCheckedChange = { viewModel.setUsingGraphUi(it) },
+                                    enabled = true
                                 )
                             }
-                            Switch(
-                                checked = isUsingGraphUi,
-                                onCheckedChange = { viewModel.setUsingGraphUi(it) },
-                                enabled = true
-                            )
                         }
                     }
                 }
@@ -266,33 +269,37 @@ fun SettingsScreen(
                                 checked = appMode == AppMode.DEBUG,
                                 onCheckedChange = { enabled ->
                                     onAppModeChanged(if (enabled) AppMode.DEBUG else AppMode.NORMAL)
-                                }
+                                },
+                                modifier = Modifier.testTag("switch-debug-mode")
                             )
                         }
                         FilledTonalButton(
                             onClick = onOpenDebugCenter,
-                            enabled = appMode == AppMode.DEBUG
+                            enabled = appMode == AppMode.DEBUG,
+                            modifier = Modifier.testTag("btn-open-debug-center")
                         ) {
                             Text("Open Debug Center")
                         }
                     }
                 }
 
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                if (appMode == AppMode.DEBUG) {
+                    ElevatedCard(
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(text = "NeoNote", style = MaterialTheme.typography.titleMedium)
-                        Text(text = "applicationId: ${BuildConfig.APPLICATION_ID_VALUE}")
-                        Text(text = "versionName: ${BuildConfig.VERSION_NAME}")
-                        Text(text = "versionCode: ${BuildConfig.VERSION_CODE}")
-                        Text(text = "buildType: ${BuildConfig.BUILD_TYPE}")
-                        Text(text = "gitSha: ${BuildConfig.GIT_SHA}")
-                        Text(text = "buildTime: ${BuildConfig.BUILD_TIME_UTC}")
-                        Text(text = "githubRunNumber: ${BuildConfig.GITHUB_RUN_NUMBER}")
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(text = "NeoNote", style = MaterialTheme.typography.titleMedium)
+                            Text(text = "applicationId: ${BuildConfig.APPLICATION_ID_VALUE}")
+                            Text(text = "versionName: ${BuildConfig.VERSION_NAME}")
+                            Text(text = "versionCode: ${BuildConfig.VERSION_CODE}")
+                            Text(text = "buildType: ${BuildConfig.BUILD_TYPE}")
+                            Text(text = "gitSha: ${BuildConfig.GIT_SHA}")
+                            Text(text = "buildTime: ${BuildConfig.BUILD_TIME_UTC}")
+                            Text(text = "githubRunNumber: ${BuildConfig.GITHUB_RUN_NUMBER}")
+                        }
                     }
                 }
             }
