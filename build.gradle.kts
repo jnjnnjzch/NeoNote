@@ -1,3 +1,3 @@
 plugins {
-    id("org.jetbrains.kotlin.jvm") version "2.3.20" apply false
+    id("com.android.application") version "9.2.0" apply false
 }
