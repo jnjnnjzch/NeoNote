@@ -28,7 +28,6 @@ class ScreenshotTest {
     @Composable
     private fun HomeContent() {
         HomePane(
-            navigateToCanvas = { _ -> },
             navigateToDrawingCanvas = { _ -> },
             navigateToDebugDrawingCanvas = { _ -> },
             navigateToBrushDesigner = {},

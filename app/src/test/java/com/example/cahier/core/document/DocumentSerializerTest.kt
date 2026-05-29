@@ -31,6 +31,28 @@ class DocumentSerializerTest {
     }
 
     @Test
+    fun encodeDecode_preservesDocumentRevisionAndInkLayerMetadata() {
+        val document = TicDocument(
+            revision = 42L,
+            pages = listOf(
+                CanvasPage(
+                    inkLayer = InkLayerRef(
+                        documentRevision = 42L,
+                        strokeCount = 7
+                    )
+                )
+            )
+        )
+
+        val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
+
+        assertNotNull(decoded)
+        assertEquals(42L, decoded!!.revision)
+        assertEquals(42L, decoded.pages.first().inkLayer.documentRevision)
+        assertEquals(7, decoded.pages.first().inkLayer.strokeCount)
+    }
+
+    @Test
     fun decodeOrNull_invalidPayload_returnsNull() {
         val decoded = DocumentSerializer.decodeOrNull("{bad json")
         assertNull(decoded)
@@ -125,6 +147,44 @@ class DocumentSerializerTest {
         assertEquals(96f, decodedImage.y)
         assertEquals(48f, decodedTable.x)
         assertEquals(-72f, decodedTable.y)
+    }
+
+    @Test
+    fun encodeDecode_preservesPersistentStrokeMetadata() {
+        val text = TextContainerBlock(id = "block-1", x = 100f, y = 120f)
+        val document = TicDocument(
+            pages = listOf(
+                CanvasPage(
+                    blocks = listOf(text),
+                    strokeIds = listOf("stroke-1"),
+                    strokeAnchors = listOf(
+                        StrokeAnchor(
+                            blockId = "block-1",
+                            strokeIds = listOf("stroke-1"),
+                            anchorOriginX = 100f,
+                            anchorOriginY = 120f,
+                        )
+                    ),
+                    strokeTransforms = listOf(
+                        StrokeTransform(
+                            strokeId = "stroke-1",
+                            translateX = 12f,
+                            translateY = -4f,
+                        )
+                    )
+                )
+            )
+        )
+
+        val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
+        assertNotNull(decoded)
+        val page = decoded!!.pages.first()
+
+        assertEquals("stroke-1", page.strokeIds.single())
+        assertEquals("block-1", page.strokeAnchors.single().blockId)
+        assertEquals("stroke-1", page.strokeAnchors.single().strokeIds.single())
+        assertEquals(12f, page.strokeTransforms.single().translateX)
+        assertEquals(-4f, page.strokeTransforms.single().translateY)
     }
 
     @Test

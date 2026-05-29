@@ -9,7 +9,7 @@ data class TicDocument(
     val version: Int = CURRENT_VERSION,
     val pages: List<CanvasPage> = listOf(CanvasPage()),
     val settings: DocumentSettings = DocumentSettings(),
-    val assetManifest: List<AssetManifestEntry> = emptyList()
+    val revision: Long = 0L
 ) {
     companion object {
         const val CURRENT_VERSION = 1
@@ -41,11 +41,14 @@ data class CanvasPage(
     val inkLayer: InkLayerRef = InkLayerRef(),
     val strokeIds: List<String> = emptyList(),
     val strokeAnchors: List<StrokeAnchor> = emptyList(),
+    val strokeTransforms: List<StrokeTransform> = emptyList(),
 )
 
 @Serializable
 data class InkLayerRef(
-    val source: String = "note_strokes_data_v1"
+    val source: String = "note_strokes_data_v1",
+    val documentRevision: Long = 0L,
+    val strokeCount: Int = 0,
 )
 
 @Serializable
@@ -56,6 +59,14 @@ data class StrokeAnchor(
     val endStrokeIndexInclusive: Int? = null,
     val anchorOriginX: Float,
     val anchorOriginY: Float,
+)
+
+
+@Serializable
+data class StrokeTransform(
+    val strokeId: String,
+    val translateX: Float = 0f,
+    val translateY: Float = 0f,
 )
 
 @Serializable

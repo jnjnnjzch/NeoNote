@@ -60,10 +60,12 @@ import com.example.cahier.core.data.CustomBrush
 import com.example.cahier.core.data.NotesRepository
 import com.example.cahier.core.document.AssetManifestEntry
 import com.example.cahier.core.document.DocumentSerializer
+import com.example.cahier.core.document.Block
 import com.example.cahier.core.document.DocumentSettings
 import com.example.cahier.core.document.ImageBlock
 import com.example.cahier.core.document.FormulaBlock
 import com.example.cahier.core.document.StrokeAnchor
+import com.example.cahier.core.document.StrokeTransform
 import com.example.cahier.core.document.TableBlock
 import com.example.cahier.core.document.TableCell
 import com.example.cahier.core.document.ParagraphNode
@@ -93,6 +95,9 @@ import com.example.cahier.features.drawing.export.TicNoteArchiveWriter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -162,8 +167,30 @@ class DrawingCanvasViewModel @Inject constructor(
     private var previousPoint: MutableVec? = null
     private val eraserPadding = 50f
 
-    private val history = mutableListOf<List<Stroke>>()
-    private var historyIndex = -1
+    private sealed interface DrawingEdit {
+        val before: EditSnapshot
+        val after: EditSnapshot
+
+        data class DocumentEdit(
+            override val before: EditSnapshot,
+            override val after: EditSnapshot,
+        ) : DrawingEdit
+
+        data class InkEdit(
+            override val before: EditSnapshot,
+            override val after: EditSnapshot,
+        ) : DrawingEdit
+    }
+
+    private data class EditSnapshot(
+        val document: TicDocument,
+        val strokes: List<Stroke>,
+    )
+
+    private val undoStack = mutableListOf<DrawingEdit>()
+    private val redoStack = mutableListOf<DrawingEdit>()
+    private var saveJob: Job? = null
+    private var isDirty = false
     private val _canUndo = MutableStateFlow(false)
     val canUndo: StateFlow<Boolean> = _canUndo.asStateFlow()
     private val _canRedo = MutableStateFlow(false)
@@ -178,7 +205,7 @@ class DrawingCanvasViewModel @Inject constructor(
     val document: StateFlow<TicDocument> = _document.asStateFlow()
     private val _strokeTranslations = MutableStateFlow<Map<Int, Pair<Float, Float>>>(emptyMap())
     val strokeTranslations: StateFlow<Map<Int, Pair<Float, Float>>> = _strokeTranslations.asStateFlow()
-    private val _manualStrokeTranslations = MutableStateFlow<Map<Int, Pair<Float, Float>>>(emptyMap())
+    private var focusedBlockId: String? = null
     private val _selectedStrokeIndices = MutableStateFlow<Set<Int>>(emptySet())
     val selectedStrokeIndices: StateFlow<Set<Int>> = _selectedStrokeIndices.asStateFlow()
     private val _selectedTextContainer = MutableStateFlow(false)
@@ -210,11 +237,18 @@ class DrawingCanvasViewModel @Inject constructor(
     val lastPressureUiSampled: StateFlow<Float> = _lastPressureUiSampled.asStateFlow()
     private var lastPressureUiSampledAtMs: Long = 0L
 
+    private val currentSnapshot: EditSnapshot
+        get() = EditSnapshot(
+            document = _document.value,
+            strokes = _uiState.value.strokes,
+        )
+
     init {
         viewModelScope.launch {
             noteRepository.getNoteStream(noteId)
                 .filterNotNull()
                 .collect { note ->
+                    if (isDirty) return@collect
                     val parsedDocument = DocumentSerializer.decodeOrNull(note.text) ?: TicDocument()
                     _document.value = parsedDocument
                     _pressureCurve.value = parsedDocument.settings.pressureCurve
@@ -246,53 +280,73 @@ class DrawingCanvasViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(note = note, strokes = initialStrokes)
                     }
-                    if (history.isEmpty()) {
-                        history.clear()
-                        history.add(initialStrokes)
-                        historyIndex = 0
-                        updateUndoRedoState()
-                    } else {
-                        if (historyIndex >= 0 && historyIndex < history.size) {
-                            _uiState.update { it.copy(strokes = history[historyIndex]) }
-                        }
-                        updateUndoRedoState()
-                    }
+                    updateUndoRedoState()
                 }
         }
 
         loadCustomBrushes()
+        viewModelScope.launch {
+            while (true) {
+                delay(PERIODIC_AUTOSAVE_MS)
+                if (isDirty) flushPendingEdits()
+            }
+        }
     }
 
     fun addImageWithLocalUri(localUri: Uri?) {
         if (localUri == null) return
         val newImageUri = localUri.toString()
-        val updatedNote = _uiState.value.note.copy(imageUriList = listOf(newImageUri))
-        viewModelScope.launch {
-            noteRepository.updateNote(updatedNote)
-        }
+        _uiState.update { it.copy(note = it.note.copy(imageUriList = listOf(newImageUri))) }
+        scheduleDebouncedSave()
     }
 
-    private fun updateStrokes(newStrokes: List<Stroke>) {
-        val oldStrokes = _uiState.value.strokes
-        if (historyIndex < history.size - 1) {
-            history.subList(historyIndex + 1, history.size).clear()
-        }
-        history.add(newStrokes)
-        historyIndex++
-
-        syncStrokeIds(oldStrokes = oldStrokes, newStrokes = newStrokes)
-        _uiState.update { it.copy(strokes = newStrokes) }
-        val maxIndex = newStrokes.lastIndex
-        _selectedStrokeIndices.value = _selectedStrokeIndices.value.filter { it in 0..maxIndex }.toSet()
-        _manualStrokeTranslations.value = _manualStrokeTranslations.value.filterKeys { it in 0..maxIndex }
-        refreshSelectionState()
+    private fun dispatchEdit(edit: DrawingEdit, scheduleSave: Boolean = true) {
+        applySnapshot(edit.after)
+        undoStack.add(edit)
+        redoStack.clear()
         updateUndoRedoState()
+        if (scheduleSave) scheduleDebouncedSave()
+    }
+
+    private fun dispatchDocumentEdit(document: TicDocument) {
+        val before = currentSnapshot
+        val afterDocument = document.nextRevision().withInkLayerMetadata(before.strokes.size)
+        if (before.document == afterDocument) return
+        dispatchEdit(
+            DrawingEdit.DocumentEdit(
+                before = before,
+                after = before.copy(document = afterDocument),
+            )
+        )
+    }
+
+    private fun dispatchInkEdit(newStrokes: List<Stroke>) {
+        val before = currentSnapshot
+        val documentWithStrokeIds = documentForStrokes(
+            document = before.document,
+            oldStrokes = before.strokes,
+            newStrokes = newStrokes,
+        ).nextRevision().withInkLayerMetadata(newStrokes.size)
+        val after = EditSnapshot(document = documentWithStrokeIds, strokes = newStrokes)
+        if (before == after) return
+        dispatchEdit(DrawingEdit.InkEdit(before = before, after = after))
+    }
+
+    private fun applySnapshot(snapshot: EditSnapshot) {
+        _document.value = snapshot.document
+        _uiState.update { it.copy(strokes = snapshot.strokes) }
+        val maxIndex = snapshot.strokes.lastIndex
+        _selectedStrokeIndices.value = _selectedStrokeIndices.value.filter { it in 0..maxIndex }.toSet()
+        refreshSelectionState()
         recomputeStrokeTranslations()
     }
 
-    private fun syncStrokeIds(oldStrokes: List<Stroke>, newStrokes: List<Stroke>) {
-        val current = _document.value
-        val page = current.pages.firstOrNull() ?: return
+    private fun documentForStrokes(
+        document: TicDocument,
+        oldStrokes: List<Stroke>,
+        newStrokes: List<Stroke>,
+    ): TicDocument {
+        val page = document.pages.firstOrNull() ?: return document
         val oldIds = if (page.strokeIds.size == oldStrokes.size) {
             page.strokeIds
         } else {
@@ -309,39 +363,53 @@ class DrawingCanvasViewModel @Inject constructor(
                     anchor.endStrokeIndexInclusive >= anchor.startStrokeIndex
                 )
         }
+        val updatedTransforms = page.strokeTransforms.filter { it.strokeId in validIds }
         persistDocument(
             current.copy(
                 pages = listOf(
                     page.copy(
                         strokeIds = remapped,
-                        strokeAnchors = updatedAnchors
+                        strokeAnchors = updatedAnchors,
+                        strokeTransforms = updatedTransforms
                     )
                 )
             )
         )
     }
 
+    private fun TicDocument.nextRevision(): TicDocument = copy(revision = revision + 1L)
+
+    private fun TicDocument.withInkLayerMetadata(strokeCount: Int): TicDocument {
+        val page = pages.firstOrNull() ?: return this
+        val updatedPage = page.copy(
+            inkLayer = page.inkLayer.copy(
+                source = "note_strokes_data_v1",
+                documentRevision = revision,
+                strokeCount = strokeCount,
+            )
+        )
+        return copy(pages = listOf(updatedPage))
+    }
+
     private fun updateUndoRedoState() {
-        _canUndo.value = historyIndex > 0
-        _canRedo.value = historyIndex < history.size - 1
+        _canUndo.value = undoStack.isNotEmpty()
+        _canRedo.value = redoStack.isNotEmpty()
     }
 
     fun undo() {
-        if (canUndo.value) {
-            historyIndex--
-            _uiState.update { it.copy(strokes = history[historyIndex]) }
-            updateUndoRedoState()
-            viewModelScope.launch { saveStrokes() }
-        }
+        val edit = undoStack.removeLastOrNull() ?: return
+        applySnapshot(edit.before)
+        redoStack.add(edit)
+        updateUndoRedoState()
+        scheduleDebouncedSave()
     }
 
     fun redo() {
-        if (canRedo.value) {
-            historyIndex++
-            _uiState.update { it.copy(strokes = history[historyIndex]) }
-            updateUndoRedoState()
-            viewModelScope.launch { saveStrokes() }
-        }
+        val edit = redoStack.removeLastOrNull() ?: return
+        applySnapshot(edit.after)
+        undoStack.add(edit)
+        updateUndoRedoState()
+        scheduleDebouncedSave()
     }
 
     fun toggleFavorite() {
@@ -425,16 +493,39 @@ class DrawingCanvasViewModel @Inject constructor(
     }
 
     suspend fun saveStrokes() {
-        if (historyIndex >= 0 && historyIndex < history.size) {
-            val strokesToSave = history[historyIndex]
-            val currentBrushFamily = strokesToSave.lastOrNull()?.brush?.family
-            val clientBrushFamilyId = _customBrushes.value
-                .find { it.brushFamily == currentBrushFamily }?.name
-            noteRepository.updateNoteStrokes(noteId, strokesToSave, clientBrushFamilyId)
-        } else if (history.isEmpty()) {
-            noteRepository.updateNoteStrokes(noteId, emptyList(), null)
+        flushPendingEdits()
+    }
+
+    private fun scheduleDebouncedSave() {
+        isDirty = true
+        saveJob?.cancel()
+        saveJob = viewModelScope.launch {
+            delay(SAVE_DEBOUNCE_MS)
+            flushPendingEdits()
         }
     }
+
+    fun flushEdits() {
+        viewModelScope.launch { flushPendingEdits() }
+    }
+
+    private suspend fun flushPendingEdits() {
+        val currentJob = currentCoroutineContext()[Job]
+        saveJob?.takeIf { it !== currentJob }?.cancel()
+        saveJob = null
+        val snapshot = currentSnapshot
+        val note = buildNoteForSave(snapshot)
+        noteRepository.updateNote(note)
+        noteRepository.updateNoteStrokes(noteId, snapshot.strokes, note.clientBrushFamilyId)
+        isDirty = false
+    }
+
+    private fun buildNoteForSave(snapshot: EditSnapshot) = _uiState.value.note.copy(
+        text = DocumentSerializer.encode(snapshot.document),
+        clientBrushFamilyId = snapshot.strokes.lastOrNull()?.brush?.family?.let { currentBrushFamily ->
+            _customBrushes.value.find { it.brushFamily == currentBrushFamily }?.name
+        },
+    )
 
     fun onTitleChanged(newTitle: String) {
         viewModelScope.launch {
@@ -443,18 +534,17 @@ class DrawingCanvasViewModel @Inject constructor(
     }
 
     suspend fun updateNoteTitle(newTitle: String) {
-        val updatedNote = _uiState.value.note.copy(title = newTitle)
-        noteRepository.updateNote(updatedNote)
+        _uiState.update { it.copy(note = it.note.copy(title = newTitle)) }
+        scheduleDebouncedSave()
     }
 
     @UiThread
     fun onStrokesFinished(finishedStrokes: List<Stroke>) {
-        val currentStrokes = history.getOrElse(historyIndex) { emptyList() }
+        val currentStrokes = _uiState.value.strokes
         val newStrokes = currentStrokes + finishedStrokes
-        updateStrokes(newStrokes)
+        dispatchInkEdit(newStrokes)
         _inkDebugMetrics.update { it.copy(finalizedStrokeCount = newStrokes.size) }
-        // Normal Mode no longer uses automatic ink anchoring as primary behavior.
-        // Keep legacy anchor data compatible via recompute/read paths.
+        anchorNewStrokes(startIndex = currentStrokes.size, count = finishedStrokes.size)
         viewModelScope.launch {
             saveStrokes()
         }
@@ -502,18 +592,18 @@ class DrawingCanvasViewModel @Inject constructor(
 
     fun endErase() {
         previousPoint = null
-        viewModelScope.launch { saveStrokes() }
+        scheduleDebouncedSave()
     }
 
 
     fun erase(x: Float, y: Float) {
-        val strokesBeforeErase = history.getOrElse(historyIndex) { emptyList() }
+        val strokesBeforeErase = _uiState.value.strokes
         val strokesAfterErase = eraseIntersectingStrokes(
             x, y, strokesBeforeErase
         )
 
         if (strokesAfterErase.size != strokesBeforeErase.size) {
-            updateStrokes(strokesAfterErase)
+            dispatchInkEdit(strokesAfterErase)
         }
     }
 
@@ -603,16 +693,14 @@ class DrawingCanvasViewModel @Inject constructor(
 
     fun clearStrokes() {
         if (_uiState.value.strokes.isNotEmpty()) {
-            updateStrokes(emptyList())
-            viewModelScope.launch { saveStrokes() }
+            dispatchInkEdit(emptyList())
+            scheduleDebouncedSave()
         }
     }
 
     fun clearImages() {
-        val updatedNote = _uiState.value.note.copy(imageUriList = emptyList())
-        viewModelScope.launch {
-            noteRepository.updateNote(updatedNote)
-        }
+        _uiState.update { it.copy(note = it.note.copy(imageUriList = emptyList())) }
+        scheduleDebouncedSave()
     }
 
     fun clearScreen() {
@@ -731,16 +819,16 @@ class DrawingCanvasViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        flushEdits()
         super.onCleared()
-        viewModelScope.launch {
-            saveStrokes()
-        }
     }
 
     companion object {
         private const val TAG = "DrawingCanvasViewModel"
         private const val HIGHLIGHTER_ALPHA = 0.3f
         private const val TOOL_TYPE_PALM_COMPAT = 5
+        private const val SAVE_DEBOUNCE_MS = 750L
+        private const val PERIODIC_AUTOSAVE_MS = 30_000L
     }
 
     /**
@@ -878,6 +966,7 @@ class DrawingCanvasViewModel @Inject constructor(
                 y = container.y + dy
             )
         }
+        recomputeStrokeTranslations()
     }
 
     fun placePrimaryTextContainerAt(x: Float, y: Float) {
@@ -889,6 +978,7 @@ class DrawingCanvasViewModel @Inject constructor(
             val currentContainer = blocks[idx] as TextContainerBlock
             blocks[idx] = currentContainer.copy(x = x, y = y)
             persistDocument(current.copy(pages = listOf(page.copy(blocks = blocks))))
+            recomputeStrokeTranslations()
             return
         }
         val container = TextContainerBlock(
@@ -897,6 +987,7 @@ class DrawingCanvasViewModel @Inject constructor(
             content = TextContainerContent(nodes = listOf(ParagraphNode("")))
         )
         persistDocument(current.copy(pages = listOf(page.copy(blocks = page.blocks + container))))
+        recomputeStrokeTranslations()
     }
 
     fun updateTableCell(
@@ -1187,11 +1278,7 @@ class DrawingCanvasViewModel @Inject constructor(
     }
 
     private fun persistDocument(document: TicDocument) {
-        _document.value = document
-        viewModelScope.launch {
-            val note = _uiState.value.note
-            noteRepository.updateNote(note.copy(text = DocumentSerializer.encode(document)))
-        }
+        dispatchDocumentEdit(document)
     }
 
     fun moveTableBlockBy(dx: Float, dy: Float) {
@@ -1225,19 +1312,24 @@ class DrawingCanvasViewModel @Inject constructor(
         return inline
     }
 
+    fun setFocusedBlockId(blockId: String?) {
+        focusedBlockId = blockId
+    }
+
     private fun anchorNewStrokes(startIndex: Int, count: Int) {
         if (count <= 0) return
         val current = _document.value
         val page = current.pages.firstOrNull() ?: return
-        val table = page.blocks.filterIsInstance<TableBlock>().firstOrNull() ?: return
         val ids = page.strokeIds.drop(startIndex).take(count)
+        if (ids.isEmpty()) return
+        val target = findAnchorTargetBlock(page.blocks, startIndex, count) ?: return
         val anchor = StrokeAnchor(
-            blockId = table.id,
+            blockId = target.id,
             strokeIds = ids,
-            startStrokeIndex = startIndex,
-            endStrokeIndexInclusive = startIndex + count - 1,
-            anchorOriginX = table.x,
-            anchorOriginY = table.y
+            startStrokeIndex = null,
+            endStrokeIndexInclusive = null,
+            anchorOriginX = target.x,
+            anchorOriginY = target.y
         )
         val updated = current.copy(
             pages = listOf(page.copy(strokeAnchors = page.strokeAnchors + anchor))
@@ -1246,15 +1338,37 @@ class DrawingCanvasViewModel @Inject constructor(
         recomputeStrokeTranslations()
     }
 
+    private fun findAnchorTargetBlock(blocks: List<Block>, startIndex: Int, count: Int): Block? {
+        val focused = focusedBlockId?.let { id -> blocks.firstOrNull { it.id == id } }
+        if (focused != null) return focused
+
+        val finishedStrokes = _uiState.value.strokes.drop(startIndex).take(count)
+        return blocks.firstOrNull { block ->
+            finishedStrokes.any { stroke -> strokeIntersectsBlock(stroke, block) }
+        }
+    }
+
+    private fun strokeIntersectsBlock(stroke: Stroke, block: Block): Boolean {
+        val top = MutableSegment(
+            MutableVec(block.x, block.y),
+            MutableVec(block.x + block.width, block.y)
+        )
+        val blockBounds = MutableParallelogram().populateFromSegmentAndPadding(
+            top,
+            maxOf(block.height, 1f)
+        )
+        return stroke.shape.intersects(blockBounds, AffineTransform.IDENTITY)
+    }
+
     private fun recomputeStrokeTranslations() {
         val page = _document.value.pages.firstOrNull() ?: return
-        val tableById = page.blocks.filterIsInstance<TableBlock>().associateBy { it.id }
+        val blockById = page.blocks.associateBy { it.id }
         val strokeIndexById = page.strokeIds.withIndex().associate { (idx, id) -> id to idx }
         val translations = mutableMapOf<Int, Pair<Float, Float>>()
         page.strokeAnchors.forEach { anchor ->
-            val table = tableById[anchor.blockId] ?: return@forEach
-            val dx = table.x - anchor.anchorOriginX
-            val dy = table.y - anchor.anchorOriginY
+            val block = blockById[anchor.blockId] ?: return@forEach
+            val dx = block.x - anchor.anchorOriginX
+            val dy = block.y - anchor.anchorOriginY
             if (anchor.strokeIds.isNotEmpty()) {
                 anchor.strokeIds.forEach { strokeId ->
                     val index = strokeIndexById[strokeId] ?: return@forEach
@@ -1270,9 +1384,10 @@ class DrawingCanvasViewModel @Inject constructor(
                 }
             }
         }
-        _manualStrokeTranslations.value.forEach { (index, delta) ->
+        page.strokeTransforms.forEach { transform ->
+            val index = strokeIndexById[transform.strokeId] ?: return@forEach
             val base = translations[index] ?: (0f to 0f)
-            translations[index] = (base.first + delta.first) to (base.second + delta.second)
+            translations[index] = (base.first + transform.translateX) to (base.second + transform.translateY)
         }
         _strokeTranslations.value = translations
     }
@@ -1362,14 +1477,26 @@ class DrawingCanvasViewModel @Inject constructor(
             moveTextContainerBy(dx, dy)
         }
         if (_selectedStrokeIndices.value.isNotEmpty()) {
-            val updated = _manualStrokeTranslations.value.toMutableMap()
-            _selectedStrokeIndices.value.forEach { index ->
-                val prev = updated[index] ?: (0f to 0f)
-                updated[index] = (prev.first + dx) to (prev.second + dy)
-            }
-            _manualStrokeTranslations.value = updated
-            recomputeStrokeTranslations()
+            persistStrokeTranslations(_selectedStrokeIndices.value, dx, dy)
         }
+    }
+
+    private fun persistStrokeTranslations(indices: Set<Int>, dx: Float, dy: Float) {
+        val current = _document.value
+        val page = current.pages.firstOrNull() ?: return
+        val selectedIds = indices.mapNotNull { page.strokeIds.getOrNull(it) }.toSet()
+        if (selectedIds.isEmpty()) return
+        val transformsById = page.strokeTransforms.associateBy { it.strokeId }.toMutableMap()
+        selectedIds.forEach { strokeId ->
+            val previous = transformsById[strokeId] ?: StrokeTransform(strokeId = strokeId)
+            transformsById[strokeId] = previous.copy(
+                translateX = previous.translateX + dx,
+                translateY = previous.translateY + dy
+            )
+        }
+        val updatedTransforms = page.strokeIds.mapNotNull { transformsById[it] }
+        persistDocument(current.copy(pages = listOf(page.copy(strokeTransforms = updatedTransforms))))
+        recomputeStrokeTranslations()
     }
 
     fun exportAllFormats() {
