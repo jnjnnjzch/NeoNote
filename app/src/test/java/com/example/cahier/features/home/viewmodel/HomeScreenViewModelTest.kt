@@ -100,6 +100,12 @@ class HomeScreenViewModelTest {
         assertEquals(1, notes.size)
         assertEquals(NoteType.Drawing, notes.first().type)
         assertEquals(createdNoteId, notes.first().id)
+
+        val document = DocumentSerializer.decodeOrNull(notes.first().text)
+        assertNotNull(document)
+        val blocks = document!!.pages.firstOrNull()?.blocks.orEmpty()
+        assertEquals(1, blocks.size)
+        assertTrue(blocks.first() is TextContainerBlock)
     }
 
     @Test

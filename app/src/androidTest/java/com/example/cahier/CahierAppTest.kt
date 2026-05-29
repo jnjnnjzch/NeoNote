@@ -21,13 +21,11 @@
 
 package com.example.cahier
 
-import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dagger.hilt.android.testing.HiltAndroidRule
@@ -35,7 +33,6 @@ import dagger.hilt.android.testing.HiltAndroidTest
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import androidx.compose.ui.test.hasText
 
 @RunWith(AndroidJUnit4::class)
 @HiltAndroidTest
@@ -48,42 +45,45 @@ class CahierAppTest {
     val composeTestRule = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun homeScreen_displaysAndNavigatesToDrawing() {
+    fun homeScreen_displaysAndNavigatesToUnifiedNote() {
         composeTestRule.waitUntil(timeoutMillis = 5000) {
             composeTestRule
-                .onAllNodesWithContentDescription("Add note")
+                .onAllNodesWithTag("btn-new-note")
                 .fetchSemanticsNodes().isNotEmpty()
         }
 
         composeTestRule.onNodeWithText("Home").assertExists()
         composeTestRule.onNodeWithText("Settings").assertExists()
 
-
-        composeTestRule.onNodeWithContentDescription("Add note").performClick()
-        composeTestRule.onNodeWithContentDescription("Drawing note").performClick()
+        composeTestRule.onNodeWithTag("btn-new-note").performClick()
 
         composeTestRule.onNodeWithText("Drawing title", useUnmergedTree = true).assertExists()
+        composeTestRule.onNodeWithTag("text-container-editor").assertExists()
         composeTestRule.onNodeWithContentDescription("Brush").assertExists()
         composeTestRule.onNodeWithContentDescription("Color").assertExists()
         composeTestRule.onNodeWithContentDescription("Eraser").assertExists()
     }
 
     @Test
-    fun homeScreen_showsNeoNoteBrand_buildBadge_andQuickLaunchButtons() {
+    fun homeScreen_showsNeoNoteBrand_andSingleNormalNewNoteEntry() {
         composeTestRule.onNodeWithText("NeoNote").assertExists()
         composeTestRule.onNodeWithText("Table-first ink canvas for S Pen").assertExists()
-        composeTestRule.onNodeWithTag("build-badge").assertExists()
-        composeTestRule.onNodeWithTag("btn-new-ink").assertExists()
-        composeTestRule.onNodeWithTag("btn-new-table").assertExists()
-        composeTestRule.onNodeWithTag("btn-open-last").assertExists()
-        composeTestRule.onNodeWithTag("btn-stress-test").assertExists()
-        composeTestRule.onNodeWithTag("btn-export-test").assertExists()
-        composeTestRule.onNodeWithTag("btn-build-info").assertExists()
+        composeTestRule.onNodeWithTag("btn-new-note").assertExists()
+        composeTestRule.onNodeWithTag("build-badge").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("btn-new-table").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("btn-open-last").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("btn-stress-test").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("btn-export-test").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("btn-build-info").assertDoesNotExist()
     }
 
     @Test
-    fun newTableNote_opensDrawingWithEditableTableAndToolbar() {
-        composeTestRule.onNodeWithTag("btn-new-table").performClick()
+    fun tableStarter_isOpenedFromDebugCenterOnly() {
+        composeTestRule.onNodeWithText("Settings").performClick()
+        composeTestRule.onNodeWithTag("switch-debug-mode").performClick()
+        composeTestRule.onNodeWithTag("btn-open-debug-center").performClick()
+        composeTestRule.onNodeWithText("TextContainer/Table Lab").performClick()
+
         composeTestRule.onNodeWithTag("text-container-editor").assertExists()
         composeTestRule.onNodeWithTag("tc-paragraph-before").assertExists()
         composeTestRule.onNodeWithTag("tc-paragraph-after").assertExists()
@@ -94,7 +94,8 @@ class CahierAppTest {
 
     @Test
     fun settings_still_shows_build_info() {
-        composeTestRule.onNodeWithTag("btn-build-info").performClick()
+        composeTestRule.onNodeWithText("Settings").performClick()
+        composeTestRule.onNodeWithTag("switch-debug-mode").performClick()
         composeTestRule.onNodeWithText("applicationId:", substring = true).assertExists()
         composeTestRule.onNodeWithText("versionName:", substring = true).assertExists()
         composeTestRule.onNodeWithText("gitSha:", substring = true).assertExists()
@@ -107,50 +108,8 @@ class CahierAppTest {
     }
 
     @Test
-    fun homeScreen_displaysAndNavigatesToText() {
-        composeTestRule.waitUntil(timeoutMillis = 5000) {
-            composeTestRule
-                .onAllNodesWithContentDescription("Add note")
-                .fetchSemanticsNodes().isNotEmpty()
-        }
-
-        composeTestRule.onNodeWithContentDescription("Add note").performClick()
-        composeTestRule.onNodeWithContentDescription("Text note").performClick()
-
-        composeTestRule
-            .onNodeWithText(composeTestRule.activity.getString(R.string.title),
-                useUnmergedTree = true)
-            .assertExists()
-        composeTestRule
-            .onNodeWithText(composeTestRule.activity.getString(R.string.note),
-                useUnmergedTree = true)
-            .assertExists()
-    }
-
-    @Test
-    fun textNoteCanvasScreen_savedState() {
-        composeTestRule.waitUntil(timeoutMillis = 5000) {
-            composeTestRule
-                .onAllNodesWithContentDescription("Add note")
-                .fetchSemanticsNodes().isNotEmpty()
-        }
-
-        composeTestRule.onNodeWithContentDescription("Add note").performClick()
-        composeTestRule.onNodeWithContentDescription("Text note").performClick()
-
-        val titleText = "My test title"
-        composeTestRule.onNode(hasSetTextAction() and
-                hasText(composeTestRule.activity.getString(R.string.title)))
-            .performTextInput(titleText)
-
-        val noteText = "This is a test note."
-        composeTestRule.onNode(hasSetTextAction() and
-                hasText(composeTestRule.activity.getString(R.string.note)))
-            .performTextInput(noteText)
-
-        composeTestRule.activityRule.scenario.recreate()
-
-        composeTestRule.onNodeWithText(titleText, useUnmergedTree = true).assertExists()
-        composeTestRule.onNodeWithText(noteText, useUnmergedTree = true).assertExists()
+    fun legacyTextCanvas_isNotEnteredFromNormalHome() {
+        composeTestRule.onNodeWithText("Text note").assertDoesNotExist()
+        composeTestRule.onNodeWithContentDescription("Text note").assertDoesNotExist()
     }
 }

@@ -89,7 +89,6 @@ fun NoteList(
     isCompact: Boolean,
     selectedNoteId: Long?,
     onAddNewNote: () -> Unit,
-    onAddNewTableNote: () -> Unit,
     onNoteClick: (Note) -> Unit,
     onToggleFavorite: (Long) -> Unit,
     onNewWindow: (Note) -> Unit,
@@ -138,12 +137,6 @@ fun NoteList(
                 ) {
                     OutlinedButton(onClick = onAddNewNote, modifier = Modifier.testTag("btn-new-note")) {
                         Text("New Note")
-                    }
-                    OutlinedButton(onClick = onAddNewTableNote, modifier = Modifier.testTag("btn-new-table")) {
-                        Text("Table Starter")
-                    }
-                    OutlinedButton(onClick = onOpenLastNote, modifier = Modifier.testTag("btn-open-last")) {
-                        Text(stringResource(R.string.open_last_note))
                     }
                 }
                 if (showDebugControls) {
@@ -618,7 +611,6 @@ fun NoteListPreview(
             isCompact = false,
             selectedNoteId = null,
             onAddNewNote = {},
-            onAddNewTableNote = {},
             onNoteClick = {},
             onToggleFavorite = {},
             onNewWindow = {},
