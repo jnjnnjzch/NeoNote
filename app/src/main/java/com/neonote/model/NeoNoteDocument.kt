@@ -1,8 +1,11 @@
 package com.neonote.model
 
+import kotlinx.serialization.Serializable
+
 /**
  * Root document aggregate for the v2 NeoNote model.
  */
+@Serializable
 data class NeoNoteDocument(
     val id: String,
     val title: String,

@@ -1,17 +1,22 @@
 package com.neonote.model
 
+import kotlinx.serialization.Serializable
+
 /**
  * Dedicated handwriting layer that is separate from rich content objects.
  */
+@Serializable
 data class InkLayer(
     val strokes: List<InkStroke> = emptyList(),
 )
 
+@Serializable
 data class InkStroke(
     val id: String,
     val points: List<InkPoint> = emptyList(),
 )
 
+@Serializable
 data class InkPoint(
     val x: Float,
     val y: Float,
