@@ -128,6 +128,44 @@ class DocumentSerializerTest {
     }
 
     @Test
+    fun encodeDecode_preservesPersistentStrokeMetadata() {
+        val text = TextContainerBlock(id = "block-1", x = 100f, y = 120f)
+        val document = TicDocument(
+            pages = listOf(
+                CanvasPage(
+                    blocks = listOf(text),
+                    strokeIds = listOf("stroke-1"),
+                    strokeAnchors = listOf(
+                        StrokeAnchor(
+                            blockId = "block-1",
+                            strokeIds = listOf("stroke-1"),
+                            anchorOriginX = 100f,
+                            anchorOriginY = 120f,
+                        )
+                    ),
+                    strokeTransforms = listOf(
+                        StrokeTransform(
+                            strokeId = "stroke-1",
+                            translateX = 12f,
+                            translateY = -4f,
+                        )
+                    )
+                )
+            )
+        )
+
+        val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
+        assertNotNull(decoded)
+        val page = decoded!!.pages.first()
+
+        assertEquals("stroke-1", page.strokeIds.single())
+        assertEquals("block-1", page.strokeAnchors.single().blockId)
+        assertEquals("stroke-1", page.strokeAnchors.single().strokeIds.single())
+        assertEquals(12f, page.strokeTransforms.single().translateX)
+        assertEquals(-4f, page.strokeTransforms.single().translateY)
+    }
+
+    @Test
     fun encodeDecode_roundTripsFormulaBlockSourceAndRendered() {
         val formula = FormulaBlock(
             x = 220f,
