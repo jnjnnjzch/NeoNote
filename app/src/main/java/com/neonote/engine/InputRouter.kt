@@ -62,9 +62,12 @@ public class InputRouter(
         if (pointer == null) return InputRouteResult(canvas = canvas, action = InputAction.Ignored)
         val pending = activeFingerDown
         if (pending != null && pointer.id == pending.pointerId) {
-            val dx = pointer.position.x - pending.start.x
-            val dy = pointer.position.y - pending.start.y
-            if (hypot(dx, dy) > tapSlop) {
+            val totalDx = pointer.position.x - pending.start.x
+            val totalDy = pointer.position.y - pending.start.y
+            if (pending.hasExceededTapSlop || hypot(totalDx, totalDy) > tapSlop) {
+                val previous = if (pending.hasExceededTapSlop) pending.last else pending.start
+                val dx = pointer.position.x - previous.x
+                val dy = pointer.position.y - previous.y
                 activeFingerDown = pending.copy(hasExceededTapSlop = true, last = pointer.position)
                 return InputRouteResult(canvas = canvas, action = InputAction.PanBy(dx = dx, dy = dy))
             }
