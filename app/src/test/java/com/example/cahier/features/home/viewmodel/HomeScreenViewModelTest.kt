@@ -92,9 +92,9 @@ class HomeScreenViewModelTest {
     }
 
     @Test
-    fun addDrawingNote_adds_a_drawing_note_to_repository() = runTest {
+    fun addUnifiedNote_adds_a_unified_drawing_note_to_repository() = runTest {
         var createdNoteId: Long? = null
-        viewModel.addDrawingNote { id -> createdNoteId = id }
+        viewModel.addUnifiedNote { id -> createdNoteId = id }
 
         val notes = notesRepository.getNotes()
         assertEquals(1, notes.size)

@@ -34,6 +34,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +60,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
@@ -117,6 +120,8 @@ import com.example.cahier.core.document.ImageBlock
 import com.example.cahier.core.document.FormulaBlock
 import com.example.cahier.features.drawing.CanvasTransformMapper.docToScreenX
 import com.example.cahier.features.drawing.CanvasTransformMapper.docToScreenY
+import com.example.cahier.features.drawing.CanvasTransformMapper.screenToCanvasX
+import com.example.cahier.features.drawing.CanvasTransformMapper.screenToCanvasY
 import com.example.cahier.features.drawing.CanvasTransformMapper.screenToDocDelta
 import com.example.cahier.features.home.AppMode
 import com.example.cahier.features.drawing.viewmodel.DrawingCanvasViewModel
@@ -142,6 +147,9 @@ fun DrawingCanvas(
     var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
     var resetViewNonce by rememberSaveable { mutableStateOf(0) }
     var inlineFocusedCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var formulaDialogOpen by rememberSaveable { mutableStateOf(false) }
+    var formulaSource by rememberSaveable { mutableStateOf("") }
+    var exportDialogOpen by rememberSaveable { mutableStateOf(false) }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -182,12 +190,30 @@ fun DrawingCanvas(
             .statusBarsPadding()
             .navigationBarsPadding()
             .imePadding()
+            .onPreviewKeyEvent { event ->
+                val native = event.nativeKeyEvent
+                if (
+                    native.action == AndroidKeyEvent.ACTION_DOWN &&
+                    native.keyCode == AndroidKeyEvent.KEYCODE_V &&
+                    native.isCtrlPressed
+                ) {
+                    val target =
+                        if (inlineFocusedCell != null) DrawingCanvasViewModel.ImagePasteTarget.INLINE_TABLE_CELL
+                        else DrawingCanvasViewModel.ImagePasteTarget.CANVAS_BLOCK
+                    drawingCanvasViewModel.pasteImageFromClipboard(target, inlineFocusedCell)
+                    true
+                } else {
+                    false
+                }
+            }
     ) {
         DrawingCanvasTopBar(
             drawingCanvasViewModel = drawingCanvasViewModel,
             appMode = appMode,
             onNavigateUp = navigateUp,
             onResetView = { resetViewNonce++ },
+            onFormulaClick = { formulaDialogOpen = true },
+            onExportClick = { exportDialogOpen = true },
             onPasteImage = {
                 val target =
                     if (inlineFocusedCell != null) DrawingCanvasViewModel.ImagePasteTarget.INLINE_TABLE_CELL
@@ -203,6 +229,55 @@ fun DrawingCanvas(
             appMode = appMode,
             resetViewNonce = resetViewNonce,
             onInlineTableCellFocused = { inlineFocusedCell = it }
+        )
+    }
+
+    if (formulaDialogOpen) {
+        AlertDialog(
+            onDismissRequest = { formulaDialogOpen = false },
+            title = { Text("Insert Formula") },
+            text = {
+                OutlinedTextField(
+                    value = formulaSource,
+                    onValueChange = { formulaSource = it },
+                    label = { Text("LaTeX source") }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    drawingCanvasViewModel.addFormulaBlock(formulaSource)
+                    formulaSource = ""
+                    formulaDialogOpen = false
+                }) { Text("Insert") }
+            },
+            dismissButton = {
+                TextButton(onClick = { formulaDialogOpen = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (exportDialogOpen) {
+        AlertDialog(
+            onDismissRequest = { exportDialogOpen = false },
+            title = { Text("Export Note") },
+            text = {
+                Column {
+                    Text("Formats:")
+                    Text("- PDF")
+                    Text("- HTML")
+                    Text("- Markdown")
+                    Text("- .ticnote")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    drawingCanvasViewModel.exportAllFormats()
+                    exportDialogOpen = false
+                }) { Text("Export") }
+            },
+            dismissButton = {
+                TextButton(onClick = { exportDialogOpen = false }) { Text("Cancel") }
+            }
         )
     }
 
@@ -245,6 +320,8 @@ private fun DrawingCanvasTopBar(
     appMode: AppMode,
     onNavigateUp: () -> Unit,
     onResetView: () -> Unit,
+    onFormulaClick: () -> Unit,
+    onExportClick: () -> Unit,
     onPasteImage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -298,7 +375,7 @@ private fun DrawingCanvasTopBar(
             )
             TextButton(onClick = drawingCanvasViewModel::undo) { Text("Undo") }
             TextButton(onClick = drawingCanvasViewModel::redo) { Text("Redo") }
-            TextButton(onClick = drawingCanvasViewModel::exportAllFormats) { Text("Export") }
+            TextButton(onClick = onExportClick) { Text("Export") }
             TextButton(onClick = { moreExpanded = true }) { Text("More") }
             DropdownMenu(expanded = moreExpanded, onDismissRequest = { moreExpanded = false }) {
                 DropdownMenuItem(
@@ -306,6 +383,13 @@ private fun DrawingCanvasTopBar(
                     onClick = {
                         moreExpanded = false
                         onResetView()
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Paste") },
+                    onClick = {
+                        moreExpanded = false
+                        onPasteImage()
                     }
                 )
                 if (appMode == AppMode.DEBUG) {
@@ -321,7 +405,7 @@ private fun DrawingCanvasTopBar(
                 Text(if (isEraserMode) "Pen" else "Eraser")
             }
             TextButton(onClick = { drawingCanvasViewModel.setSelectionMode(!selectionMode) }) {
-                Text("Select")
+                Text("Select/Lasso")
             }
             if (selectionMode) {
                 TextButton(onClick = drawingCanvasViewModel::toggleTextContainerSelection) {
@@ -332,7 +416,7 @@ private fun DrawingCanvasTopBar(
             TextButton(onClick = { /* text entry tool reserved */ }) { Text("Text") }
             TextButton(onClick = { drawingCanvasViewModel.insertInlineTableInTextContainer() }) { Text("Table") }
             TextButton(onClick = onPasteImage) { Text("Image") }
-            TextButton(onClick = { drawingCanvasViewModel.addFormulaBlock("x^2 + y^2 = z^2") }) { Text("Formula") }
+            TextButton(onClick = onFormulaClick) { Text("Formula") }
         }
         if (appMode == AppMode.DEBUG) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -499,6 +583,8 @@ private fun DrawingSurfaceWithTarget(
     val imageBlocks = page?.blocks?.filterIsInstance<ImageBlock>().orEmpty()
     val formulaBlocks = page?.blocks?.filterIsInstance<FormulaBlock>().orEmpty()
     var selectedInlineCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var selectedImageIndex by remember { mutableStateOf<Int?>(null) }
+    var requestTextFocusNonce by remember { mutableStateOf(0) }
 
     val dropTarget = remember {
         createDropTarget(activity) { uri, permissions ->
@@ -534,7 +620,9 @@ private fun DrawingSurfaceWithTarget(
         modifier = modifier
             .fillMaxSize()
             .pointerInteropFilter { event ->
-                if (!fingerPanZoomEnabled) return@pointerInteropFilter false
+                if (!fingerPanZoomEnabled || isSelectionMode || selectedImageIndex != null) {
+                    return@pointerInteropFilter false
+                }
                 val toolType = event.getToolType(0)
                 val isFinger = toolType == MotionEvent.TOOL_TYPE_FINGER
                 if (!isFinger) return@pointerInteropFilter false
@@ -649,6 +737,25 @@ private fun DrawingSurfaceWithTarget(
                 )
             },
             onRawMotionEvent = drawingCanvasViewModel::onRawMotionEvent,
+            consumeFingerInkInput = true,
+            onFingerTap = { sx, sy ->
+                val container = textContainer
+                if (container != null) {
+                    val left = docToScreenX(container.x, canvasTransform)
+                    val top = docToScreenY(container.y, canvasTransform)
+                    val right = left + (container.width * canvasTransform.scale)
+                    val bottom = top + (container.height * canvasTransform.scale)
+                    val hitsContainer = sx in left..right && sy in top..bottom
+                    if (hitsContainer) {
+                        requestTextFocusNonce++
+                        return@DrawingSurface
+                    }
+                }
+                val docX = screenToCanvasX(sx, canvasTransform)
+                val docY = screenToCanvasY(sy, canvasTransform)
+                drawingCanvasViewModel.placePrimaryTextContainerAt(docX, docY)
+                requestTextFocusNonce++
+            },
             modifier = Modifier.fillMaxSize()
         )
 
@@ -720,6 +827,7 @@ private fun DrawingSurfaceWithTarget(
                 onInlineToggleUnderline = drawingCanvasViewModel::toggleInlineTableCellUnderline,
                 onMove = drawingCanvasViewModel::moveTextContainerBy,
                 isSelected = textContainerSelected,
+                requestFocusNonce = requestTextFocusNonce,
                 modifier = Modifier
                     .offset {
                         IntOffset(
@@ -733,6 +841,7 @@ private fun DrawingSurfaceWithTarget(
         }
 
         imageBlocks.forEachIndexed { index, image ->
+            val isSelectedImage = selectedImageIndex == index
             AsyncImage(
                 model = image.assetPath,
                 contentDescription = "Image block $index",
@@ -746,8 +855,50 @@ private fun DrawingSurfaceWithTarget(
                     }
                     .width((image.width * canvasTransform.scale).dp)
                     .height((image.height * canvasTransform.scale).dp)
-                    .border(1.dp, NeoNoteVisualTokens.subtleBorder)
+                    .border(
+                        if (isSelectedImage) 2.dp else 1.dp,
+                        if (isSelectedImage) NeoNoteVisualTokens.selectedBorder else NeoNoteVisualTokens.subtleBorder
+                    )
+                    .pointerInput(index) {
+                        detectTapGestures(onTap = { selectedImageIndex = index })
+                    }
+                    .pointerInput(index, isSelectedImage) {
+                        if (isSelectedImage) {
+                            detectDragGestures { change, dragAmount ->
+                                change.consume()
+                                drawingCanvasViewModel.moveImageBlockBy(
+                                    index = index,
+                                    dx = screenToDocDelta(dragAmount.x, canvasTransform),
+                                    dy = screenToDocDelta(dragAmount.y, canvasTransform)
+                                )
+                            }
+                        }
+                    }
             )
+            if (isSelectedImage) {
+                Box(
+                    modifier = Modifier
+                        .offset {
+                            IntOffset(
+                                docToScreenX(image.x + image.width, canvasTransform).toInt() - 16,
+                                docToScreenY(image.y + image.height, canvasTransform).toInt() - 16
+                            )
+                        }
+                        .width(20.dp)
+                        .height(20.dp)
+                        .background(NeoNoteVisualTokens.activeCellOutline)
+                        .pointerInput(index) {
+                            detectDragGestures { change, dragAmount ->
+                                change.consume()
+                                drawingCanvasViewModel.resizeImageBlockBy(
+                                    index = index,
+                                    dw = screenToDocDelta(dragAmount.x, canvasTransform),
+                                    dh = screenToDocDelta(dragAmount.y, canvasTransform)
+                                )
+                            }
+                        }
+                )
+            }
         }
 
         formulaBlocks.forEachIndexed { index, formula ->
@@ -808,9 +959,16 @@ private fun TextContainerEditor(
     onInlineToggleUnderline: (Int, Int) -> Unit,
     onMove: (Float, Float) -> Unit,
     isSelected: Boolean,
+    requestFocusNonce: Int,
     modifier: Modifier = Modifier,
 ) {
             var containerFocused by remember { mutableStateOf(false) }
+            val paragraphBeforeFocusRequester = remember { FocusRequester() }
+            LaunchedEffect(requestFocusNonce) {
+                if (requestFocusNonce > 0) {
+                    paragraphBeforeFocusRequester.requestFocus()
+                }
+            }
             Surface(
                 modifier = modifier
                     .pointerInput(Unit) {
@@ -843,6 +1001,7 @@ private fun TextContainerEditor(
                 singleLine = false,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .focusRequester(paragraphBeforeFocusRequester)
                     .onFocusChanged { containerFocused = it.isFocused || containerFocused }
                     .testTag("tc-paragraph-before")
             )
@@ -1293,6 +1452,7 @@ private fun TextContainerParagraphPreview() {
             onInlineToggleUnderline = { _, _ -> },
             onMove = { _, _ -> },
             isSelected = false,
+            requestFocusNonce = 0,
             modifier = Modifier
                 .padding(20.dp)
                 .width(360.dp)
@@ -1337,6 +1497,7 @@ private fun TextContainerInlineTablePreview() {
             onInlineToggleUnderline = { _, _ -> },
             onMove = { _, _ -> },
             isSelected = false,
+            requestFocusNonce = 0,
             modifier = Modifier
                 .padding(20.dp)
                 .width(440.dp)

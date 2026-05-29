@@ -876,6 +876,25 @@ class DrawingCanvasViewModel @Inject constructor(
         }
     }
 
+    fun placePrimaryTextContainerAt(x: Float, y: Float) {
+        val current = _document.value
+        val page = current.pages.firstOrNull() ?: return
+        val idx = page.blocks.indexOfFirst { it is TextContainerBlock }
+        if (idx >= 0) {
+            val blocks = page.blocks.toMutableList()
+            val currentContainer = blocks[idx] as TextContainerBlock
+            blocks[idx] = currentContainer.copy(x = x, y = y)
+            persistDocument(current.copy(pages = listOf(page.copy(blocks = blocks))))
+            return
+        }
+        val container = TextContainerBlock(
+            x = x,
+            y = y,
+            content = TextContainerContent(nodes = listOf(ParagraphNode("")))
+        )
+        persistDocument(current.copy(pages = listOf(page.copy(blocks = page.blocks + container))))
+    }
+
     fun updateTableCell(
         row: Int,
         col: Int,
@@ -917,6 +936,31 @@ class DrawingCanvasViewModel @Inject constructor(
         val page = current.pages.firstOrNull() ?: return
         val imageBlock = ImageBlock(assetPath = assetPath)
         persistDocument(current.copy(pages = listOf(page.copy(blocks = page.blocks + imageBlock))))
+    }
+
+    fun moveImageBlockBy(index: Int, dx: Float, dy: Float) {
+        val current = _document.value
+        val page = current.pages.firstOrNull() ?: return
+        val imageIndexes = page.blocks.mapIndexedNotNull { i, b -> if (b is ImageBlock) i else null }
+        val blockIndex = imageIndexes.getOrNull(index) ?: return
+        val blocks = page.blocks.toMutableList()
+        val image = blocks[blockIndex] as ImageBlock
+        blocks[blockIndex] = image.copy(x = image.x + dx, y = image.y + dy)
+        persistDocument(current.copy(pages = listOf(page.copy(blocks = blocks))))
+    }
+
+    fun resizeImageBlockBy(index: Int, dw: Float, dh: Float) {
+        val current = _document.value
+        val page = current.pages.firstOrNull() ?: return
+        val imageIndexes = page.blocks.mapIndexedNotNull { i, b -> if (b is ImageBlock) i else null }
+        val blockIndex = imageIndexes.getOrNull(index) ?: return
+        val blocks = page.blocks.toMutableList()
+        val image = blocks[blockIndex] as ImageBlock
+        blocks[blockIndex] = image.copy(
+            width = (image.width + dw).coerceAtLeast(96f),
+            height = (image.height + dh).coerceAtLeast(96f)
+        )
+        persistDocument(current.copy(pages = listOf(page.copy(blocks = blocks))))
     }
 
     fun attachImageAssetToInlineCell(row: Int, col: Int, assetPath: String) {

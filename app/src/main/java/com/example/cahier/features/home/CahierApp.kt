@@ -24,7 +24,6 @@ import com.example.cahier.core.data.NoteType
 import com.example.cahier.core.navigation.CahierNavHost
 import com.example.cahier.core.ui.CahierTextureBitmapStore
 import com.example.cahier.core.navigation.DrawingCanvasDestination
-import com.example.cahier.core.navigation.TextCanvasDestination
 
 @Composable
 fun CahierApp(
@@ -38,7 +37,7 @@ fun CahierApp(
     LaunchedEffect(noteId, noteType) {
         if (noteId > 0) {
             val destination = when (noteType) {
-                NoteType.Text -> "${TextCanvasDestination.route}/$noteId"
+                NoteType.Text -> "${DrawingCanvasDestination.route}/$noteId"
                 NoteType.Drawing -> "${DrawingCanvasDestination.route}/$noteId"
                 else -> null
             }

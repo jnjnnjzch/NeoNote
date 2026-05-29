@@ -77,6 +77,8 @@ fun DrawingSurface(
     onSelectionLasso: (Offset, Offset) -> Unit = { _, _ -> },
     onMoveSelection: (Float, Float) -> Unit = { _, _ -> },
     onRawMotionEvent: (MotionEvent) -> Unit = {},
+    onFingerTap: (Float, Float) -> Unit = { _, _ -> },
+    consumeFingerInkInput: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val textureStore = LocalTextureStore.current
@@ -95,7 +97,11 @@ fun DrawingSurface(
                 .fillMaxSize()
                 .pointerInteropFilter { event ->
                     onRawMotionEvent(event)
-                    false
+                    val isFinger = event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER
+                    if (isFinger && event.actionMasked == MotionEvent.ACTION_UP) {
+                        onFingerTap(event.x, event.y)
+                    }
+                    consumeFingerInkInput && isFinger && !isSelectionMode && !isEraserMode
                 }
         ) {
             val canvas = drawContext.canvas.nativeCanvas

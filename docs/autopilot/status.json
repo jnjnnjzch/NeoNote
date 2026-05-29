@@ -1,8 +1,8 @@
 {
-  "current_goal": "P0_REACHABILITY_REPAIR",
+  "current_goal": "UNIFIED_NOTE_SURFACE_P0",
   "mode": "AUTOPILOT",
   "stop_policy": "stop_only_on_real_blocker",
-  "current_milestone": "p0_repair_pack",
+  "current_milestone": "unified_note_surface_reset",
   "milestones": {
     "0_legacy_tableblock_boundary": "PASS",
     "1_textcontainer_foundation": "PASS",

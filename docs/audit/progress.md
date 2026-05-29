@@ -134,3 +134,21 @@
 - Validation:
   - `.\gradlew.bat :app:assembleDebug` -> FAIL (environment network blocker downloading Gradle wrapper)
   - `.\gradlew.bat :app:testDebugUnitTest` -> FAIL (same blocker)
+
+## P0 Unified Note Surface Reset
+- Status: PARTIAL
+- Date: 2026-05-29
+- Current product status: `PRODUCT_PROTOTYPE_NOT_ONE_NOTE_LIKE`
+- Completed in this pass:
+  - Unified creation path (`New Note`) routed to one unified editor surface.
+  - `Table Starter` retained as template path to same unified editor.
+  - Tap-to-type baseline added: finger tap places/focuses primary `TextContainer`.
+  - Finger default ink consumption guard added in normal inking state.
+  - `Select/Lasso` label made explicit in normal toolbar.
+  - Formula insertion made reachable via normal dialog flow.
+  - Clipboard paste added via Ctrl+V + More/Paste fallback.
+  - Image blocks now support select + drag + resize interactions.
+  - Export options dialog exposed in normal path.
+- Validation:
+  - `.\gradlew.bat :app:assembleDebug` -> FAIL (wrapper download blocked by network permission)
+  - `.\gradlew.bat :app:testDebugUnitTest` -> FAIL (same blocker)

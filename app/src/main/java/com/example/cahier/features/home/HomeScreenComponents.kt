@@ -88,8 +88,7 @@ fun NoteList(
     otherNotes: List<Note>,
     isCompact: Boolean,
     selectedNoteId: Long?,
-    onAddNewTextNote: () -> Unit,
-    onAddNewDrawingNote: () -> Unit,
+    onAddNewNote: () -> Unit,
     onAddNewTableNote: () -> Unit,
     onNoteClick: (Note) -> Unit,
     onToggleFavorite: (Long) -> Unit,
@@ -127,20 +126,7 @@ fun NoteList(
                     }
                 )
             },
-            floatingActionButton = {
-                val expanded = rememberSaveable { mutableStateOf(false) }
-                CahierFloatingButton(
-                    expanded = expanded,
-                    onTextNoteSelected = {
-                        expanded.value = true
-                        onAddNewTextNote()
-                    },
-                    onDrawingNoteSelected = {
-                        expanded.value = true
-                        onAddNewDrawingNote()
-                    }
-                )
-            },
+            floatingActionButton = {},
             modifier = Modifier
         ) { innerPadding ->
             Column(modifier = Modifier.padding(innerPadding)) {
@@ -150,11 +136,11 @@ fun NoteList(
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedButton(onClick = onAddNewDrawingNote, modifier = Modifier.testTag("btn-new-ink")) {
-                        Text(stringResource(R.string.new_ink_note))
+                    OutlinedButton(onClick = onAddNewNote, modifier = Modifier.testTag("btn-new-note")) {
+                        Text("New Note")
                     }
                     OutlinedButton(onClick = onAddNewTableNote, modifier = Modifier.testTag("btn-new-table")) {
-                        Text(stringResource(R.string.new_table_note))
+                        Text("Table Starter")
                     }
                     OutlinedButton(onClick = onOpenLastNote, modifier = Modifier.testTag("btn-open-last")) {
                         Text(stringResource(R.string.open_last_note))
@@ -631,8 +617,7 @@ fun NoteListPreview(
             otherNotes = others,
             isCompact = false,
             selectedNoteId = null,
-            onAddNewTextNote = {},
-            onAddNewDrawingNote = {},
+            onAddNewNote = {},
             onAddNewTableNote = {},
             onNoteClick = {},
             onToggleFavorite = {},

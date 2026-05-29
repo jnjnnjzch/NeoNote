@@ -101,21 +101,18 @@ class HomeScreenViewModel @Inject constructor(
         }
     }
 
-    fun addNote(callback: (noteId: Long) -> Unit) {
+    fun addUnifiedNote(callback: (id: Long) -> Unit) {
         viewModelScope.launch {
-            val newNoteId = addNoteOfType(NoteType.Text)
-            newNoteId?.let {
-                callback(it)
-            }
-        }
-    }
-
-    fun addDrawingNote(callback: (id: Long) -> Unit) {
-        viewModelScope.launch {
-            val newNoteId = addNoteOfType(NoteType.Drawing)
-            newNoteId?.let {
-                callback(it)
-            }
+            val initialDoc = TicDocument(pages = listOf(CanvasPage(blocks = emptyList())))
+            val newNote = Note(
+                id = 0,
+                title = "",
+                type = NoteType.Drawing,
+                text = DocumentSerializer.encode(initialDoc)
+            )
+            val insertedId = noteRepository.addNote(newNote)
+            _uiState.value = CahierUiState(note = newNote.copy(id = insertedId))
+            callback(insertedId)
         }
     }
 
@@ -145,25 +142,6 @@ class HomeScreenViewModel @Inject constructor(
             val insertedId = noteRepository.addNote(newNote)
             _uiState.value = CahierUiState(note = newNote.copy(id = insertedId))
             callback(insertedId)
-        }
-    }
-
-    private suspend fun addNoteOfType(noteType: NoteType): Long? {
-        return try {
-            val newNote = Note(
-                id = 0,
-                title = "",
-                type = noteType,
-                text = if (noteType == NoteType.Text) "" else null,
-            )
-            val insertedId = noteRepository.addNote(newNote)
-            _uiState.value = CahierUiState(note = newNote.copy(id = insertedId))
-            insertedId
-        } catch (e: Exception) {
-            Log.e(TAG, "Error adding note: ${e.message}")
-            _uiState.value =
-                _uiState.value.copy(error = "Error adding note: ${e.message}")
-            null
         }
     }
 

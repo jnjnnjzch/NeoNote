@@ -275,22 +275,13 @@ private fun CahierNavigationSuite(
                                 else selectedNoteUIState.note.id,
                                 onNoteClick = {
                                     if (isCompact) {
-                                        if (it.type == NoteType.Drawing) {
-                                            navigateToDrawingCanvas(it.id)
-                                        } else {
-                                            navigateToCanvas(it.id)
-                                        }
+                                        navigateToDrawingCanvas(it.id)
                                     } else {
                                         homeScreenViewModel.selectNote(it.id)
                                     }
                                 },
-                                onAddNewTextNote = {
-                                    homeScreenViewModel.addNote { noteId ->
-                                        navigateToCanvas(noteId)
-                                    }
-                                },
-                                onAddNewDrawingNote = {
-                                    homeScreenViewModel.addDrawingNote { noteId ->
+                                onAddNewNote = {
+                                    homeScreenViewModel.addUnifiedNote { noteId ->
                                         navigateToDrawingCanvas(noteId)
                                     }
                                 },
@@ -308,10 +299,7 @@ private fun CahierNavigationSuite(
                                 },
                                 onOpenLastNote = {
                                     val latest = noteList.noteList.maxByOrNull { it.id }
-                                    latest?.let { note ->
-                                        if (note.type == NoteType.Drawing) navigateToDrawingCanvas(note.id)
-                                        else navigateToCanvas(note.id)
-                                    }
+                                    latest?.let { note -> navigateToDrawingCanvas(note.id) }
                                 },
                                 onStressTest = {
                                     val drawing = noteList.noteList
@@ -320,7 +308,7 @@ private fun CahierNavigationSuite(
                                     if (drawing != null) {
                                         navigateToDebugDrawingCanvas(drawing.id)
                                     } else {
-                                        homeScreenViewModel.addDrawingNote { noteId ->
+                                        homeScreenViewModel.addUnifiedNote { noteId ->
                                             navigateToDebugDrawingCanvas(noteId)
                                         }
                                     }
@@ -332,7 +320,7 @@ private fun CahierNavigationSuite(
                                     if (drawing != null) {
                                         navigateToDebugDrawingCanvas(drawing.id)
                                     } else {
-                                        homeScreenViewModel.addDrawingNote { noteId ->
+                                        homeScreenViewModel.addUnifiedNote { noteId ->
                                             navigateToDebugDrawingCanvas(noteId)
                                         }
                                     }
@@ -351,11 +339,7 @@ private fun CahierNavigationSuite(
                                         note = note,
                                         strokes = selectedNoteUIState.strokes,
                                         onClickToEdit = {
-                                            if (note.type == NoteType.Text) {
-                                                navigateToCanvas(note.id)
-                                            } else {
-                                                navigateToDrawingCanvas(note.id)
-                                            }
+                                            navigateToDrawingCanvas(note.id)
                                         }
                                     )
                                 }
@@ -453,8 +437,7 @@ private fun ListPaneContent(
     isCompact: Boolean,
     selectedNoteId: Long?,
     onNoteClick: (Note) -> Unit,
-    onAddNewTextNote: () -> Unit,
-    onAddNewDrawingNote: () -> Unit,
+    onAddNewNote: () -> Unit,
     onAddNewTableNote: () -> Unit,
     onToggleFavorite: (Long) -> Unit,
     onOpenLastNote: () -> Unit,
@@ -474,8 +457,7 @@ private fun ListPaneContent(
         isCompact = isCompact,
         selectedNoteId = selectedNoteId,
         onNoteClick = onNoteClick,
-        onAddNewTextNote = onAddNewTextNote,
-        onAddNewDrawingNote = onAddNewDrawingNote,
+        onAddNewNote = onAddNewNote,
         onAddNewTableNote = onAddNewTableNote,
         onDeleteNote = onDeleteNote,
         onToggleFavorite = onToggleFavorite,
