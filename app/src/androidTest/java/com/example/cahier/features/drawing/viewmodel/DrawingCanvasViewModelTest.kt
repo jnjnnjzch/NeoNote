@@ -28,12 +28,15 @@ import androidx.ink.brush.Brush
 import androidx.ink.brush.StockBrushes
 import androidx.ink.brush.compose.composeColor
 import androidx.ink.strokes.ImmutableStrokeInputBatch
+import androidx.ink.strokes.InputToolType
+import androidx.ink.strokes.MutableStrokeInputBatch
 import androidx.ink.strokes.Stroke
 import androidx.lifecycle.SavedStateHandle
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import coil3.ImageLoader
 import com.example.cahier.core.data.FakeNotesRepository
+import com.example.cahier.core.document.TextContainerBlock
 import com.example.cahier.core.navigation.DrawingCanvasDestination
 import com.example.cahier.core.ui.CahierTextureBitmapStore
 import com.example.cahier.core.utils.FileHelper
@@ -183,6 +186,65 @@ class DrawingCanvasViewModelTest {
         assertTrue(viewModel.canUndo.value)
         assertFalse(viewModel.canRedo.value)
         assertEquals(1, viewModel.uiState.value.strokes.size)
+    }
+
+    @Test
+    fun moving_textContainer_movesAnchoredStroke() = runTest {
+        viewModel.placePrimaryTextContainerAt(100f, 100f)
+        val container = viewModel.document.value.pages.first().blocks
+            .filterIsInstance<TextContainerBlock>()
+            .first()
+        val stroke = strokeInsideContainer(container)
+
+        viewModel.onStrokesFinished(listOf(stroke))
+        viewModel.moveTextContainerBy(25f, 40f)
+
+        assertEquals(container.id, viewModel.document.value.pages.first().strokeAnchors.single().blockId)
+        assertEquals(25f, viewModel.strokeTranslations.value[0]?.first ?: 0f, 0.01f)
+        assertEquals(40f, viewModel.strokeTranslations.value[0]?.second ?: 0f, 0.01f)
+    }
+
+    @Test
+    fun reloaded_note_preservesAnchoredStrokeTranslationAfterTextContainerMove() = runTest {
+        viewModel.placePrimaryTextContainerAt(100f, 100f)
+        val container = viewModel.document.value.pages.first().blocks
+            .filterIsInstance<TextContainerBlock>()
+            .first()
+        val stroke = strokeInsideContainer(container)
+
+        viewModel.onStrokesFinished(listOf(stroke))
+        viewModel.moveTextContainerBy(25f, 40f)
+
+        val savedStateHandle = SavedStateHandle(
+            mapOf(DrawingCanvasDestination.NOTE_ID_ARG to noteId)
+        )
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val reloadedViewModel = DrawingCanvasViewModel(
+            context, savedStateHandle, notesRepository, fileHelper, imageLoader,
+            customBrushDao = FakeCustomBrushDao(),
+            CahierTextureBitmapStore(context)
+        )
+
+        assertEquals(25f, reloadedViewModel.strokeTranslations.value[0]?.first ?: 0f, 0.01f)
+        assertEquals(40f, reloadedViewModel.strokeTranslations.value[0]?.second ?: 0f, 0.01f)
+    }
+
+    private fun strokeInsideContainer(container: TextContainerBlock): Stroke {
+        val brush = Brush(StockBrushes.marker(), 10f, 1f)
+        val inputs = MutableStrokeInputBatch()
+            .add(
+                type = InputToolType.STYLUS,
+                x = container.x + 20f,
+                y = container.y + 20f,
+                elapsedTimeMillis = 0L,
+            )
+            .add(
+                type = InputToolType.STYLUS,
+                x = container.x + 80f,
+                y = container.y + 40f,
+                elapsedTimeMillis = 16L,
+            )
+        return Stroke(brush, inputs)
     }
 
     @Test

@@ -57,10 +57,12 @@ import coil3.toBitmap
 import com.example.cahier.core.data.CustomBrush
 import com.example.cahier.core.data.NotesRepository
 import com.example.cahier.core.document.DocumentSerializer
+import com.example.cahier.core.document.Block
 import com.example.cahier.core.document.DocumentSettings
 import com.example.cahier.core.document.ImageBlock
 import com.example.cahier.core.document.FormulaBlock
 import com.example.cahier.core.document.StrokeAnchor
+import com.example.cahier.core.document.StrokeTransform
 import com.example.cahier.core.document.TableBlock
 import com.example.cahier.core.document.TableCell
 import com.example.cahier.core.document.ParagraphNode
@@ -174,7 +176,7 @@ class DrawingCanvasViewModel @Inject constructor(
     val document: StateFlow<TicDocument> = _document.asStateFlow()
     private val _strokeTranslations = MutableStateFlow<Map<Int, Pair<Float, Float>>>(emptyMap())
     val strokeTranslations: StateFlow<Map<Int, Pair<Float, Float>>> = _strokeTranslations.asStateFlow()
-    private val _manualStrokeTranslations = MutableStateFlow<Map<Int, Pair<Float, Float>>>(emptyMap())
+    private var focusedBlockId: String? = null
     private val _selectedStrokeIndices = MutableStateFlow<Set<Int>>(emptySet())
     val selectedStrokeIndices: StateFlow<Set<Int>> = _selectedStrokeIndices.asStateFlow()
     private val _selectedTextContainer = MutableStateFlow(false)
@@ -280,7 +282,6 @@ class DrawingCanvasViewModel @Inject constructor(
         _uiState.update { it.copy(strokes = newStrokes) }
         val maxIndex = newStrokes.lastIndex
         _selectedStrokeIndices.value = _selectedStrokeIndices.value.filter { it in 0..maxIndex }.toSet()
-        _manualStrokeTranslations.value = _manualStrokeTranslations.value.filterKeys { it in 0..maxIndex }
         refreshSelectionState()
         updateUndoRedoState()
         recomputeStrokeTranslations()
@@ -305,12 +306,14 @@ class DrawingCanvasViewModel @Inject constructor(
                     anchor.endStrokeIndexInclusive >= anchor.startStrokeIndex
                 )
         }
+        val updatedTransforms = page.strokeTransforms.filter { it.strokeId in validIds }
         persistDocument(
             current.copy(
                 pages = listOf(
                     page.copy(
                         strokeIds = remapped,
-                        strokeAnchors = updatedAnchors
+                        strokeAnchors = updatedAnchors,
+                        strokeTransforms = updatedTransforms
                     )
                 )
             )
@@ -449,8 +452,7 @@ class DrawingCanvasViewModel @Inject constructor(
         val newStrokes = currentStrokes + finishedStrokes
         updateStrokes(newStrokes)
         _inkDebugMetrics.update { it.copy(finalizedStrokeCount = newStrokes.size) }
-        // Normal Mode no longer uses automatic ink anchoring as primary behavior.
-        // Keep legacy anchor data compatible via recompute/read paths.
+        anchorNewStrokes(startIndex = currentStrokes.size, count = finishedStrokes.size)
         viewModelScope.launch {
             saveStrokes()
         }
@@ -874,6 +876,7 @@ class DrawingCanvasViewModel @Inject constructor(
                 y = container.y + dy
             )
         }
+        recomputeStrokeTranslations()
     }
 
     fun placePrimaryTextContainerAt(x: Float, y: Float) {
@@ -885,6 +888,7 @@ class DrawingCanvasViewModel @Inject constructor(
             val currentContainer = blocks[idx] as TextContainerBlock
             blocks[idx] = currentContainer.copy(x = x, y = y)
             persistDocument(current.copy(pages = listOf(page.copy(blocks = blocks))))
+            recomputeStrokeTranslations()
             return
         }
         val container = TextContainerBlock(
@@ -893,6 +897,7 @@ class DrawingCanvasViewModel @Inject constructor(
             content = TextContainerContent(nodes = listOf(ParagraphNode("")))
         )
         persistDocument(current.copy(pages = listOf(page.copy(blocks = page.blocks + container))))
+        recomputeStrokeTranslations()
     }
 
     fun updateTableCell(
@@ -1158,19 +1163,24 @@ class DrawingCanvasViewModel @Inject constructor(
         return inline
     }
 
+    fun setFocusedBlockId(blockId: String?) {
+        focusedBlockId = blockId
+    }
+
     private fun anchorNewStrokes(startIndex: Int, count: Int) {
         if (count <= 0) return
         val current = _document.value
         val page = current.pages.firstOrNull() ?: return
-        val table = page.blocks.filterIsInstance<TableBlock>().firstOrNull() ?: return
         val ids = page.strokeIds.drop(startIndex).take(count)
+        if (ids.isEmpty()) return
+        val target = findAnchorTargetBlock(page.blocks, startIndex, count) ?: return
         val anchor = StrokeAnchor(
-            blockId = table.id,
+            blockId = target.id,
             strokeIds = ids,
-            startStrokeIndex = startIndex,
-            endStrokeIndexInclusive = startIndex + count - 1,
-            anchorOriginX = table.x,
-            anchorOriginY = table.y
+            startStrokeIndex = null,
+            endStrokeIndexInclusive = null,
+            anchorOriginX = target.x,
+            anchorOriginY = target.y
         )
         val updated = current.copy(
             pages = listOf(page.copy(strokeAnchors = page.strokeAnchors + anchor))
@@ -1179,15 +1189,37 @@ class DrawingCanvasViewModel @Inject constructor(
         recomputeStrokeTranslations()
     }
 
+    private fun findAnchorTargetBlock(blocks: List<Block>, startIndex: Int, count: Int): Block? {
+        val focused = focusedBlockId?.let { id -> blocks.firstOrNull { it.id == id } }
+        if (focused != null) return focused
+
+        val finishedStrokes = _uiState.value.strokes.drop(startIndex).take(count)
+        return blocks.firstOrNull { block ->
+            finishedStrokes.any { stroke -> strokeIntersectsBlock(stroke, block) }
+        }
+    }
+
+    private fun strokeIntersectsBlock(stroke: Stroke, block: Block): Boolean {
+        val top = MutableSegment(
+            MutableVec(block.x, block.y),
+            MutableVec(block.x + block.width, block.y)
+        )
+        val blockBounds = MutableParallelogram().populateFromSegmentAndPadding(
+            top,
+            maxOf(block.height, 1f)
+        )
+        return stroke.shape.intersects(blockBounds, AffineTransform.IDENTITY)
+    }
+
     private fun recomputeStrokeTranslations() {
         val page = _document.value.pages.firstOrNull() ?: return
-        val tableById = page.blocks.filterIsInstance<TableBlock>().associateBy { it.id }
+        val blockById = page.blocks.associateBy { it.id }
         val strokeIndexById = page.strokeIds.withIndex().associate { (idx, id) -> id to idx }
         val translations = mutableMapOf<Int, Pair<Float, Float>>()
         page.strokeAnchors.forEach { anchor ->
-            val table = tableById[anchor.blockId] ?: return@forEach
-            val dx = table.x - anchor.anchorOriginX
-            val dy = table.y - anchor.anchorOriginY
+            val block = blockById[anchor.blockId] ?: return@forEach
+            val dx = block.x - anchor.anchorOriginX
+            val dy = block.y - anchor.anchorOriginY
             if (anchor.strokeIds.isNotEmpty()) {
                 anchor.strokeIds.forEach { strokeId ->
                     val index = strokeIndexById[strokeId] ?: return@forEach
@@ -1203,9 +1235,10 @@ class DrawingCanvasViewModel @Inject constructor(
                 }
             }
         }
-        _manualStrokeTranslations.value.forEach { (index, delta) ->
+        page.strokeTransforms.forEach { transform ->
+            val index = strokeIndexById[transform.strokeId] ?: return@forEach
             val base = translations[index] ?: (0f to 0f)
-            translations[index] = (base.first + delta.first) to (base.second + delta.second)
+            translations[index] = (base.first + transform.translateX) to (base.second + transform.translateY)
         }
         _strokeTranslations.value = translations
     }
@@ -1295,14 +1328,26 @@ class DrawingCanvasViewModel @Inject constructor(
             moveTextContainerBy(dx, dy)
         }
         if (_selectedStrokeIndices.value.isNotEmpty()) {
-            val updated = _manualStrokeTranslations.value.toMutableMap()
-            _selectedStrokeIndices.value.forEach { index ->
-                val prev = updated[index] ?: (0f to 0f)
-                updated[index] = (prev.first + dx) to (prev.second + dy)
-            }
-            _manualStrokeTranslations.value = updated
-            recomputeStrokeTranslations()
+            persistStrokeTranslations(_selectedStrokeIndices.value, dx, dy)
         }
+    }
+
+    private fun persistStrokeTranslations(indices: Set<Int>, dx: Float, dy: Float) {
+        val current = _document.value
+        val page = current.pages.firstOrNull() ?: return
+        val selectedIds = indices.mapNotNull { page.strokeIds.getOrNull(it) }.toSet()
+        if (selectedIds.isEmpty()) return
+        val transformsById = page.strokeTransforms.associateBy { it.strokeId }.toMutableMap()
+        selectedIds.forEach { strokeId ->
+            val previous = transformsById[strokeId] ?: StrokeTransform(strokeId = strokeId)
+            transformsById[strokeId] = previous.copy(
+                translateX = previous.translateX + dx,
+                translateY = previous.translateY + dy
+            )
+        }
+        val updatedTransforms = page.strokeIds.mapNotNull { transformsById[it] }
+        persistDocument(current.copy(pages = listOf(page.copy(strokeTransforms = updatedTransforms))))
+        recomputeStrokeTranslations()
     }
 
     fun exportAllFormats() {
