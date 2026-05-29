@@ -55,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.neonote.engine.InputMode
+import com.neonote.engine.InkStrokeWidthMapper
 import com.neonote.engine.InputRouter
 import com.neonote.engine.PointerEventType
 import com.neonote.input.AndroidPointerSnapshot
@@ -213,7 +214,7 @@ private fun InkLayer(
                     color = Color(0xFF0F172A),
                     start = Offset(start.x, start.y),
                     end = Offset(end.x, end.y),
-                    strokeWidth = 3f,
+                    strokeWidth = InkStrokeWidthMapper.widthForPressure((start.pressure + end.pressure) / 2f),
                     cap = StrokeCap.Round,
                 )
             }

@@ -6,6 +6,7 @@ import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerType
 import com.neonote.engine.InputEvent
+import com.neonote.engine.InputInkSample
 import com.neonote.engine.InputPointer
 import com.neonote.engine.PointerEventType
 import com.neonote.model.CanvasPoint
@@ -73,6 +74,8 @@ public class ComposeInputAdapter {
             androidSource = source,
         ),
         pressure = platformPointer?.pressure ?: 1f,
+        rawPressure = platformPointer?.pressure,
+        historicalSamples = platformPointer?.historicalSamples.orEmpty(),
     )
 }
 
@@ -87,6 +90,17 @@ public fun MotionEvent.toAndroidPointerSnapshot(): AndroidPointerSnapshot {
                 toolType = getToolType(index),
                 pressure = getPressure(index),
                 source = eventSource,
+                historicalSamples = List(historySize) { historyIndex ->
+                    val pressure = getHistoricalPressure(index, historyIndex)
+                    InputInkSample(
+                        position = CanvasPoint(
+                            x = getHistoricalX(index, historyIndex),
+                            y = getHistoricalY(index, historyIndex),
+                        ),
+                        pressure = pressure,
+                        rawPressure = pressure,
+                    )
+                },
             )
         },
     )
