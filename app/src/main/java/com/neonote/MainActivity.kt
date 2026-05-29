@@ -23,8 +23,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -32,11 +36,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
@@ -47,13 +52,14 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.neonote.engine.InputAction
-import com.neonote.engine.InputEvent
 import com.neonote.engine.InputMode
-import com.neonote.engine.InputPointer
 import com.neonote.engine.InputRouter
 import com.neonote.engine.PointerEventType
-import com.neonote.engine.PointerTool
+import com.neonote.input.AndroidPointerSnapshot
+import com.neonote.input.ComposeInputAdapter
+import com.neonote.input.InputDiagnostics
+import com.neonote.input.describeAndroidSource
+import com.neonote.input.toAndroidPointerSnapshot
 import com.neonote.model.CanvasObject
 import com.neonote.model.CanvasPoint
 import com.neonote.model.InlineText
@@ -86,6 +92,7 @@ private fun NeoNoteEditorScreen(controller: NeoNoteEditorController) {
             title = state.document.title,
             selectionMode = selectionMode,
             viewportLabel = "pan=(${state.viewport.panOffsetX.roundToInt()}, ${state.viewport.panOffsetY.roundToInt()}) zoom=${"%.2f".format(state.viewport.zoomScale)}x",
+            diagnosticsLabel = controller.inputDiagnostics.asToolbarText(),
             onToggleSelectionMode = { controller.setSelectionMode(!selectionMode) },
         )
         InfiniteCanvasViewport(
@@ -101,6 +108,7 @@ private fun EditorToolbar(
     title: String,
     selectionMode: Boolean,
     viewportLabel: String,
+    diagnosticsLabel: String,
     onToggleSelectionMode: () -> Unit,
 ) {
     Row(
@@ -113,6 +121,7 @@ private fun EditorToolbar(
         Column(modifier = Modifier.weight(1f)) {
             Text(text = title, fontWeight = FontWeight.SemiBold, color = Color(0xFF0F172A))
             Text(text = viewportLabel, style = MaterialTheme.typography.bodySmall, color = Color(0xFF64748B))
+            Text(text = diagnosticsLabel, style = MaterialTheme.typography.bodySmall, color = Color(0xFF475569))
         }
         Button(onClick = onToggleSelectionMode) {
             Text(if (selectionMode) "Selection: ON" else "Selection: OFF")
@@ -120,6 +129,7 @@ private fun EditorToolbar(
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun InfiniteCanvasViewport(
     controller: NeoNoteEditorController,
@@ -127,12 +137,20 @@ private fun InfiniteCanvasViewport(
     modifier: Modifier = Modifier,
 ) {
     val router = remember { InputRouter() }
+    val inputAdapter = remember { ComposeInputAdapter() }
+    var platformSnapshot by remember { mutableStateOf<AndroidPointerSnapshot?>(null) }
     Box(
         modifier = modifier
             .background(Color(0xFFEFF6FF))
+            .pointerInteropFilter { motionEvent ->
+                platformSnapshot = motionEvent.toAndroidPointerSnapshot()
+                false
+            }
             .pointerInput(selectionMode) {
                 handleCanvasPointerInput(
                     router = router,
+                    inputAdapter = inputAdapter,
+                    platformSnapshotProvider = { platformSnapshot },
                     controller = controller,
                     selectionMode = selectionMode,
                 )
@@ -256,6 +274,8 @@ private fun RichContentBoxView(
 
 private suspend fun PointerInputScope.handleCanvasPointerInput(
     router: InputRouter,
+    inputAdapter: ComposeInputAdapter,
+    platformSnapshotProvider: () -> AndroidPointerSnapshot?,
     controller: NeoNoteEditorController,
     selectionMode: Boolean,
 ) {
@@ -263,53 +283,62 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
         if (down.isConsumed) return@awaitEachGesture
 
-        routePointer(
+        routePointerEvent(
             router = router,
+            inputAdapter = inputAdapter,
             controller = controller,
             type = PointerEventType.Down,
-            position = down.position,
+            changes = listOf(down),
+            platformSnapshot = platformSnapshotProvider(),
             selectionMode = selectionMode,
         )
 
         while (true) {
             val event = awaitPointerEvent(pass = PointerEventPass.Final)
+            val platformSnapshot = platformSnapshotProvider()
+            controller.updateInputDiagnostics(inputAdapter.diagnostics(event, platformSnapshot))
             if (event.changes.any { it.isConsumed }) return@awaitEachGesture
 
             val pressedChanges = event.changes.filter { it.pressed }
             if (pressedChanges.size >= 2) {
                 val zoomChange = event.calculateZoom()
                 val centroid = event.calculateCentroid(useCurrent = true)
-                routePointer(
+                routePointerEvent(
                     router = router,
+                    inputAdapter = inputAdapter,
                     controller = controller,
                     type = PointerEventType.Move,
-                    position = centroid,
-                    pointerCount = pressedChanges.size,
+                    changes = pressedChanges,
+                    platformSnapshot = platformSnapshot,
                     selectionMode = selectionMode,
                 )
                 controller.zoomViewportBy(zoomChange, CanvasPoint(centroid.x, centroid.y))
-                event.changes.forEach(PointerInputChange::consume)
+                event.changes.forEach { it.consume() }
                 continue
             }
 
             val primary = event.changes.firstOrNull() ?: return@awaitEachGesture
             if (primary.changedToUpIgnoreConsumed()) {
-                routePointer(
+                routePointerEvent(
                     router = router,
+                    inputAdapter = inputAdapter,
                     controller = controller,
                     type = PointerEventType.Up,
-                    position = primary.position,
+                    changes = listOf(primary),
+                    platformSnapshot = platformSnapshot,
                     selectionMode = selectionMode,
                 )
                 return@awaitEachGesture
             }
 
             if (primary.pressed && primary.positionChange() != Offset.Zero) {
-                routePointer(
+                routePointerEvent(
                     router = router,
+                    inputAdapter = inputAdapter,
                     controller = controller,
                     type = PointerEventType.Move,
-                    position = primary.position,
+                    changes = listOf(primary),
+                    platformSnapshot = platformSnapshot,
                     selectionMode = selectionMode,
                 )
             }
@@ -317,33 +346,35 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
     }
 }
 
-private fun routePointer(
+private fun routePointerEvent(
     router: InputRouter,
+    inputAdapter: ComposeInputAdapter,
     controller: NeoNoteEditorController,
     type: PointerEventType,
-    position: Offset,
-    pointerCount: Int = 1,
+    changes: List<PointerInputChange>,
+    platformSnapshot: AndroidPointerSnapshot?,
     selectionMode: Boolean,
 ) {
-    val pointers = List(pointerCount) { index ->
-        InputPointer(
-            id = index + 1,
-            position = CanvasPoint(position.x + index, position.y + index),
-            tool = PointerTool.Finger,
-        )
-    }
-    val result = router.route(
-        canvas = controller.currentCanvas,
-        event = InputEvent(type = type, pointers = pointers),
+    val inputEvent = inputAdapter.toInputEvent(
+        type = type,
+        changes = changes,
+        platformSnapshot = platformSnapshot,
+    ) ?: return
+    controller.updateInputDiagnostics(
+        InputDiagnostics(
+            tool = inputEvent.pointers.first().tool,
+            pressure = inputEvent.primaryPressure,
+            pointerCount = inputEvent.pointers.size,
+            deviceId = platformSnapshot?.deviceId,
+            source = platformSnapshot?.source,
+            sourceDescription = describeAndroidSource(platformSnapshot?.source),
+        ),
+    )
+    controller.routeInputEvent(
+        router = router,
+        event = inputEvent,
         mode = if (selectionMode) InputMode.Selection else InputMode.Write,
     )
-    when (val action = result.action) {
-        is InputAction.PanBy -> controller.panViewportBy(action.dx, action.dy)
-        is InputAction.CreateOrFocusRichContentBox -> {
-            controller.focusOrCreateRichContentBox(controller.screenToDocument(action.position))
-        }
-        else -> Unit
-    }
 }
 
 private fun RichContentBox.plainText(): String = content.blocks.joinToString("\n") { block ->

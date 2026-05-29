@@ -7,6 +7,11 @@ import androidx.compose.ui.geometry.Offset
 import com.neonote.engine.CanvasCommand
 import com.neonote.engine.CanvasCommandResult
 import com.neonote.engine.CanvasEngine
+import com.neonote.engine.InputAction
+import com.neonote.engine.InputEvent
+import com.neonote.engine.InputMode
+import com.neonote.engine.InputRouteResult
+import com.neonote.engine.InputRouter
 import com.neonote.engine.SelectionCommand
 import com.neonote.engine.SelectionCommandResult
 import com.neonote.engine.SelectionEngine
@@ -24,6 +29,7 @@ import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
 import com.neonote.model.SelectionState
 import com.neonote.model.ViewportState
+import com.neonote.input.InputDiagnostics
 
 private const val DefaultBoxWidth = 320f
 private const val DefaultBoxHeight = 160f
@@ -43,11 +49,34 @@ public class NeoNoteEditorController(
     public var state: EditorState by mutableStateOf(initialState)
         private set
 
+    public var inputDiagnostics: InputDiagnostics by mutableStateOf(InputDiagnostics())
+        private set
+
     public val currentCanvas: InfiniteCanvas
         get() = currentPage.canvas
 
     private val currentPage: NotePage
         get() = state.document.pages.first { it.id == state.currentPageId }
+
+
+    public fun updateInputDiagnostics(diagnostics: InputDiagnostics) {
+        inputDiagnostics = diagnostics
+    }
+
+    public fun routeInputEvent(
+        router: InputRouter,
+        event: InputEvent,
+        mode: InputMode = InputMode.Write,
+    ): InputRouteResult {
+        val result = router.route(canvas = currentCanvas, event = event, mode = mode)
+        when (val action = result.action) {
+            is InputAction.PanBy -> panViewportBy(action.dx, action.dy)
+            is InputAction.CreateOrFocusRichContentBox -> focusOrCreateRichContentBox(screenToDocument(action.position))
+            is InputAction.FocusExisting -> action.objectId?.let(::focusRichContentBox)
+            else -> Unit
+        }
+        return result
+    }
 
     public fun setSelectionMode(enabled: Boolean) {
         state = state.copy(
