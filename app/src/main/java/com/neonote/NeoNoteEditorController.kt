@@ -7,6 +7,9 @@ import androidx.compose.ui.geometry.Offset
 import com.neonote.engine.CanvasCommand
 import com.neonote.engine.CanvasCommandResult
 import com.neonote.engine.CanvasEngine
+import com.neonote.engine.DocumentCommand
+import com.neonote.engine.DocumentCommandResult
+import com.neonote.engine.DocumentEngine
 import com.neonote.engine.IdGenerator
 import com.neonote.engine.InkCommand
 import com.neonote.engine.InkCommandResult
@@ -36,6 +39,7 @@ import com.neonote.model.EditorTool
 import com.neonote.model.InfiniteCanvas
 import com.neonote.model.InkPoint
 import com.neonote.model.InkStroke
+import com.neonote.model.InkStrokeRef
 import com.neonote.model.NeoNoteDocument
 import com.neonote.model.NotePage
 import com.neonote.model.RichContent
@@ -58,6 +62,7 @@ public class NeoNoteEditorController(
     private val selectionEngine: SelectionEngine = SelectionEngine(),
     private val inkEngine: InkEngine = InkEngine(SequentialIdGenerator()),
     private val richContentEngine: RichContentEngine = RichContentEngine(),
+    private val documentEngine: DocumentEngine = DocumentEngine(SequentialIdGenerator()),
 ) {
     public var state: EditorState by mutableStateOf(initialState)
         private set
@@ -77,12 +82,25 @@ public class NeoNoteEditorController(
     public val currentCanvas: InfiniteCanvas
         get() = currentPage.canvas
 
+    public val currentPageIndex: Int
+        get() = state.document.pages.indexOfFirst { it.id == state.currentPageId }.coerceAtLeast(0)
+
+    public val currentPageNumber: Int
+        get() = currentPageIndex + 1
+
+    public val pageCount: Int
+        get() = state.document.pages.size
+
+    public val canSwitchToPreviousPage: Boolean
+        get() = currentPageIndex > 0
+
+    public val canSwitchToNextPage: Boolean
+        get() = currentPageIndex < pageCount - 1
+
     private var activeSelectionGesture: ActiveSelectionGesture? = null
 
     private val currentPage: NotePage
         get() = state.document.pages.first { it.id == state.currentPageId }
-
-
 
     public suspend fun saveDocument(store: PersistenceStore): PersistenceResult.Saved {
         val saved = store.save(state.document)
@@ -117,6 +135,39 @@ public class NeoNoteEditorController(
         inputDiagnostics = diagnostics
     }
 
+    public fun addPage() {
+        val result = documentEngine.execute(DocumentCommand.AddPage(state.document)) as DocumentCommandResult.PageAdded
+        state = state.copy(document = result.document)
+        switchPage(result.page.id)
+    }
+
+    public fun switchToPreviousPage() {
+        if (!canSwitchToPreviousPage) return
+        switchPage(state.document.pages[currentPageIndex - 1].id)
+    }
+
+    public fun switchToNextPage() {
+        if (!canSwitchToNextPage) return
+        switchPage(state.document.pages[currentPageIndex + 1].id)
+    }
+
+    public fun switchPage(pageId: String) {
+        if (pageId == state.currentPageId) return
+        val documentWithClearedFocus = state.document.withCanvasForPage(
+            pageId = currentPage.id,
+            canvas = currentCanvas.setFocusedRichContentBox(null),
+        )
+        val clearedState = state.copy(
+            document = documentWithClearedFocus,
+            focusedRichContentBoxId = null,
+            selection = SelectionState(),
+        )
+        val result = documentEngine.execute(DocumentCommand.SwitchPage(clearedState, pageId)) as DocumentCommandResult.PageSwitched
+        state = result.state
+        activeSelectionGesture = null
+        inkSession = InkSession.fromCanvas(currentCanvas)
+    }
+
     public fun routeInputEvent(
         router: InputRouter,
         event: InputEvent,
@@ -126,8 +177,6 @@ public class NeoNoteEditorController(
         when (val action = result.action) {
             is InputAction.BeginInk -> beginInk(action.position, action.pressure, action.rawPressure)
             is InputAction.ContinueInk -> continueInk(action.samples)
-            InputAction.EndInteraction -> endInkIfActive()
-            InputAction.CancelInteraction -> cancelInkIfActive()
             is InputAction.PanBy -> panViewportBy(action.dx, action.dy)
             is InputAction.CreateOrFocusRichContentBox -> focusOrCreateRichContentBox(screenToDocument(action.position))
             is InputAction.FocusExisting -> action.objectId?.let(::focusRichContentBox)
@@ -396,8 +445,13 @@ public class NeoNoteEditorController(
         return "rich-content-$next"
     }
 
-    private fun NeoNoteDocument.withCanvas(canvas: InfiniteCanvas): NeoNoteDocument = copy(
-        pages = pages.map { page -> if (page.id == state.currentPageId) page.copy(canvas = canvas) else page },
+    private fun NeoNoteDocument.withCanvas(canvas: InfiniteCanvas): NeoNoteDocument = withCanvasForPage(
+        pageId = state.currentPageId,
+        canvas = canvas,
+    )
+
+    private fun NeoNoteDocument.withCanvasForPage(pageId: String?, canvas: InfiniteCanvas): NeoNoteDocument = copy(
+        pages = pages.map { page -> if (page.id == pageId) page.copy(canvas = canvas) else page },
         revision = revision + 1,
     )
 }

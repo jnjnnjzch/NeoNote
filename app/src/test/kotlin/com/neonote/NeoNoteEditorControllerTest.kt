@@ -22,9 +22,82 @@ import com.neonote.model.ViewportState
 import com.neonote.model.RichContentBox
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class NeoNoteEditorControllerTest {
+
+    @Test
+    fun `add page appends a blank page and switches to it`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 20f))
+        val firstPageId = controller.state.currentPageId
+
+        controller.addPage()
+
+        assertEquals(2, controller.pageCount)
+        assertEquals(2, controller.currentPageNumber)
+        assertTrue(controller.state.currentPageId != firstPageId)
+        assertTrue(controller.currentCanvas.objects.isEmpty())
+        assertTrue(controller.currentCanvas.inkLayer.strokes.isEmpty())
+    }
+
+    @Test
+    fun `switch page exposes only that page canvas for editing`() {
+        val controller = NeoNoteEditorController()
+        val firstPageId = controller.state.currentPageId!!
+        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 20f))
+        val firstBoxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(firstBoxId, "first page")
+
+        controller.addPage()
+        val secondPageId = controller.state.currentPageId!!
+        controller.focusOrCreateRichContentBox(CanvasPoint(100f, 120f))
+        val secondBoxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(secondBoxId, "second page")
+
+        controller.switchPage(firstPageId)
+        assertEquals(1, controller.currentPageNumber)
+        assertEquals("first page", (controller.currentCanvas.objects.single() as RichContentBox).toPlainText())
+
+        controller.switchPage(secondPageId)
+        assertEquals(2, controller.currentPageNumber)
+        assertEquals("second page", (controller.currentCanvas.objects.single() as RichContentBox).toPlainText())
+    }
+
+    @Test
+    fun `switch page clears selection focus and active ink session`() {
+        val controller = NeoNoteEditorController()
+        val router = InputRouter()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.addPage()
+        controller.switchToPreviousPage()
+        controller.selectCanvasObject(boxId)
+
+        controller.switchToNextPage()
+
+        assertTrue(controller.state.selection.selectedRefs.isEmpty())
+        controller.switchToPreviousPage()
+        controller.focusRichContentBox(boxId)
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(5f, 5f), tool = PointerTool.SPen)),
+            ),
+        )
+        assertTrue(controller.activeInkStroke != null)
+
+        controller.switchToNextPage()
+
+        assertNull(controller.state.focusedRichContentBoxId)
+        assertNull(controller.activeInkStroke)
+        controller.switchToPreviousPage()
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals(false, box.isFocused)
+        assertTrue(controller.currentCanvas.inkLayer.strokes.isEmpty())
+    }
     @Test
     fun `panning viewport does not move document objects`() {
         val controller = NeoNoteEditorController()
@@ -315,6 +388,7 @@ class NeoNoteEditorControllerTest {
         assertEquals(listOf(InkPoint(15f, 25f), InkPoint(70f, 25f)), movedStroke.points)
     }
 
+    @Test
     fun `selection mode clears focus and ignores rich content text edits`() {
         val controller = NeoNoteEditorController()
         controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
