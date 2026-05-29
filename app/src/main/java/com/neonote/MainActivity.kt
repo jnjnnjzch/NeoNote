@@ -6,8 +6,6 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -271,28 +269,6 @@ private fun RichContentBoxView(
         .clip(RoundedCornerShape(14.dp))
         .background(Color.White)
         .border(width = 2.dp, color = borderColor, shape = RoundedCornerShape(14.dp))
-        .then(
-            if (selectionMode) {
-                Modifier
-                    .pointerInput(box.id) {
-                        detectTapGestures(onTap = { controller.selectCanvasObject(box.id) })
-                    }
-                    .pointerInput(box.id, selected) {
-                        detectDragGestures(
-                            onDragStart = { controller.selectCanvasObject(box.id) },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                if (!controller.state.selection.isObjectSelected(box.id)) {
-                                    controller.selectCanvasObject(box.id)
-                                }
-                                controller.moveSelectedObjectsByScreenDelta(dragAmount)
-                            },
-                        )
-                    }
-            } else {
-                Modifier
-            },
-        )
 
     Box(modifier = modifier.padding(8.dp)) {
         TextField(

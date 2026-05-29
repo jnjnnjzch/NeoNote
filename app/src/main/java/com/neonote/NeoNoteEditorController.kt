@@ -26,6 +26,7 @@ import com.neonote.engine.SelectionCommandResult
 import com.neonote.engine.SelectionEngine
 import com.neonote.input.InputDiagnostics
 import com.neonote.model.CanvasObject
+import com.neonote.model.CanvasObjectRef
 import com.neonote.model.CanvasPoint
 import com.neonote.model.CanvasSize
 import com.neonote.model.EditorState
@@ -71,6 +72,8 @@ public class NeoNoteEditorController(
     public val currentCanvas: InfiniteCanvas
         get() = currentPage.canvas
 
+    private var activeSelectionGesture: ActiveSelectionGesture? = null
+
     private val currentPage: NotePage
         get() = state.document.pages.first { it.id == state.currentPageId }
 
@@ -93,6 +96,10 @@ public class NeoNoteEditorController(
             is InputAction.PanBy -> panViewportBy(action.dx, action.dy)
             is InputAction.CreateOrFocusRichContentBox -> focusOrCreateRichContentBox(screenToDocument(action.position))
             is InputAction.FocusExisting -> action.objectId?.let(::focusRichContentBox)
+            is InputAction.BeginSelectionGesture -> beginSelectionGesture(action.position)
+            is InputAction.UpdateSelectionGesture -> updateSelectionGesture(action.position)
+            InputAction.EndInteraction -> endActiveInteraction()
+            InputAction.CancelInteraction -> cancelActiveInteraction()
             else -> Unit
         }
         return result
@@ -241,6 +248,92 @@ public class NeoNoteEditorController(
         state = state.copy(selection = result.selection)
     }
 
+    public fun selectWithLasso(documentPath: List<CanvasPoint>): SelectionState {
+        val selection = selectionEngine.selectWithLasso(currentCanvas, documentPath)
+        val result = selectionEngine.execute(
+            state.selection,
+            SelectionCommand.ReplaceSelection(selection),
+        ) as SelectionCommandResult.SelectionChanged
+        state = state.copy(
+            selection = result.selection,
+            focusedRichContentBoxId = null,
+            document = state.document.withCanvas(currentCanvas.setFocusedRichContentBox(null)),
+        )
+        return result.selection
+    }
+
+    private fun beginSelectionGesture(screenPosition: CanvasPoint) {
+        val documentPosition = screenToDocument(screenPosition)
+        val hitRef = hitSelectableAt(documentPosition)
+        if (hitRef != null) {
+            if (hitRef !in state.selection.selectedRefs) {
+                replaceSelection(SelectionState(selectedRefs = setOf(hitRef)))
+            }
+            activeSelectionGesture = ActiveSelectionGesture.Drag(lastScreenPosition = screenPosition)
+        } else {
+            activeSelectionGesture = ActiveSelectionGesture.Lasso(path = listOf(documentPosition))
+        }
+    }
+
+    private fun updateSelectionGesture(screenPosition: CanvasPoint) {
+        when (val gesture = activeSelectionGesture) {
+            is ActiveSelectionGesture.Drag -> {
+                val screenDelta = Offset(
+                    x = screenPosition.x - gesture.lastScreenPosition.x,
+                    y = screenPosition.y - gesture.lastScreenPosition.y,
+                )
+                moveSelectedObjectsByScreenDelta(screenDelta)
+                activeSelectionGesture = gesture.copy(lastScreenPosition = screenPosition)
+            }
+            is ActiveSelectionGesture.Lasso -> {
+                val path = gesture.path + screenToDocument(screenPosition)
+                activeSelectionGesture = gesture.copy(path = path)
+                selectWithLasso(path)
+            }
+            null -> Unit
+        }
+    }
+
+    private fun endActiveInteraction() {
+        when (val gesture = activeSelectionGesture) {
+            is ActiveSelectionGesture.Lasso -> {
+                if (gesture.path.size < 2) {
+                    clearSelection()
+                } else {
+                    selectWithLasso(gesture.path)
+                }
+            }
+            is ActiveSelectionGesture.Drag,
+            null -> endInkIfActive()
+        }
+        activeSelectionGesture = null
+    }
+
+    private fun cancelActiveInteraction() {
+        activeSelectionGesture = null
+        cancelInkIfActive()
+    }
+
+    private fun replaceSelection(selection: SelectionState) {
+        val result = selectionEngine.execute(
+            state.selection,
+            SelectionCommand.ReplaceSelection(selection),
+        ) as SelectionCommandResult.SelectionChanged
+        state = state.copy(
+            selection = result.selection,
+            focusedRichContentBoxId = null,
+            document = state.document.withCanvas(currentCanvas.setFocusedRichContentBox(null)),
+        )
+    }
+
+    private fun hitSelectableAt(documentPosition: CanvasPoint): com.neonote.model.SelectableRef? {
+        val objectHit = selectionEngine.hitTestCanvasObjects(currentCanvas, documentPosition).firstOrNull()
+        if (objectHit != null) return CanvasObjectRef(objectHit.id)
+        val strokeHit = selectionEngine.hitTestInkStrokes(currentCanvas, documentPosition).firstOrNull()
+        if (strokeHit != null) return InkStrokeRef(strokeHit.id)
+        return null
+    }
+
     public fun moveSelectedObjectsByScreenDelta(screenDelta: Offset) {
         if (state.selection.selectedRefs.isEmpty()) return
         val documentDelta = screenDeltaToDocumentDelta(screenDelta)
@@ -303,6 +396,11 @@ private fun InfiniteCanvas.setFocusedRichContentBox(focusedId: String?): Infinit
     },
 )
 
+
+private sealed interface ActiveSelectionGesture {
+    data class Lasso(val path: List<CanvasPoint>) : ActiveSelectionGesture
+    data class Drag(val lastScreenPosition: CanvasPoint) : ActiveSelectionGesture
+}
 
 private class SequentialIdGenerator : IdGenerator {
     private var nextId = 1
