@@ -7,6 +7,11 @@ import androidx.compose.ui.geometry.Offset
 import com.neonote.engine.CanvasCommand
 import com.neonote.engine.CanvasCommandResult
 import com.neonote.engine.CanvasEngine
+import com.neonote.engine.IdGenerator
+import com.neonote.engine.InkCommand
+import com.neonote.engine.InkCommandResult
+import com.neonote.engine.InkEngine
+import com.neonote.engine.InkSession
 import com.neonote.engine.InputAction
 import com.neonote.engine.InputEvent
 import com.neonote.engine.InputMode
@@ -22,6 +27,8 @@ import com.neonote.model.CanvasSize
 import com.neonote.model.EditorState
 import com.neonote.model.EditorTool
 import com.neonote.model.InfiniteCanvas
+import com.neonote.model.InkPoint
+import com.neonote.model.InkStroke
 import com.neonote.model.InlineText
 import com.neonote.model.NeoNoteDocument
 import com.neonote.model.NotePage
@@ -44,12 +51,19 @@ public class NeoNoteEditorController(
     initialState: EditorState = createTestEditorState(),
     private val canvasEngine: CanvasEngine = CanvasEngine(),
     private val selectionEngine: SelectionEngine = SelectionEngine(),
+    private val inkEngine: InkEngine = InkEngine(SequentialIdGenerator()),
 ) {
     public var state: EditorState by mutableStateOf(initialState)
         private set
 
     public var inputDiagnostics: InputDiagnostics by mutableStateOf(InputDiagnostics())
         private set
+
+    public var inkSession: InkSession by mutableStateOf(InkSession.fromCanvas(currentCanvas))
+        private set
+
+    public val activeInkStroke: InkStroke?
+        get() = inkSession.activeStroke
 
     public val currentCanvas: InfiniteCanvas
         get() = currentPage.canvas
@@ -69,12 +83,58 @@ public class NeoNoteEditorController(
     ): InputRouteResult {
         val result = router.route(canvas = currentCanvas, event = event, mode = mode)
         when (val action = result.action) {
+            is InputAction.BeginInk -> beginInk(action.position, action.pressure)
+            is InputAction.ContinueInk -> continueInk(action.position, action.pressure)
+            InputAction.EndInteraction -> endInkIfActive()
+            InputAction.CancelInteraction -> cancelInkIfActive()
             is InputAction.PanBy -> panViewportBy(action.dx, action.dy)
             is InputAction.CreateOrFocusRichContentBox -> focusOrCreateRichContentBox(screenToDocument(action.position))
             is InputAction.FocusExisting -> action.objectId?.let(::focusRichContentBox)
             else -> Unit
         }
         return result
+    }
+
+
+    private fun beginInk(screenPosition: CanvasPoint, pressure: Float) {
+        val point = screenPosition.toInkPoint(pressure)
+        val result = inkEngine.execute(
+            session = InkSession.fromCanvas(currentCanvas),
+            command = InkCommand.BeginStroke(point),
+        ) as InkCommandResult.StrokeBegun
+        inkSession = result.session
+    }
+
+    private fun continueInk(screenPosition: CanvasPoint, pressure: Float) {
+        if (inkSession.activeStroke == null) return
+        val result = inkEngine.execute(
+            session = inkSession,
+            command = InkCommand.AppendPoint(screenPosition.toInkPoint(pressure)),
+        ) as InkCommandResult.PointAppended
+        inkSession = result.session
+    }
+
+    private fun endInkIfActive() {
+        if (inkSession.activeStroke == null) return
+        val result = inkEngine.execute(inkSession, InkCommand.EndStroke) as InkCommandResult.StrokeEnded
+        inkSession = result.session
+        commitInkLayer(result.session.inkLayer)
+    }
+
+    private fun cancelInkIfActive() {
+        if (inkSession.activeStroke == null) return
+        val result = inkEngine.execute(inkSession, InkCommand.CancelStroke) as InkCommandResult.StrokeCancelled
+        inkSession = result.session
+    }
+
+    private fun CanvasPoint.toInkPoint(pressure: Float): InkPoint {
+        val documentPosition = screenToDocument(this)
+        return InkPoint(x = documentPosition.x, y = documentPosition.y, pressure = pressure)
+    }
+
+    private fun commitInkLayer(inkLayer: com.neonote.model.InkLayer) {
+        val updatedCanvas = currentCanvas.copy(inkLayer = inkLayer)
+        state = state.copy(document = state.document.withCanvas(updatedCanvas))
     }
 
     public fun setSelectionMode(enabled: Boolean) {
@@ -224,3 +284,10 @@ private fun InfiniteCanvas.setFocusedRichContentBox(focusedId: String?): Infinit
         if (canvasObject is RichContentBox) canvasObject.copy(isFocused = canvasObject.id == focusedId) else canvasObject
     },
 )
+
+
+private class SequentialIdGenerator : IdGenerator {
+    private var nextId = 1
+
+    override fun nextId(prefix: String): String = "$prefix-${nextId++}"
+}

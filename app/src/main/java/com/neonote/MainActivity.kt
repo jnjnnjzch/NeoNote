@@ -3,6 +3,7 @@ package com.neonote
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -33,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -62,6 +64,8 @@ import com.neonote.input.describeAndroidSource
 import com.neonote.input.toAndroidPointerSnapshot
 import com.neonote.model.CanvasObject
 import com.neonote.model.CanvasPoint
+import com.neonote.model.InkLayer as ModelInkLayer
+import com.neonote.model.InkStroke
 import com.neonote.model.InlineText
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContentBox
@@ -167,6 +171,11 @@ private fun InfiniteCanvasViewport(
                     transformOrigin = TransformOrigin(0f, 0f)
                 },
         ) {
+            InkLayer(
+                inkLayer = controller.currentCanvas.inkLayer,
+                activeStroke = controller.activeInkStroke,
+                modifier = Modifier.fillMaxSize(),
+            )
             controller.currentCanvas.objects.forEach { canvasObject ->
                 CanvasObjectView(
                     canvasObject = canvasObject,
@@ -187,6 +196,28 @@ private fun InfiniteCanvasViewport(
             color = Color(0xFF334155),
             style = MaterialTheme.typography.bodySmall,
         )
+    }
+}
+
+
+@Composable
+private fun InkLayer(
+    inkLayer: ModelInkLayer,
+    activeStroke: InkStroke?,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier) {
+        (inkLayer.strokes + listOfNotNull(activeStroke)).forEach { stroke ->
+            stroke.points.zipWithNext { start, end ->
+                drawLine(
+                    color = Color(0xFF0F172A),
+                    start = Offset(start.x, start.y),
+                    end = Offset(end.x, end.y),
+                    strokeWidth = 3f,
+                    cap = StrokeCap.Round,
+                )
+            }
+        }
     }
 }
 
