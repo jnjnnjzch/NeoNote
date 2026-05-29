@@ -104,6 +104,12 @@ private fun NeoNoteEditorScreen(controller: NeoNoteEditorController) {
             viewportLabel = "pan=(${state.viewport.panOffsetX.roundToInt()}, ${state.viewport.panOffsetY.roundToInt()}) zoom=${"%.2f".format(state.viewport.zoomScale)}x",
             diagnosticsLabel = controller.inputDiagnostics.asToolbarText(),
             persistenceStatus = controller.persistenceStatus,
+            pageLabel = "Page ${controller.currentPageNumber} / ${controller.pageCount}",
+            canGoToPreviousPage = controller.canSwitchToPreviousPage,
+            canGoToNextPage = controller.canSwitchToNextPage,
+            onPreviousPage = controller::switchToPreviousPage,
+            onNextPage = controller::switchToNextPage,
+            onAddPage = controller::addPage,
             onToggleSelectionMode = { controller.setSelectionMode(!selectionMode) },
             onSave = { coroutineScope.launch { controller.saveDocument(persistenceStore) } },
             onLoad = { coroutineScope.launch { controller.loadDocument(persistenceStore) } },
@@ -123,6 +129,12 @@ private fun EditorToolbar(
     viewportLabel: String,
     diagnosticsLabel: String,
     persistenceStatus: String,
+    pageLabel: String,
+    canGoToPreviousPage: Boolean,
+    canGoToNextPage: Boolean,
+    onPreviousPage: () -> Unit,
+    onNextPage: () -> Unit,
+    onAddPage: () -> Unit,
     onToggleSelectionMode: () -> Unit,
     onSave: () -> Unit,
     onLoad: () -> Unit,
@@ -140,7 +152,24 @@ private fun EditorToolbar(
             Text(text = diagnosticsLabel, style = MaterialTheme.typography.bodySmall, color = Color(0xFF475569))
             Text(text = persistenceStatus, style = MaterialTheme.typography.bodySmall, color = Color(0xFF0369A1))
         }
-        Button(onClick = onSave) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = onPreviousPage, enabled = canGoToPreviousPage) {
+                Text("Prev")
+            }
+            Text(
+                text = pageLabel,
+                modifier = Modifier.padding(horizontal = 8.dp),
+                color = Color(0xFF334155),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Button(onClick = onNextPage, enabled = canGoToNextPage) {
+                Text("Next")
+            }
+            Button(onClick = onAddPage, modifier = Modifier.padding(start = 8.dp)) {
+                Text("Add Page")
+            }
+        }
+        Button(onClick = onSave, modifier = Modifier.padding(start = 8.dp)) {
             Text("Save")
         }
         Button(onClick = onLoad, modifier = Modifier.padding(start = 8.dp)) {
