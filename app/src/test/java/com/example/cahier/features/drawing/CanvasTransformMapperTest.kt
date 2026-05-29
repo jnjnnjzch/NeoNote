@@ -47,4 +47,20 @@ class CanvasTransformMapperTest {
         assertEquals(413.5f, canvasX, 0.0001f)
         assertEquals(-27.25f, canvasY, 0.0001f)
     }
+
+    @Test
+    fun screenToDocumentComposeMatrix_mapsPanZoomedInputIntoDocumentSpace() {
+        val transform = CanvasTransform(scale = 2.5f, panX = -80f, panY = 45f)
+        val documentX = 128f
+        val documentY = -24f
+        val screen = androidx.compose.ui.geometry.Offset(
+            CanvasTransformMapper.docToScreenX(documentX, transform),
+            CanvasTransformMapper.docToScreenY(documentY, transform)
+        )
+
+        val mapped = CanvasTransformMapper.screenToDocumentComposeMatrix(transform).map(screen)
+
+        assertEquals(documentX, mapped.x, 0.0001f)
+        assertEquals(documentY, mapped.y, 0.0001f)
+    }
 }

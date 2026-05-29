@@ -551,7 +551,7 @@ class DrawingCanvasViewModel @Inject constructor(
         }
     }
 
-    fun onRawMotionEvent(event: MotionEvent) {
+    fun onRawMotionEvent(event: MotionEvent, canvasTransform: CanvasTransform = CanvasTransform()) {
         val now = SystemClock.elapsedRealtime()
         val tilt = event.getAxisValue(MotionEvent.AXIS_TILT).let { axis ->
             if (axis == 0f) null else axis
@@ -565,7 +565,15 @@ class DrawingCanvasViewModel @Inject constructor(
             tiltRadians = tilt
         )
         inkDebugAggregator.ingest(now, sample, _inkDebugMetrics.value)?.let { updated ->
-            _inkDebugMetrics.value = updated
+            _inkDebugMetrics.value = updated.copy(
+                screenX = event.x,
+                screenY = event.y,
+                documentX = CanvasTransformMapper.screenToDocX(event.x, canvasTransform),
+                documentY = CanvasTransformMapper.screenToDocY(event.y, canvasTransform),
+                scale = canvasTransform.scale,
+                panX = canvasTransform.panX,
+                panY = canvasTransform.panY
+            )
         }
         val clampedPressure = event.pressure.coerceIn(0f, 1f)
         _lastPressure.value = clampedPressure

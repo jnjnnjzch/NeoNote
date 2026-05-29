@@ -31,8 +31,8 @@ object CanvasTransformGesture {
         val newScale = (current.scale * ratio).coerceIn(minScale, maxScale)
 
         // Keep the same document-space point under the moving centroid.
-        val docX = (previousCentroid.x - current.panX) / current.scale
-        val docY = (previousCentroid.y - current.panY) / current.scale
+        val docX = CanvasTransformMapper.screenToDocX(previousCentroid.x, current)
+        val docY = CanvasTransformMapper.screenToDocY(previousCentroid.y, current)
         val newPanX = currentCentroid.x - docX * newScale
         val newPanY = currentCentroid.y - docY * newScale
 

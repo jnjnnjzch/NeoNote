@@ -753,7 +753,7 @@ private fun DrawingSurfaceWithTarget(
                     dy = screenToDocDelta(dyScreen, canvasTransform)
                 )
             },
-            onRawMotionEvent = drawingCanvasViewModel::onRawMotionEvent,
+            onRawMotionEvent = { event -> drawingCanvasViewModel.onRawMotionEvent(event, canvasTransform) },
             consumeFingerInkInput = true,
             onFingerTap = { sx, sy ->
                 val container = textContainer
@@ -784,6 +784,7 @@ private fun DrawingSurfaceWithTarget(
             val scale = drawingCanvasViewModel.mapPressureToScale(pressure, curve)
             InkDebugOverlay(
                 metrics = metrics,
+                canvasTransform = canvasTransform,
                 modifier = Modifier.align(Alignment.TopStart)
             )
             PressureTestPanel(
@@ -1383,6 +1384,7 @@ internal fun TableBlockEditor(
 @Composable
 private fun InkDebugOverlay(
     metrics: InkDebugMetrics,
+    canvasTransform: CanvasTransform,
     modifier: Modifier = Modifier,
 ) {
     Text(
@@ -1405,6 +1407,24 @@ private fun InkDebugOverlay(
             append(metrics.cancelEventCount)
             append("  palm=")
             append(metrics.palmEventCount)
+            append('\n')
+            append("screen=(")
+            append(String.format("%.1f", metrics.screenX))
+            append(", ")
+            append(String.format("%.1f", metrics.screenY))
+            append(")  doc=(")
+            append(String.format("%.1f", metrics.documentX))
+            append(", ")
+            append(String.format("%.1f", metrics.documentY))
+            append(")")
+            append('\n')
+            append("scale=")
+            append(String.format("%.3f", canvasTransform.scale))
+            append("  pan=(")
+            append(String.format("%.1f", canvasTransform.panX))
+            append(", ")
+            append(String.format("%.1f", canvasTransform.panY))
+            append(")")
         },
         modifier = modifier
             .fillMaxWidth()

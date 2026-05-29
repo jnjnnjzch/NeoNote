@@ -19,7 +19,6 @@
 package com.example.cahier.core.ui
 
 import android.annotation.SuppressLint
-import android.graphics.Matrix
 import android.view.MotionEvent
 import android.view.ViewConfiguration
 import androidx.compose.foundation.Canvas
@@ -57,6 +56,7 @@ import androidx.ink.strokes.Stroke
 import coil3.compose.AsyncImage
 import com.example.cahier.core.utils.pointerInputWithSiblingFallthrough
 import com.example.cahier.features.drawing.CanvasTransform
+import com.example.cahier.features.drawing.CanvasTransformMapper
 import kotlin.math.hypot
 
 enum class DrawingInputRoute {
@@ -131,6 +131,9 @@ fun DrawingSurface(
     ),
     modifier: Modifier = Modifier,
 ) {
+    // Coordinate contract: every persisted Stroke is authored and stored in document/canvas space.
+    // Screen-space pan/zoom is applied only through CanvasTransformMapper for wet input transforms
+    // and dry-stroke rendering transforms.
     val textureStore = LocalTextureStore.current
     val viewConfiguration = ViewConfiguration.get(LocalContext.current)
     val fingerTapSlop = viewConfiguration.scaledTouchSlop.toFloat()
@@ -193,11 +196,12 @@ fun DrawingSurface(
                 } else {
                     BlendMode.SrcOver
                 }
-                val matrix = Matrix()
                 val translation = strokeTranslations[index] ?: (0f to 0f)
-                matrix.postTranslate(translation.first, translation.second)
-                matrix.postScale(canvasTransform.scale, canvasTransform.scale)
-                matrix.postTranslate(canvasTransform.panX, canvasTransform.panY)
+                val matrix = CanvasTransformMapper.documentToScreenAndroidMatrix(
+                    transform = canvasTransform,
+                    documentTranslationX = translation.first,
+                    documentTranslationY = translation.second
+                )
                 drawContext.canvas.withSaveLayer(
                     drawContext.size.toRect(),
                     androidx.compose.ui.graphics.Paint()
@@ -305,6 +309,10 @@ fun DrawingSurface(
                 InProgressStrokes(
                     defaultBrush = currentBrush,
                     nextBrush = onGetNextBrush,
+                    pointerEventToWorldTransform = CanvasTransformMapper.screenToDocumentComposeMatrix(
+                        canvasTransform
+                    ),
+                    strokeToWorldTransform = CanvasTransformMapper.identityComposeMatrix(),
                     onStrokesFinished = onStrokesFinished,
                     textureBitmapStore = textureStore
                 )
