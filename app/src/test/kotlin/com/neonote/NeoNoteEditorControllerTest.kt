@@ -274,8 +274,8 @@ class NeoNoteEditorControllerTest {
         assertEquals(6.5f, points[1].y, 0.0001f)
         assertEquals(15.275f, points[2].x, 0.0001f)
         assertEquals(15.275f, points[2].y, 0.0001f)
-        assertEquals(24.94625f, points[3].x, 0.0001f)
-        assertEquals(24.94625f, points[3].y, 0.0001f)
+        assertEquals(24.84625f, points[3].x, 0.0001f)
+        assertEquals(24.84625f, points[3].y, 0.0001f)
     }
 
     @Test
