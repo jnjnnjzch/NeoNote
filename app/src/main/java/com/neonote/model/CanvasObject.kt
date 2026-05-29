@@ -68,6 +68,7 @@ data class RichContentBox(
     override val size: CanvasSize = CanvasSize.Zero,
     override val zIndex: Int = 0,
     val content: RichContent = RichContent(),
+    val position: CanvasPosition = CanvasPosition(0f, 0f),
 ) : CanvasObject
 
 /**
@@ -80,4 +81,5 @@ data class FloatingImage(
     override val zIndex: Int = 0,
     val assetId: String,
     val altText: String? = null,
+    val position: CanvasPosition = CanvasPosition(0f, 0f),
 ) : CanvasObject
