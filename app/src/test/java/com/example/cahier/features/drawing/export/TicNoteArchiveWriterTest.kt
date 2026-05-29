@@ -19,6 +19,7 @@ class TicNoteArchiveWriterTest {
         TicNoteArchiveWriter.writeArchive(
             archiveFile = out,
             documentJson = """{"version":1}""",
+            inkStrokesJson = """["stroke-a","stroke-b"]""",
             markdownFile = md,
             htmlFile = html,
             title = "Neo",
@@ -32,6 +33,7 @@ class TicNoteArchiveWriterTest {
             assertTrue("document.json missing", "document.json" in names)
             assertTrue("manifest.json missing", "manifest.json" in names)
             assertTrue("ink.json missing", "ink.json" in names)
+            assertTrue("ink/strokes.json missing", "ink/strokes.json" in names)
             assertTrue("assets/background.png missing", "assets/background.png" in names)
             assertTrue("assets/img.png missing", "assets/img.png" in names)
         }

@@ -7,7 +7,7 @@ import java.util.zip.ZipOutputStream
 
 object TicNoteArchiveWriter {
     fun manifestJson(title: String): String {
-        return """{"title":"$title","version":2,"assets_dir":"assets","ink_file":"ink.json","document_file":"document.json","layout_preserving_exports":[".html",".md",".pdf"]}"""
+        return """{"title":"$title","version":3,"assets_dir":"assets","ink_file":"ink/strokes.json","ink_summary_file":"ink.json","document_file":"document.json","layout_preserving_exports":[".html",".md",".pdf"]}"""
     }
 
     fun inkJson(finalizedStrokeCount: Int): String {
@@ -17,6 +17,7 @@ object TicNoteArchiveWriter {
     fun writeArchive(
         archiveFile: File,
         documentJson: String,
+        inkStrokesJson: String,
         markdownFile: File,
         htmlFile: File,
         title: String,
@@ -39,6 +40,10 @@ object TicNoteArchiveWriter {
 
             zip.putNextEntry(ZipEntry("ink.json"))
             zip.write(inkJson(finalizedStrokeCount).toByteArray())
+            zip.closeEntry()
+
+            zip.putNextEntry(ZipEntry("ink/strokes.json"))
+            zip.write(inkStrokesJson.toByteArray())
             zip.closeEntry()
 
             if (markdownFile.exists()) {

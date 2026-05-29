@@ -114,6 +114,15 @@ class DrawingCanvasViewModel @Inject constructor(
     private val customBrushDao: CustomBrushDao,
     val textureStore: CahierTextureBitmapStore,
 ) : ViewModel() {
+    data class ExportResult(
+        val directory: String,
+        val generatedFiles: List<String>
+    )
+
+    enum class ImagePasteTarget {
+        CANVAS_BLOCK,
+        INLINE_TABLE_CELL
+    }
 
     private val _uiState = MutableStateFlow(CahierUiState())
     val uiState: StateFlow<CahierUiState> = _uiState.asStateFlow()
@@ -179,6 +188,10 @@ class DrawingCanvasViewModel @Inject constructor(
     private var isBrushSelectedInSession = false
     private val _lastExportDirectory = MutableStateFlow<String?>(null)
     val lastExportDirectory: StateFlow<String?> = _lastExportDirectory.asStateFlow()
+    private val _lastExportResult = MutableStateFlow<ExportResult?>(null)
+    val lastExportResult: StateFlow<ExportResult?> = _lastExportResult.asStateFlow()
+    private val _userMessage = MutableStateFlow<String?>(null)
+    val userMessage: StateFlow<String?> = _userMessage.asStateFlow()
     private val _stylusWritesByDefault = MutableStateFlow(true)
     val stylusWritesByDefault: StateFlow<Boolean> = _stylusWritesByDefault.asStateFlow()
     private val _fingerPansByDefault = MutableStateFlow(true)
@@ -906,6 +919,22 @@ class DrawingCanvasViewModel @Inject constructor(
         persistDocument(current.copy(pages = listOf(page.copy(blocks = page.blocks + imageBlock))))
     }
 
+    fun attachImageAssetToInlineCell(row: Int, col: Int, assetPath: String) {
+        updateFirstTextContainer { container ->
+            val tableIndex = container.content.nodes.indexOfFirst { it is TableNode }
+            if (tableIndex < 0) return@updateFirstTextContainer container
+            val table = container.content.nodes[tableIndex] as TableNode
+            val updatedCells = table.cells.mapIndexed { rowIndex, rowCells ->
+                rowCells.mapIndexed { colIndex, cell ->
+                    if (rowIndex == row && colIndex == col) cell.copy(imageUri = assetPath) else cell
+                }
+            }
+            val nodes = container.content.nodes.toMutableList()
+            nodes[tableIndex] = table.copy(cells = updatedCells)
+            container.copy(content = container.content.copy(nodes = nodes))
+        }
+    }
+
     fun addFormulaBlock(source: String) {
         val trimmed = source.trim()
         if (trimmed.isBlank()) return
@@ -935,6 +964,27 @@ class DrawingCanvasViewModel @Inject constructor(
         val uri = item.uri ?: return false
         val asset = importImageFromUriToAssets(uri.toString()) ?: return false
         addImageBlock(asset)
+        return true
+    }
+
+    fun pasteImageFromClipboard(
+        target: ImagePasteTarget,
+        inlineCell: Pair<Int, Int>? = null
+    ): Boolean {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return false
+        val item = clipboard.primaryClip?.getItemAt(0) ?: return false
+        val uri = item.uri ?: return false
+        val asset = importImageFromUriToAssets(uri.toString()) ?: return false
+        when {
+            target == ImagePasteTarget.INLINE_TABLE_CELL && inlineCell != null -> {
+                attachImageAssetToInlineCell(inlineCell.first, inlineCell.second, asset)
+            }
+            target == ImagePasteTarget.INLINE_TABLE_CELL && inlineCell == null -> {
+                _userMessage.value = "Image paste into table cell is not supported until a cell is focused. Inserted as canvas image."
+                addImageBlock(asset)
+            }
+            else -> addImageBlock(asset)
+        }
         return true
     }
 
@@ -1257,6 +1307,7 @@ class DrawingCanvasViewModel @Inject constructor(
             TicNoteArchiveWriter.writeArchive(
                 archiveFile = archiveFile,
                 documentJson = DocumentSerializer.encode(doc),
+                inkStrokesJson = note.strokesData ?: "[]",
                 markdownFile = File(baseDir, "$safeTitle.md"),
                 htmlFile = File(baseDir, "$safeTitle.html"),
                 title = safeTitle,
@@ -1265,7 +1316,24 @@ class DrawingCanvasViewModel @Inject constructor(
                 imageAssetFiles = imageAssets
             )
             _lastExportDirectory.value = baseDir.absolutePath
+            _lastExportResult.value = ExportResult(
+                directory = baseDir.absolutePath,
+                generatedFiles = listOf(
+                    File(baseDir, "$safeTitle.pdf").absolutePath,
+                    File(baseDir, "$safeTitle.html").absolutePath,
+                    File(baseDir, "$safeTitle.md").absolutePath,
+                    archiveFile.absolutePath
+                )
+            )
         }
+    }
+
+    fun clearExportResult() {
+        _lastExportResult.value = null
+    }
+
+    fun consumeUserMessage() {
+        _userMessage.value = null
     }
 
     fun generateStressDocument(

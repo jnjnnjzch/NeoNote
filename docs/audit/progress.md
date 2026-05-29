@@ -118,3 +118,19 @@
 - Validation:
   - `.\gradlew.bat :app:assembleDebug` -> PASS
   - `.\gradlew.bat :app:testDebugUnitTest` -> PASS
+
+## P0 Reachability Repair Pack
+- Status: PARTIAL
+- Date: 2026-05-29
+- Scope: repair normal-mode feature reachability/wiring without adding new major features.
+- Completed:
+  - Normal editor topbar cleaned for user-facing controls.
+  - Export now produces visible result panel with explicit generated file paths.
+  - New Table Note guardrail test added: TextContainer inline table path only; no default standalone TableBlock.
+  - `.ticnote` now includes `ink/strokes.json` payload in archive.
+  - Image paste routing split for inline table focus vs canvas image block fallback.
+  - Debug-only canvas verification panel added; normal mode gets reset-view action.
+  - Selected TextContainer outline now follows selection state for clearer move feedback.
+- Validation:
+  - `.\gradlew.bat :app:assembleDebug` -> FAIL (environment network blocker downloading Gradle wrapper)
+  - `.\gradlew.bat :app:testDebugUnitTest` -> FAIL (same blocker)

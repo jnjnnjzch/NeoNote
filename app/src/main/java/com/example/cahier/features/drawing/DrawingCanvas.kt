@@ -20,8 +20,6 @@ package com.example.cahier.features.drawing
 
 import android.content.ClipData
 import android.content.ClipDescription
-import android.content.ClipboardManager
-import android.content.Context
 import android.net.Uri
 import android.view.KeyEvent as AndroidKeyEvent
 import android.view.MotionEvent
@@ -52,10 +50,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
@@ -83,7 +86,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -134,8 +136,12 @@ fun DrawingCanvas(
     drawingCanvasViewModel: DrawingCanvasViewModel = hiltViewModel(),
 ) {
     val uiState by drawingCanvasViewModel.uiState.collectAsStateWithLifecycle()
+    val exportResult by drawingCanvasViewModel.lastExportResult.collectAsStateWithLifecycle()
+    val userMessage by drawingCanvasViewModel.userMessage.collectAsStateWithLifecycle()
     var showConfirmationDialog by rememberSaveable { mutableStateOf(false) }
     var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
+    var resetViewNonce by rememberSaveable { mutableStateOf(0) }
+    var inlineFocusedCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -177,13 +183,42 @@ fun DrawingCanvas(
             .navigationBarsPadding()
             .imePadding()
     ) {
-        DrawingCanvasTopBar(drawingCanvasViewModel)
+        DrawingCanvasTopBar(
+            drawingCanvasViewModel = drawingCanvasViewModel,
+            appMode = appMode,
+            onNavigateUp = navigateUp,
+            onResetView = { resetViewNonce++ },
+            onPasteImage = {
+                val target =
+                    if (inlineFocusedCell != null) DrawingCanvasViewModel.ImagePasteTarget.INLINE_TABLE_CELL
+                    else DrawingCanvasViewModel.ImagePasteTarget.CANVAS_BLOCK
+                drawingCanvasViewModel.pasteImageFromClipboard(target, inlineFocusedCell)
+            }
+        )
         DrawingCanvasContent(
             drawingCanvasViewModel = drawingCanvasViewModel,
             imagePickerLauncher = imagePickerLauncher,
             onNavigateUp = navigateUp,
             navigateToBrushGraph = navigateToBrushGraph,
-            appMode = appMode
+            appMode = appMode,
+            resetViewNonce = resetViewNonce,
+            onInlineTableCellFocused = { inlineFocusedCell = it }
+        )
+    }
+
+    exportResult?.let { result ->
+        ExportResultDialog(
+            result = result,
+            onDismiss = drawingCanvasViewModel::clearExportResult
+        )
+    }
+
+    userMessage?.let { message ->
+        ConfirmationDialog(
+            title = "NeoNote",
+            text = message,
+            onConfirm = drawingCanvasViewModel::consumeUserMessage,
+            onDismiss = drawingCanvasViewModel::consumeUserMessage
         )
     }
 }
@@ -207,15 +242,16 @@ fun NormalEditorScreen(
 @Composable
 private fun DrawingCanvasTopBar(
     drawingCanvasViewModel: DrawingCanvasViewModel,
+    appMode: AppMode,
+    onNavigateUp: () -> Unit,
+    onResetView: () -> Unit,
+    onPasteImage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val uiState by drawingCanvasViewModel.uiState.collectAsStateWithLifecycle()
     val isEraserMode by drawingCanvasViewModel.isEraserMode.collectAsStateWithLifecycle()
     val selectionMode by drawingCanvasViewModel.selectionModeEnabled.collectAsStateWithLifecycle()
-    val textContainerSelected by drawingCanvasViewModel.selectedTextContainer.collectAsStateWithLifecycle()
-    val stylusWrites by drawingCanvasViewModel.stylusWritesByDefault.collectAsStateWithLifecycle()
-    val fingerPans by drawingCanvasViewModel.fingerPansByDefault.collectAsStateWithLifecycle()
-    val pressureCurve by drawingCanvasViewModel.pressureCurve.collectAsStateWithLifecycle()
+    var moreExpanded by rememberSaveable { mutableStateOf(false) }
     var titleState by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(uiState.note.title))
     }
@@ -235,6 +271,12 @@ private fun DrawingCanvasTopBar(
                 .background(NeoNoteVisualTokens.mutedToolbarBackground)
                 .padding(horizontal = 8.dp, vertical = 6.dp)
         ) {
+            IconButton(onClick = onNavigateUp) {
+                Icon(
+                    painter = androidx.compose.ui.res.painterResource(R.drawable.arrow_back_24px),
+                    contentDescription = "Back"
+                )
+            }
             TextField(
                 value = titleState,
                 onValueChange = { newTitle ->
@@ -254,31 +296,80 @@ private fun DrawingCanvasTopBar(
                 keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { })
             )
+            TextButton(onClick = drawingCanvasViewModel::undo) { Text("Undo") }
+            TextButton(onClick = drawingCanvasViewModel::redo) { Text("Redo") }
             TextButton(onClick = drawingCanvasViewModel::exportAllFormats) { Text("Export") }
+            TextButton(onClick = { moreExpanded = true }) { Text("More") }
+            DropdownMenu(expanded = moreExpanded, onDismissRequest = { moreExpanded = false }) {
+                DropdownMenuItem(
+                    text = { Text("Reset View") },
+                    onClick = {
+                        moreExpanded = false
+                        onResetView()
+                    }
+                )
+                if (appMode == AppMode.DEBUG) {
+                    DropdownMenuItem(
+                        text = { Text("Debug: Brush Graph") },
+                        onClick = { moreExpanded = false }
+                    )
+                }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { drawingCanvasViewModel.setEraserMode(!isEraserMode) }) {
                 Text(if (isEraserMode) "Pen" else "Eraser")
             }
             TextButton(onClick = { drawingCanvasViewModel.setSelectionMode(!selectionMode) }) {
-                Text(if (selectionMode) "Select" else "Select")
+                Text("Select")
             }
             if (selectionMode) {
                 TextButton(onClick = drawingCanvasViewModel::toggleTextContainerSelection) {
-                    Text(if (textContainerSelected) "Text:On" else "Text:Off")
+                    Text("Select Text")
                 }
-                TextButton(onClick = drawingCanvasViewModel::clearSelection) { Text("Clear Sel") }
+                TextButton(onClick = drawingCanvasViewModel::clearSelection) { Text("Clear Selection") }
+            }
+            TextButton(onClick = { /* text entry tool reserved */ }) { Text("Text") }
+            TextButton(onClick = { drawingCanvasViewModel.insertInlineTableInTextContainer() }) { Text("Table") }
+            TextButton(onClick = onPasteImage) { Text("Image") }
+            TextButton(onClick = { drawingCanvasViewModel.addFormulaBlock("x^2 + y^2 = z^2") }) { Text("Formula") }
+        }
+        if (appMode == AppMode.DEBUG) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { drawingCanvasViewModel.setStylusWritesByDefault(true) }) {
+                    Text("Handwriting")
+                }
+                TextButton(onClick = { drawingCanvasViewModel.setFingerPansByDefault(true) }) {
+                    Text("Move Canvas")
+                }
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { drawingCanvasViewModel.setStylusWritesByDefault(!stylusWrites) }) {
-                Text(if (stylusWrites) "Stylus:Write" else "Stylus:Tool")
+    }
+}
+
+@Composable
+private fun ExportResultDialog(
+    result: DrawingCanvasViewModel.ExportResult,
+    onDismiss: () -> Unit,
+) {
+    Surface(
+        tonalElevation = 4.dp,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Export completed", style = MaterialTheme.typography.titleMedium)
+            Text("Folder:", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
+            Text(result.directory, style = MaterialTheme.typography.bodySmall)
+            Text("Generated files:", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
+            result.generatedFiles.forEach { file ->
+                Text(file, style = MaterialTheme.typography.bodySmall)
             }
-            TextButton(onClick = { drawingCanvasViewModel.setFingerPansByDefault(!fingerPans) }) {
-                Text(if (fingerPans) "Finger:Pan" else "Finger:Touch")
+            Row(modifier = Modifier.padding(top = 12.dp)) {
+                OutlinedButton(onClick = onDismiss) { Text("Dismiss") }
             }
-            TextButton(onClick = { /* Text tool entry reserved */ }) { Text("Text") }
-            TextButton(onClick = { drawingCanvasViewModel.insertInlineTableInTextContainer() }) { Text("Table") }
-            TextButton(onClick = { drawingCanvasViewModel.pasteImageBlockFromClipboard() }) { Text("Paste Img") }
-            TextButton(onClick = { drawingCanvasViewModel.addFormulaBlock("x^2 + y^2 = z^2") }) { Text("Formula") }
         }
     }
 }
@@ -294,6 +385,8 @@ private fun DrawingCanvasContent(
     onNavigateUp: () -> Unit,
     navigateToBrushGraph: () -> Unit,
     appMode: AppMode,
+    resetViewNonce: Int,
+    onInlineTableCellFocused: (Pair<Int, Int>?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val activity = LocalActivity.current as ComponentActivity
@@ -311,6 +404,8 @@ private fun DrawingCanvasContent(
         DrawingSurfaceWithTarget(
             drawingCanvasViewModel,
             appMode = appMode,
+            resetViewNonce = resetViewNonce,
+            onInlineTableCellFocused = onInlineTableCellFocused,
             modifier = Modifier.fillMaxSize()
         )
 
@@ -373,6 +468,8 @@ private fun DrawingCanvasContent(
 private fun DrawingSurfaceWithTarget(
     drawingCanvasViewModel: DrawingCanvasViewModel,
     appMode: AppMode,
+    resetViewNonce: Int,
+    onInlineTableCellFocused: (Pair<Int, Int>?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val uiState by drawingCanvasViewModel.uiState.collectAsStateWithLifecycle()
@@ -380,6 +477,7 @@ private fun DrawingSurfaceWithTarget(
     val isEraserMode by drawingCanvasViewModel.isEraserMode.collectAsStateWithLifecycle()
     val isSelectionMode by drawingCanvasViewModel.selectionModeEnabled.collectAsStateWithLifecycle()
     val hasSelection by drawingCanvasViewModel.hasSelection.collectAsStateWithLifecycle()
+    val textContainerSelected by drawingCanvasViewModel.selectedTextContainer.collectAsStateWithLifecycle()
     val strokeTranslations by drawingCanvasViewModel.strokeTranslations.collectAsStateWithLifecycle()
     val fingerPanZoomEnabled by drawingCanvasViewModel.fingerPansByDefault.collectAsStateWithLifecycle()
     val strokes = remember { mutableStateListOf<Stroke>() }
@@ -400,8 +498,7 @@ private fun DrawingSurfaceWithTarget(
     val textContainer = page?.blocks?.filterIsInstance<TextContainerBlock>()?.firstOrNull()
     val imageBlocks = page?.blocks?.filterIsInstance<ImageBlock>().orEmpty()
     val formulaBlocks = page?.blocks?.filterIsInstance<FormulaBlock>().orEmpty()
-    var selectedCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
-    val context = LocalContext.current
+    var selectedInlineCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
 
     val dropTarget = remember {
         createDropTarget(activity) { uri, permissions ->
@@ -428,6 +525,9 @@ private fun DrawingSurfaceWithTarget(
                 canvasSize.height
             )
         }
+    }
+    LaunchedEffect(resetViewNonce) {
+        canvasTransform = CanvasTransform()
     }
 
     Box(
@@ -575,22 +675,11 @@ private fun DrawingSurfaceWithTarget(
             TableBlockEditor(
                 table = table,
                 onCellChange = drawingCanvasViewModel::updateTableCell,
-                onSelectCell = { r, c -> selectedCell = r to c },
+                onSelectCell = { _, _ -> },
                 onPasteImage = {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val clip = clipboard.primaryClip
-                    val uri = clip?.getItemAt(0)?.uri?.toString()
-                    if (uri != null) {
-                        val asset = drawingCanvasViewModel.importImageFromUriToAssets(uri)
-                        if (asset != null) {
-                            val target = selectedCell
-                            if (target != null) {
-                                drawingCanvasViewModel.attachImageAssetToCell(target.first, target.second, asset)
-                            } else {
-                                drawingCanvasViewModel.addImageBlock(asset)
-                            }
-                        }
-                    }
+                    drawingCanvasViewModel.pasteImageFromClipboard(
+                        target = DrawingCanvasViewModel.ImagePasteTarget.CANVAS_BLOCK
+                    )
                 },
                 onToggleBold = drawingCanvasViewModel::toggleTableCellBold,
                 onToggleItalic = drawingCanvasViewModel::toggleTableCellItalic,
@@ -621,11 +710,16 @@ private fun DrawingSurfaceWithTarget(
                 onParagraphAfterChange = { drawingCanvasViewModel.updateTextContainerParagraphAt(1, it) },
                 onInsertTable = drawingCanvasViewModel::insertInlineTableInTextContainer,
                 onInlineTableCellChange = drawingCanvasViewModel::updateInlineTableCell,
+                onInlineCellFocused = {
+                    selectedInlineCell = it
+                    onInlineTableCellFocused(it)
+                },
                 onInlineTableAppendRow = drawingCanvasViewModel::appendInlineTableRow,
                 onInlineToggleBold = drawingCanvasViewModel::toggleInlineTableCellBold,
                 onInlineToggleItalic = drawingCanvasViewModel::toggleInlineTableCellItalic,
                 onInlineToggleUnderline = drawingCanvasViewModel::toggleInlineTableCellUnderline,
                 onMove = drawingCanvasViewModel::moveTextContainerBy,
+                isSelected = textContainerSelected,
                 modifier = Modifier
                     .offset {
                         IntOffset(
@@ -684,6 +778,16 @@ private fun DrawingSurfaceWithTarget(
                 }
             }
         }
+        if (appMode == AppMode.DEBUG) {
+            CanvasVerificationPanel(
+                transform = canvasTransform,
+                textContainer = textContainer,
+                imageBlocks = imageBlocks,
+                formulaBlocks = formulaBlocks,
+                selectedInlineCell = selectedInlineCell,
+                modifier = Modifier.align(Alignment.BottomEnd)
+            )
+        }
     }
 }
 
@@ -697,11 +801,13 @@ private fun TextContainerEditor(
     onParagraphAfterChange: (String) -> Unit,
     onInsertTable: () -> Unit,
     onInlineTableCellChange: (Int, Int, String) -> Unit,
+    onInlineCellFocused: (Pair<Int, Int>?) -> Unit,
     onInlineTableAppendRow: () -> Unit,
     onInlineToggleBold: (Int, Int) -> Unit,
     onInlineToggleItalic: (Int, Int) -> Unit,
     onInlineToggleUnderline: (Int, Int) -> Unit,
     onMove: (Float, Float) -> Unit,
+    isSelected: Boolean,
     modifier: Modifier = Modifier,
 ) {
             var containerFocused by remember { mutableStateOf(false) }
@@ -720,8 +826,8 @@ private fun TextContainerEditor(
         tonalElevation = 1.dp,
         shape = MaterialTheme.shapes.medium,
         border = androidx.compose.foundation.BorderStroke(
-            width = if (containerFocused) 1.4.dp else 0.8.dp,
-            color = if (containerFocused) NeoNoteVisualTokens.selectedBorder else NeoNoteVisualTokens.subtleBorder
+            width = if (containerFocused || isSelected) 1.4.dp else 0.8.dp,
+            color = if (containerFocused || isSelected) NeoNoteVisualTokens.selectedBorder else NeoNoteVisualTokens.subtleBorder
         )
     ) {
         Column(
@@ -748,7 +854,7 @@ private fun TextContainerEditor(
                 InlineTableNodeEditor(
                     table = tableNode,
                     onCellChange = onInlineTableCellChange,
-                    onSelectCell = { _, _ -> },
+                    onSelectCell = { r, c -> onInlineCellFocused(r to c) },
                     onToggleBold = onInlineToggleBold,
                     onToggleItalic = onInlineToggleItalic,
                     onToggleUnderline = onInlineToggleUnderline,
@@ -902,6 +1008,44 @@ private fun PressureTestPanel(
         },
         modifier = modifier
             .background(Color(0xCC102020))
+            .padding(8.dp),
+        color = Color.White,
+        fontFamily = FontFamily.Monospace,
+        style = MaterialTheme.typography.bodySmall
+    )
+}
+
+@Composable
+private fun CanvasVerificationPanel(
+    transform: CanvasTransform,
+    textContainer: TextContainerBlock?,
+    imageBlocks: List<ImageBlock>,
+    formulaBlocks: List<FormulaBlock>,
+    selectedInlineCell: Pair<Int, Int>?,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = buildString {
+            append("canvas verify\n")
+            append("scale=").append(String.format("%.2f", transform.scale))
+            append(" pan=(").append(String.format("%.1f", transform.panX))
+            append(", ").append(String.format("%.1f", transform.panY)).append(")\n")
+            textContainer?.let {
+                append("text=(").append(String.format("%.1f", it.x)).append(", ")
+                    .append(String.format("%.1f", it.y)).append(")\n")
+            }
+            imageBlocks.firstOrNull()?.let {
+                append("image0=(").append(String.format("%.1f", it.x)).append(", ")
+                    .append(String.format("%.1f", it.y)).append(")\n")
+            }
+            formulaBlocks.firstOrNull()?.let {
+                append("formula0=(").append(String.format("%.1f", it.x)).append(", ")
+                    .append(String.format("%.1f", it.y)).append(")\n")
+            }
+            append("inlineCell=").append(selectedInlineCell?.toString() ?: "none")
+        },
+        modifier = modifier
+            .background(Color(0xCC111111))
             .padding(8.dp),
         color = Color.White,
         fontFamily = FontFamily.Monospace,
@@ -1142,11 +1286,13 @@ private fun TextContainerParagraphPreview() {
             onParagraphAfterChange = {},
             onInsertTable = {},
             onInlineTableCellChange = { _, _, _ -> },
+            onInlineCellFocused = {},
             onInlineTableAppendRow = {},
             onInlineToggleBold = { _, _ -> },
             onInlineToggleItalic = { _, _ -> },
             onInlineToggleUnderline = { _, _ -> },
             onMove = { _, _ -> },
+            isSelected = false,
             modifier = Modifier
                 .padding(20.dp)
                 .width(360.dp)
@@ -1184,11 +1330,13 @@ private fun TextContainerInlineTablePreview() {
             onParagraphAfterChange = {},
             onInsertTable = {},
             onInlineTableCellChange = { _, _, _ -> },
+            onInlineCellFocused = {},
             onInlineTableAppendRow = {},
             onInlineToggleBold = { _, _ -> },
             onInlineToggleItalic = { _, _ -> },
             onInlineToggleUnderline = { _, _ -> },
             onMove = { _, _ -> },
+            isSelected = false,
             modifier = Modifier
                 .padding(20.dp)
                 .width(440.dp)

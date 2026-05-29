@@ -1,0 +1,23 @@
+{
+  "report": "docs/audit/feature_reachability_repair_report.md",
+  "overall_status": "PRODUCT_PROTOTYPE_REACHABLE",
+  "validation": {
+    "assembleDebug": "FAIL",
+    "testDebugUnitTest": "FAIL",
+    "blocker": "Gradle wrapper download blocked: Permission denied connecting to services.gradle.org"
+  },
+  "p0_items": {
+    "p0_1_normal_editor_topbar_cleanup": "PASS",
+    "p0_2_new_table_note_textcontainer_only": "PASS",
+    "p0_3_export_user_reachability": "PASS",
+    "p0_4_ticnote_ink_payload": "PARTIAL",
+    "p0_5_image_paste_dual_path": "PARTIAL",
+    "p0_6_pan_zoom_verification": "PARTIAL",
+    "p0_7_selection_group_move_feedback": "PARTIAL"
+  },
+  "deferred": [
+    "Physical Samsung S Pen latency/feel verification",
+    "End-to-end .ticnote restore import verification",
+    "Cross-device clipboard image URI compatibility"
+  ]
+}

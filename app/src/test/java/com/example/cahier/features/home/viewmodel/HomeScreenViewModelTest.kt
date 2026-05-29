@@ -26,6 +26,10 @@ import app.cash.turbine.test
 import com.example.cahier.core.data.FakeNotesRepository
 import com.example.cahier.core.data.Note
 import com.example.cahier.core.data.NoteType
+import com.example.cahier.core.document.DocumentSerializer
+import com.example.cahier.core.document.TableBlock
+import com.example.cahier.core.document.TableNode
+import com.example.cahier.core.document.TextContainerBlock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
@@ -131,5 +135,22 @@ class HomeScreenViewModelTest {
             assertEquals(Note(), awaitItem().note)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun addTableInkNote_creates_textcontainer_inline_table_not_legacy_tableblock() = runTest {
+        var createdId: Long? = null
+        viewModel.addTableInkNote { id -> createdId = id }
+        val note = notesRepository.getNotes().first { it.id == createdId }
+        val doc = DocumentSerializer.decodeOrNull(note.text ?: "")
+
+        assertNotNull(doc)
+        val blocks = doc!!.pages.firstOrNull()?.blocks.orEmpty()
+        assertTrue(blocks.any { it is TextContainerBlock })
+        assertTrue(blocks.none { it is TableBlock })
+
+        val textContainer = blocks.filterIsInstance<TextContainerBlock>().first()
+        val nodes = textContainer.content.nodes
+        assertTrue(nodes.any { it is TableNode })
     }
 }
