@@ -31,6 +31,28 @@ class DocumentSerializerTest {
     }
 
     @Test
+    fun encodeDecode_preservesDocumentRevisionAndInkLayerMetadata() {
+        val document = TicDocument(
+            revision = 42L,
+            pages = listOf(
+                CanvasPage(
+                    inkLayer = InkLayerRef(
+                        documentRevision = 42L,
+                        strokeCount = 7
+                    )
+                )
+            )
+        )
+
+        val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
+
+        assertNotNull(decoded)
+        assertEquals(42L, decoded!!.revision)
+        assertEquals(42L, decoded.pages.first().inkLayer.documentRevision)
+        assertEquals(7, decoded.pages.first().inkLayer.strokeCount)
+    }
+
+    @Test
     fun decodeOrNull_invalidPayload_returnsNull() {
         val decoded = DocumentSerializer.decodeOrNull("{bad json")
         assertNull(decoded)

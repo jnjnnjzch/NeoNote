@@ -66,6 +66,7 @@ import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSiz
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -102,6 +103,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.ink.rendering.android.canvas.CanvasStrokeRenderer
 import androidx.ink.strokes.Stroke
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.cahier.R
 import com.example.cahier.core.ui.ColorPickerDialog
@@ -182,6 +186,19 @@ fun DrawingCanvas(
     LaunchedEffect(Unit) {
         drawingCanvasViewModel.ensureDefaultTextContainer()
     }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, drawingCanvasViewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                drawingCanvasViewModel.flushEdits()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            drawingCanvasViewModel.flushEdits()
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     Column(
         modifier = modifier
@@ -210,7 +227,10 @@ fun DrawingCanvas(
         DrawingCanvasTopBar(
             drawingCanvasViewModel = drawingCanvasViewModel,
             appMode = appMode,
-            onNavigateUp = navigateUp,
+            onNavigateUp = {
+                drawingCanvasViewModel.flushEdits()
+                navigateUp()
+            },
             onResetView = { resetViewNonce++ },
             onFormulaClick = { formulaDialogOpen = true },
             onExportClick = { exportDialogOpen = true },
@@ -224,7 +244,10 @@ fun DrawingCanvas(
         DrawingCanvasContent(
             drawingCanvasViewModel = drawingCanvasViewModel,
             imagePickerLauncher = imagePickerLauncher,
-            onNavigateUp = navigateUp,
+            onNavigateUp = {
+                drawingCanvasViewModel.flushEdits()
+                navigateUp()
+            },
             navigateToBrushGraph = navigateToBrushGraph,
             appMode = appMode,
             resetViewNonce = resetViewNonce,

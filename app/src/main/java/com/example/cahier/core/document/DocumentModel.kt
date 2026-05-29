@@ -8,7 +8,8 @@ import java.util.UUID
 data class TicDocument(
     val version: Int = CURRENT_VERSION,
     val pages: List<CanvasPage> = listOf(CanvasPage()),
-    val settings: DocumentSettings = DocumentSettings()
+    val settings: DocumentSettings = DocumentSettings(),
+    val revision: Long = 0L
 ) {
     companion object {
         const val CURRENT_VERSION = 1
@@ -33,7 +34,9 @@ data class CanvasPage(
 
 @Serializable
 data class InkLayerRef(
-    val source: String = "note_strokes_data_v1"
+    val source: String = "note_strokes_data_v1",
+    val documentRevision: Long = 0L,
+    val strokeCount: Int = 0,
 )
 
 @Serializable
