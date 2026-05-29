@@ -365,14 +365,12 @@ class DrawingCanvasViewModel @Inject constructor(
                 )
         }
         val updatedTransforms = page.strokeTransforms.filter { it.strokeId in validIds }
-        persistDocument(
-            current.copy(
-                pages = listOf(
-                    page.copy(
-                        strokeIds = remapped,
-                        strokeAnchors = updatedAnchors,
-                        strokeTransforms = updatedTransforms
-                    )
+        return document.copy(
+            pages = listOf(
+                page.copy(
+                    strokeIds = remapped,
+                    strokeAnchors = updatedAnchors,
+                    strokeTransforms = updatedTransforms
                 )
             )
         )

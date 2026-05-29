@@ -100,8 +100,31 @@ class DrawingInputRoutingTest {
     }
 
     private fun motionEvent(action: Int, toolType: Int): MotionEvent {
-        return MotionEvent.obtain(0L, 0L, action, 10f, 10f, 0).apply {
-            setToolType(0, toolType)
-        }
+        val properties = arrayOf(MotionEvent.PointerProperties().apply {
+            id = 0
+            this.toolType = toolType
+        })
+        val coords = arrayOf(MotionEvent.PointerCoords().apply {
+            x = 10f
+            y = 10f
+            pressure = 1f
+            size = 1f
+        })
+        return MotionEvent.obtain(
+            0L,
+            0L,
+            action,
+            1,
+            properties,
+            coords,
+            0,
+            0,
+            1f,
+            1f,
+            0,
+            0,
+            0,
+            0
+        )
     }
 }

@@ -9,6 +9,7 @@ data class TicDocument(
     val version: Int = CURRENT_VERSION,
     val pages: List<CanvasPage> = listOf(CanvasPage()),
     val settings: DocumentSettings = DocumentSettings(),
+    val assetManifest: List<AssetManifestEntry> = emptyList(),
     val revision: Long = 0L
 ) {
     companion object {
@@ -110,7 +111,7 @@ data class FormulaNode(
 @SerialName("image_node")
 data class ImageNode(
     val assetId: String? = null,
-    override val id: String = UUID.randomUUID().toString()
+    override val id: String = UUID.randomUUID().toString(),
     val assetPath: String? = null
 ) : ContentNode
 

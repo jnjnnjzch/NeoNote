@@ -754,7 +754,6 @@ private fun DrawingSurfaceWithTarget(
                 )
             },
             onRawMotionEvent = { event -> drawingCanvasViewModel.onRawMotionEvent(event, canvasTransform) },
-            consumeFingerInkInput = true,
             onFingerTap = { sx, sy ->
                 val container = textContainer
                 if (container != null) {
