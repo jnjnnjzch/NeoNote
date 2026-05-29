@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 @OptIn(ExperimentalMaterial3Api::class)
 fun DebugCenterScreen(
     onOpenBuildInfo: () -> Unit,
+    onOpenDebugDrawing: () -> Unit,
     onOpenSPenMetrics: () -> Unit,
     onOpenPressureTest: () -> Unit,
     onOpenStrokeLatencyLab: () -> Unit,
@@ -46,6 +47,7 @@ fun DebugCenterScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text("Debug-only tools and labs", style = MaterialTheme.typography.titleMedium)
+            DebugItem("Debug Drawing", onOpenDebugDrawing)
             DebugItem("Build Info", onOpenBuildInfo)
             DebugItem("S Pen Metrics", onOpenSPenMetrics)
             DebugItem("Pressure Test", onOpenPressureTest)

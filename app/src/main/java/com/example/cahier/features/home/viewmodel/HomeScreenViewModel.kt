@@ -103,21 +103,25 @@ class HomeScreenViewModel @Inject constructor(
 
     fun addUnifiedNote(callback: (id: Long) -> Unit) {
         viewModelScope.launch {
-            val initialDoc = TicDocument(
-                pages = listOf(
-                    CanvasPage(blocks = listOf(TextContainerBlock()))
-                )
-            )
-            val newNote = Note(
-                id = 0,
-                title = "",
-                type = NoteType.Drawing,
-                text = DocumentSerializer.encode(initialDoc)
-            )
+            val newNote = createUnifiedNote()
             val insertedId = noteRepository.addNote(newNote)
             _uiState.value = CahierUiState(note = newNote.copy(id = insertedId))
             callback(insertedId)
         }
+    }
+
+    private fun createUnifiedNote(): Note {
+        val initialDoc = TicDocument(
+            pages = listOf(
+                CanvasPage(blocks = listOf(TextContainerBlock()))
+            )
+        )
+        return Note(
+            id = 0,
+            title = "",
+            type = NoteType.Drawing,
+            text = DocumentSerializer.encode(initialDoc)
+        )
     }
 
     fun addTableInkNote(callback: (id: Long) -> Unit) {

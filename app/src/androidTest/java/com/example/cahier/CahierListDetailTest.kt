@@ -87,7 +87,6 @@ class CahierListDetailTest {
     @Composable
     private fun HomeContent(forceCompact: Boolean) {
         HomePane(
-            navigateToCanvas = { _ -> },
             navigateToDrawingCanvas = { _ -> },
             navigateToDebugDrawingCanvas = { _ -> },
             navigateToBrushGraph = {},
