@@ -13,6 +13,7 @@ sealed interface CanvasObject {
 data class RichContentBox(
     override val id: String,
     val content: RichContent = RichContent(),
+    val position: CanvasPosition = CanvasPosition(0f, 0f),
 ) : CanvasObject
 
 /**
@@ -22,4 +23,5 @@ data class FloatingImage(
     override val id: String,
     val assetId: String,
     val altText: String? = null,
+    val position: CanvasPosition = CanvasPosition(0f, 0f),
 ) : CanvasObject
