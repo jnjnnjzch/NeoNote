@@ -75,6 +75,116 @@ class NeoNoteEditorControllerTest {
     }
 
     @Test
+    fun `s pen routed events create committed ink stroke`() {
+        val controller = NeoNoteEditorController()
+        val router = InputRouter()
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(10f, 12f), tool = PointerTool.SPen, pressure = 0.4f)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(20f, 24f), tool = PointerTool.SPen, pressure = 0.8f)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(20f, 24f), tool = PointerTool.SPen, pressure = 0.8f)),
+            ),
+        )
+
+        val stroke = controller.currentCanvas.inkLayer.strokes.single()
+        assertEquals("stroke-1", stroke.id)
+        assertEquals(2, stroke.points.size)
+        assertEquals(10f, stroke.points[0].x)
+        assertEquals(12f, stroke.points[0].y)
+        assertEquals(0.4f, stroke.points[0].pressure)
+        assertEquals(20f, stroke.points[1].x)
+        assertEquals(24f, stroke.points[1].y)
+        assertEquals(0.8f, stroke.points[1].pressure)
+    }
+
+    @Test
+    fun `finger drag pans without creating ink strokes`() {
+        val controller = NeoNoteEditorController()
+        val router = InputRouter(tapSlop = 8f)
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(0f, 0f), tool = PointerTool.Finger)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(12f, 0f), tool = PointerTool.Finger)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(12f, 0f), tool = PointerTool.Finger)),
+            ),
+        )
+
+        assertTrue(controller.currentCanvas.inkLayer.strokes.isEmpty())
+        assertEquals(12f, controller.state.viewport.panOffsetX)
+    }
+
+    @Test
+    fun `pan and zoom do not mutate stroke document coordinates`() {
+        val controller = NeoNoteEditorController()
+        val router = InputRouter()
+        controller.panViewportBy(screenDx = 50f, screenDy = 20f)
+        controller.zoomViewportBy(zoomChange = 2f, screenCentroid = CanvasPoint(0f, 0f))
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(150f, 220f), tool = PointerTool.SPen)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(170f, 260f), tool = PointerTool.SPen)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(170f, 260f), tool = PointerTool.SPen)),
+            ),
+        )
+
+        val originalPoints = controller.currentCanvas.inkLayer.strokes.single().points
+        assertEquals(25f, originalPoints[0].x)
+        assertEquals(90f, originalPoints[0].y)
+        assertEquals(35f, originalPoints[1].x)
+        assertEquals(110f, originalPoints[1].y)
+
+        controller.panViewportBy(screenDx = -30f, screenDy = 15f)
+        controller.zoomViewportBy(zoomChange = 0.5f, screenCentroid = CanvasPoint(100f, 100f))
+
+        assertEquals(originalPoints, controller.currentCanvas.inkLayer.strokes.single().points)
+    }
+
+    @Test
     fun `selection mode can move a selected rich content box in document coordinates under zoom`() {
         val controller = NeoNoteEditorController()
         controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
