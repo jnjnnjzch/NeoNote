@@ -8,7 +8,8 @@ import java.util.UUID
 data class TicDocument(
     val version: Int = CURRENT_VERSION,
     val pages: List<CanvasPage> = listOf(CanvasPage()),
-    val settings: DocumentSettings = DocumentSettings()
+    val settings: DocumentSettings = DocumentSettings(),
+    val assetManifest: List<AssetManifestEntry> = emptyList()
 ) {
     companion object {
         const val CURRENT_VERSION = 1
@@ -20,6 +21,17 @@ data class DocumentSettings(
     val pressureCurve: Float = 1.0f,
     val stylusWritesByDefault: Boolean = true,
     val fingerPansByDefault: Boolean = true
+)
+
+@Serializable
+data class AssetManifestEntry(
+    val assetId: String,
+    val mimeType: String,
+    val originalName: String,
+    val relativePath: String,
+    val width: Int? = null,
+    val height: Int? = null,
+    val createdAt: Long
 )
 
 @Serializable
@@ -81,7 +93,8 @@ data class FormulaNode(
 @Serializable
 @SerialName("image_node")
 data class ImageNode(
-    val assetPath: String
+    val assetId: String? = null,
+    val assetPath: String? = null
 ) : ContentNode
 
 @Serializable
@@ -121,7 +134,8 @@ data class ImageBlock(
     override val y: Float = 64f,
     override val width: Float = 320f,
     override val height: Float = 240f,
-    val assetPath: String
+    val assetId: String? = null,
+    val assetPath: String? = null
 ) : Block
 
 @Serializable

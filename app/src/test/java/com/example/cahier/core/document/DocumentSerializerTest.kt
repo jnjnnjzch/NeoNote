@@ -107,7 +107,7 @@ class DocumentSerializerTest {
     @Test
     fun encodeDecode_preservesSharedCanvasCoordinatesAcrossBlockTypes() {
         val text = TextContainerBlock(x = 300f, y = 220f, width = 700f, height = 380f)
-        val image = ImageBlock(x = -140f, y = 96f, width = 256f, height = 192f, assetPath = "/tmp/a.png")
+        val image = ImageBlock(x = -140f, y = 96f, width = 256f, height = 192f, assetPath = "files/notes/42/assets/a.png")
         val table = TableBlock(x = 48f, y = -72f, width = 640f, height = 320f, rows = 2, columns = 2)
         val document = TicDocument(pages = listOf(CanvasPage(blocks = listOf(text, image, table))))
 
@@ -133,7 +133,7 @@ class DocumentSerializerTest {
             x = 220f,
             y = 140f,
             source = "x^2 + y^2 = z^2",
-            rendered = "f(x): x^2 + y^2 = z^2"
+            rendered = "plain formula preview: x^2 + y^2 = z^2"
         )
         val document = TicDocument(pages = listOf(CanvasPage(blocks = listOf(formula))))
         val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
@@ -141,8 +141,40 @@ class DocumentSerializerTest {
         assertNotNull(decoded)
         val decodedFormula = decoded!!.pages.first().blocks.first() as FormulaBlock
         assertEquals("x^2 + y^2 = z^2", decodedFormula.source)
-        assertEquals("f(x): x^2 + y^2 = z^2", decodedFormula.rendered)
+        assertEquals("plain formula preview: x^2 + y^2 = z^2", decodedFormula.rendered)
         assertEquals(220f, decodedFormula.x)
         assertEquals(140f, decodedFormula.y)
     }
+    @Test
+    fun encodeDecode_roundTripsAssetManifestAndImageAssetReference() {
+        val manifest = AssetManifestEntry(
+            assetId = "asset-1",
+            mimeType = "image/png",
+            originalName = "sample.png",
+            relativePath = "files/notes/42/assets/asset-1.png",
+            width = 320,
+            height = 240,
+            createdAt = 1_800_000_000_000L
+        )
+        val image = ImageBlock(assetId = manifest.assetId, assetPath = manifest.relativePath)
+        val document = TicDocument(
+            pages = listOf(CanvasPage(blocks = listOf(image))),
+            assetManifest = listOf(manifest)
+        )
+
+        val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
+
+        assertNotNull(decoded)
+        val decodedManifest = decoded!!.assetManifest.single()
+        val decodedImage = decoded.pages.first().blocks.first() as ImageBlock
+        assertEquals("asset-1", decodedManifest.assetId)
+        assertEquals("image/png", decodedManifest.mimeType)
+        assertEquals("sample.png", decodedManifest.originalName)
+        assertEquals("files/notes/42/assets/asset-1.png", decodedManifest.relativePath)
+        assertEquals(320, decodedManifest.width)
+        assertEquals(240, decodedManifest.height)
+        assertEquals("asset-1", decodedImage.assetId)
+        assertEquals("files/notes/42/assets/asset-1.png", decodedImage.assetPath)
+    }
+
 }

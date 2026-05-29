@@ -1,13 +1,42 @@
 package com.example.cahier.features.drawing.export
 
+import com.example.cahier.core.document.AssetManifestEntry
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.encodeToJsonElement
 import java.io.File
 import java.io.FileOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
+data class TicNoteArchiveAsset(
+    val file: File,
+    val archivePath: String
+)
+
 object TicNoteArchiveWriter {
-    fun manifestJson(title: String): String {
-        return """{"title":"$title","version":3,"assets_dir":"assets","ink_file":"ink/strokes.json","ink_summary_file":"ink.json","document_file":"document.json","layout_preserving_exports":[".html",".md",".pdf"]}"""
+    private val json = Json { encodeDefaults = true }
+
+    fun manifestJson(title: String, assets: List<AssetManifestEntry> = emptyList()): String {
+        val manifest = buildJsonObject {
+            put("title", title)
+            put("version", 3)
+            put("assets_dir", "assets")
+            put("ink_file", "ink/strokes.json")
+            put("ink_summary_file", "ink.json")
+            put("document_file", "document.json")
+            putJsonArray("layout_preserving_exports") {
+                add(".html")
+                add(".md")
+                add(".pdf")
+            }
+            put("asset_manifest", json.encodeToJsonElement(ListSerializer(AssetManifestEntry.serializer()), assets))
+        }
+        return manifest.toString()
     }
 
     fun inkJson(finalizedStrokeCount: Int): String {
@@ -23,7 +52,9 @@ object TicNoteArchiveWriter {
         title: String,
         finalizedStrokeCount: Int,
         backgroundFile: File?,
-        imageAssetFiles: List<File>
+        imageAssetFiles: List<File>,
+        assetManifest: List<AssetManifestEntry> = emptyList(),
+        archiveAssets: List<TicNoteArchiveAsset> = imageAssetFiles.map { TicNoteArchiveAsset(it, "assets/${it.name}") }
     ) {
         ZipOutputStream(FileOutputStream(archiveFile)).use { zip ->
             zip.putNextEntry(ZipEntry("document.json"))
@@ -35,7 +66,7 @@ object TicNoteArchiveWriter {
             zip.closeEntry()
 
             zip.putNextEntry(ZipEntry("manifest.json"))
-            zip.write(manifestJson(title).toByteArray())
+            zip.write(manifestJson(title, assetManifest).toByteArray())
             zip.closeEntry()
 
             zip.putNextEntry(ZipEntry("ink.json"))
@@ -61,10 +92,10 @@ object TicNoteArchiveWriter {
                 zip.write(file.readBytes())
                 zip.closeEntry()
             }
-            imageAssetFiles.forEach { file ->
-                if (file.exists()) {
-                    zip.putNextEntry(ZipEntry("assets/${file.name}"))
-                    zip.write(file.readBytes())
+            archiveAssets.forEach { asset ->
+                if (asset.file.exists()) {
+                    zip.putNextEntry(ZipEntry(asset.archivePath))
+                    zip.write(asset.file.readBytes())
                     zip.closeEntry()
                 }
             }

@@ -856,7 +856,7 @@ private fun DrawingSurfaceWithTarget(
         imageBlocks.forEachIndexed { index, image ->
             val isSelectedImage = selectedImageIndex == index
             AsyncImage(
-                model = image.assetPath,
+                model = drawingCanvasViewModel.imageModelForBlock(image),
                 contentDescription = "Image block $index",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -930,9 +930,9 @@ private fun DrawingSurfaceWithTarget(
             ) {
                 Column(modifier = Modifier.padding(8.dp)) {
                     Text(
-                        text = formula.rendered,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = NeoNoteVisualTokens.normalText
+                        text = "plain formula preview",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = NeoNoteVisualTokens.secondaryText
                     )
                     Text(
                         text = formula.source,
@@ -1144,7 +1144,7 @@ private fun InlineTableNodeEditor(
                         )
                         cell.latex?.takeIf { it.isNotBlank() }?.let { formula ->
                             Text(
-                                text = "f(x): $formula",
+                                text = "plain formula preview: $formula",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = NeoNoteVisualTokens.secondaryText,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)

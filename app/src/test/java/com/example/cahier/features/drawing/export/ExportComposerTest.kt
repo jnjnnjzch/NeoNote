@@ -1,5 +1,6 @@
 package com.example.cahier.features.drawing.export
 
+import com.example.cahier.core.document.AssetManifestEntry
 import com.example.cahier.core.document.CanvasPage
 import com.example.cahier.core.document.FormulaBlock
 import com.example.cahier.core.document.ImageBlock
@@ -15,9 +16,9 @@ class ExportComposerTest {
         val doc = sampleDoc()
         val md = ExportComposer.toMarkdown("Neo", doc, 12)
         assertTrue(md.contains("## Layout"))
-        assertTrue(md.contains("| alpha `${'$'}x^2${'$'}` |"))
-        assertTrue(md.contains("![image-0](assets/sample.png)"))
-        assertTrue(md.contains("formula-0"))
+        assertTrue(md.contains("| alpha `plain formula preview: x^2` |"))
+        assertTrue(md.contains("![image-0](assets/asset-1.png)"))
+        assertTrue(md.contains("formula-0 (plain formula preview)"))
         assertTrue(md.contains("Finalized stroke count: 12"))
     }
 
@@ -40,8 +41,20 @@ class ExportComposerTest {
                 listOf(TableCell(text = "alpha", latex = "x^2"))
             )
         )
-        val image = ImageBlock(assetPath = "/tmp/sample.png")
-        val formula = FormulaBlock(source = "x^2 + y^2 = z^2", rendered = "f(x): x^2 + y^2 = z^2")
-        return TicDocument(pages = listOf(CanvasPage(blocks = listOf(table, image, formula))))
+        val image = ImageBlock(assetId = "asset-1", assetPath = "files/notes/7/assets/asset-1.png")
+        val formula = FormulaBlock(source = "x^2 + y^2 = z^2", rendered = "plain formula preview: x^2 + y^2 = z^2")
+        val manifest = AssetManifestEntry(
+            assetId = "asset-1",
+            mimeType = "image/png",
+            originalName = "sample.png",
+            relativePath = "files/notes/7/assets/asset-1.png",
+            width = 640,
+            height = 480,
+            createdAt = 1_800_000_000_000L
+        )
+        return TicDocument(
+            pages = listOf(CanvasPage(blocks = listOf(table, image, formula))),
+            assetManifest = listOf(manifest)
+        )
     }
 }
