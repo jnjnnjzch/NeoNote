@@ -2,8 +2,6 @@ package com.neonote.engine
 
 import com.neonote.model.CanvasPoint
 import com.neonote.model.InfiniteCanvas
-import com.neonote.model.RichContent
-import com.neonote.model.RichContentBox
 import kotlin.math.hypot
 
 /**
@@ -15,7 +13,6 @@ public class InputRouter(
     private val tapSlop: Float = DefaultTapSlop,
 ) {
     private var activeFingerDown: PendingFingerDown? = null
-    private var nextRichContentIndex: Int = 1
 
     public fun route(canvas: InfiniteCanvas, event: InputEvent, mode: InputMode = InputMode.Write): InputRouteResult {
         if (mode == InputMode.Selection) {
@@ -34,8 +31,8 @@ public class InputRouter(
         }
 
         return when (event.type) {
-            PointerEventType.Down -> routeFingerDown(canvas, event, touchPointers.singleOrNull())
-            PointerEventType.Move -> routeFingerMove(canvas, event, touchPointers.singleOrNull())
+            PointerEventType.Down -> routeFingerDown(canvas, touchPointers.singleOrNull())
+            PointerEventType.Move -> routeFingerMove(canvas, touchPointers.singleOrNull())
             PointerEventType.Up -> routeFingerUp(canvas, event, touchPointers.singleOrNull())
             PointerEventType.Cancel -> {
                 activeFingerDown = null
@@ -46,7 +43,6 @@ public class InputRouter(
 
     private fun routeFingerDown(
         canvas: InfiniteCanvas,
-        event: InputEvent,
         pointer: InputPointer?,
     ): InputRouteResult {
         if (pointer == null) return InputRouteResult(canvas = canvas, action = InputAction.Ignored)
@@ -56,7 +52,6 @@ public class InputRouter(
 
     private fun routeFingerMove(
         canvas: InfiniteCanvas,
-        event: InputEvent,
         pointer: InputPointer?,
     ): InputRouteResult {
         if (pointer == null) return InputRouteResult(canvas = canvas, action = InputAction.Ignored)
@@ -90,9 +85,8 @@ public class InputRouter(
             return InputRouteResult(canvas = canvas, action = InputAction.EndInteraction)
         }
         if (event.targetObjectId == null && event.targetStrokeId == null) {
-            val updatedCanvas = canvas.ensureRichContentBoxFocusedAt(pointer.position)
             return InputRouteResult(
-                canvas = updatedCanvas,
+                canvas = canvas,
                 action = InputAction.CreateOrFocusRichContentBox(pointer.position),
             )
         }
@@ -114,27 +108,6 @@ public class InputRouter(
         PointerEventType.Move -> InputAction.ContinueInk(primaryPosition, primaryPressure)
         PointerEventType.Up -> InputAction.EndInteraction
         PointerEventType.Cancel -> InputAction.CancelInteraction
-    }
-
-    private fun InfiniteCanvas.ensureRichContentBoxFocusedAt(position: CanvasPoint): InfiniteCanvas {
-        val existingBox = objects.filterIsInstance<RichContentBox>().firstOrNull { it.bounds.contains(position) }
-        if (existingBox != null) {
-            return copy(
-                objects = objects.map { canvasObject ->
-                    if (canvasObject.id == existingBox.id) existingBox.copy(isFocused = true) else canvasObject
-                },
-            )
-        }
-
-        val objectId = "rich-content-${nextRichContentIndex++}"
-        return copy(
-            objects = objects + RichContentBox(
-                id = objectId,
-                content = RichContent(),
-                position = position,
-                isFocused = true,
-            ),
-        )
     }
 
     private data class PendingFingerDown(

@@ -9,7 +9,6 @@ import com.neonote.engine.PointerEventType
 import com.neonote.engine.PointerTool
 import com.neonote.model.CanvasPoint
 import com.neonote.model.InfiniteCanvas
-import com.neonote.model.RichContentBox
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -33,7 +32,7 @@ class InputRouterTest {
     }
 
     @Test
-    fun `finger tap blank creates and focuses a rich content box`() {
+    fun `finger tap blank routes create rich content box intent without mutating canvas`() {
         val router = InputRouter()
         val canvas = InfiniteCanvas()
 
@@ -52,11 +51,9 @@ class InputRouterTest {
             ),
         )
 
-        assertIs<InputAction.CreateOrFocusRichContentBox>(result.action)
-        val box = assertIs<RichContentBox>(result.canvas.objects.single())
-        assertEquals("rich-content-1", box.id)
-        assertEquals(CanvasPoint(32f, 64f), box.position)
-        assertTrue(box.isFocused)
+        val action = assertIs<InputAction.CreateOrFocusRichContentBox>(result.action)
+        assertEquals(CanvasPoint(32f, 64f), action.position)
+        assertTrue(result.canvas.objects.isEmpty())
     }
 
     @Test
