@@ -89,6 +89,13 @@ import com.example.cahier.core.ui.CahierUiState
 import com.example.cahier.core.ui.FocusedFieldEnum
 import com.example.cahier.features.home.NotePreviewParameterProvider
 
+/**
+ * Legacy migration-compatible editor for old text notes. Normal home navigation creates unified
+ * drawing notes and opens [com.example.cahier.features.drawing.DrawingCanvas] instead.
+ */
+@Deprecated(
+    message = "Use the unified DrawingCanvas route for normal note editing; this screen remains for legacy migration compatibility."
+)
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 fun TextNoteCanvasScreen(

@@ -39,6 +39,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -98,14 +99,17 @@ class HomeScreenViewModelTest {
 
         val notes = notesRepository.getNotes()
         assertEquals(1, notes.size)
-        assertEquals(NoteType.Drawing, notes.first().type)
-        assertEquals(createdNoteId, notes.first().id)
+        val note = notes.first()
+        assertEquals(NoteType.Drawing, note.type)
+        assertEquals(createdNoteId, note.id)
+        assertFalse(note.text.isNullOrBlank())
 
-        val document = DocumentSerializer.decodeOrNull(notes.first().text)
+        val document = DocumentSerializer.decodeOrNull(note.text)
         assertNotNull(document)
-        val blocks = document!!.pages.firstOrNull()?.blocks.orEmpty()
+        assertEquals(1, document!!.pages.size)
+        val blocks = document.pages.single().blocks
         assertEquals(1, blocks.size)
-        assertTrue(blocks.first() is TextContainerBlock)
+        assertTrue(blocks.single() is TextContainerBlock)
     }
 
     @Test

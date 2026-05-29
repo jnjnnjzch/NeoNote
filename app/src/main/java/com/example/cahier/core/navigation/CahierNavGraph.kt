@@ -48,9 +48,6 @@ fun CahierNavHost(
     ) {
         composable(HomeDestination.route) {
             HomePane(
-                navigateToCanvas = { noteId ->
-                    navController.navigate("${TextCanvasDestination.route}/$noteId")
-                },
                 navigateToDrawingCanvas = { noteId ->
                     navController.navigate("${DrawingCanvasDestination.route}/$noteId?mode=${AppMode.NORMAL.name}")
                 },
@@ -73,7 +70,8 @@ fun CahierNavHost(
             arguments = listOf(navArgument(TextCanvasDestination.NOTE_ID_ARG) {
                 type = NavType.LongType
             })
-        ) { navBackStackEntry ->
+        ) { _ ->
+            @Suppress("DEPRECATION")
             TextNoteCanvasScreen(
                 onExit = { navController.navigateUp() },
             )
@@ -112,6 +110,11 @@ fun CahierNavHost(
     }
 }
 
+/**
+ * Legacy migration-compatible route for pre-unified text notes. Normal app UI must route note
+ * editing through [DrawingCanvasDestination] so every newly created note opens on the unified
+ * TicDocument canvas.
+ */
 object TextCanvasDestination : NavigationDestination {
     override val route = "note_canvas"
     const val NOTE_ID_ARG = "noteId"
