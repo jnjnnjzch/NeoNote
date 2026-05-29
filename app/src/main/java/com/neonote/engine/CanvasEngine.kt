@@ -1,7 +1,7 @@
 package com.neonote.engine
 
 import com.neonote.model.CanvasObject
-import com.neonote.model.CanvasPosition
+import com.neonote.model.CanvasPoint
 import com.neonote.model.FloatingImage
 import com.neonote.model.InfiniteCanvas
 import com.neonote.model.RichContentBox
@@ -19,7 +19,7 @@ public class CanvasEngine {
     public fun addObject(canvas: InfiniteCanvas, canvasObject: CanvasObject): CanvasCommandResult.ObjectAdded =
         CanvasCommandResult.ObjectAdded(canvas = canvas.copy(objects = canvas.objects + canvasObject), canvasObject = canvasObject)
 
-    public fun moveObject(canvas: InfiniteCanvas, objectId: String, position: CanvasPosition): CanvasCommandResult.ObjectMoved {
+    public fun moveObject(canvas: InfiniteCanvas, objectId: String, position: CanvasPoint): CanvasCommandResult.ObjectMoved {
         require(canvas.objects.any { it.id == objectId }) { "Unknown canvas object id: $objectId" }
         val movedObjects = canvas.objects.map { canvasObject ->
             if (canvasObject.id == objectId) canvasObject.withPosition(position) else canvasObject
@@ -33,21 +33,20 @@ public class CanvasEngine {
             objectId = objectId,
         )
 
-    private fun CanvasObject.withPosition(position: CanvasPosition): CanvasObject = when (this) {
+    private fun CanvasObject.withPosition(position: CanvasPoint): CanvasObject = when (this) {
         is RichContentBox -> copy(position = position)
         is FloatingImage -> copy(position = position)
     }
 }
 
-
 public sealed interface CanvasCommand {
     public data class AddObject(val canvasObject: CanvasObject) : CanvasCommand
-    public data class MoveObject(val objectId: String, val position: CanvasPosition) : CanvasCommand
+    public data class MoveObject(val objectId: String, val position: CanvasPoint) : CanvasCommand
     public data class DeleteObject(val objectId: String) : CanvasCommand
 }
 
 public sealed interface CanvasCommandResult {
     public data class ObjectAdded(val canvas: InfiniteCanvas, val canvasObject: CanvasObject) : CanvasCommandResult
-    public data class ObjectMoved(val canvas: InfiniteCanvas, val objectId: String, val position: CanvasPosition) : CanvasCommandResult
+    public data class ObjectMoved(val canvas: InfiniteCanvas, val objectId: String, val position: CanvasPoint) : CanvasCommandResult
     public data class ObjectDeleted(val canvas: InfiniteCanvas, val objectId: String) : CanvasCommandResult
 }

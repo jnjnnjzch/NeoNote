@@ -1,11 +1,13 @@
 package com.neonote
 
-import com.neonote.input.InkEngine
-import com.neonote.input.InputEvent
-import com.neonote.input.InputPointer
-import com.neonote.input.InputRouter
-import com.neonote.input.PointerTool
-import com.neonote.input.RouteResult
+import com.neonote.engine.InputAction
+import com.neonote.engine.InputEvent
+import com.neonote.engine.InputMode
+import com.neonote.engine.InputPointer
+import com.neonote.engine.InputRouter
+import com.neonote.engine.PointerEventType
+import com.neonote.engine.PointerTool
+import com.neonote.model.CanvasPoint
 import com.neonote.model.InfiniteCanvas
 import com.neonote.model.RichContentBox
 import kotlin.test.Test
@@ -15,52 +17,112 @@ import kotlin.test.assertTrue
 
 class InputRouterTest {
     @Test
-    fun `s pen events route to ink engine`() {
-        val inkEngine = InkEngine()
-        val router = InputRouter(inkEngine)
-        val event = InputEvent.PointerMove(
-            pointers = listOf(InputPointer(id = 1, x = 4f, y = 5f, tool = PointerTool.SPEN)),
+    fun `s pen events route to ink`() {
+        val router = InputRouter()
+        val canvas = InfiniteCanvas()
+        val event = InputEvent(
+            type = PointerEventType.Move,
+            pointers = listOf(InputPointer(id = 1, position = CanvasPoint(4f, 5f), tool = PointerTool.SPen, pressure = 0.75f)),
         )
 
-        val result = router.route(event)
+        val result = router.route(canvas, event)
 
-        assertIs<RouteResult.Ink>(result)
-        assertEquals(listOf(event), inkEngine.events)
+        val action = assertIs<InputAction.ContinueInk>(result.action)
+        assertEquals(CanvasPoint(4f, 5f), action.position)
+        assertEquals(0.75f, action.pressure)
     }
 
     @Test
-    fun `single finger touch routes to pan and two finger touch routes to zoom`() {
-        val router = InputRouter(InkEngine())
-        val singleFinger = InputEvent.PointerMove(
-            pointers = listOf(InputPointer(id = 1, x = 1f, y = 1f, tool = PointerTool.TOUCH)),
+    fun `finger tap blank creates and focuses a rich content box`() {
+        val router = InputRouter()
+        val canvas = InfiniteCanvas()
+
+        router.route(
+            canvas,
+            InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(32f, 64f), tool = PointerTool.Finger)),
+            ),
         )
-        val twoFinger = InputEvent.PointerMove(
-            pointers = listOf(
-                InputPointer(id = 1, x = 1f, y = 1f, tool = PointerTool.TOUCH),
-                InputPointer(id = 2, x = 10f, y = 10f, tool = PointerTool.TOUCH),
+        val result = router.route(
+            canvas,
+            InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(32f, 64f), tool = PointerTool.Finger)),
             ),
         )
 
-        assertIs<RouteResult.Pan>(router.route(singleFinger))
-        assertIs<RouteResult.Zoom>(router.route(twoFinger))
+        assertIs<InputAction.CreateOrFocusRichContentBox>(result.action)
+        val box = assertIs<RichContentBox>(result.canvas.objects.single())
+        assertEquals("rich-content-1", box.id)
+        assertEquals(CanvasPoint(32f, 64f), box.position)
+        assertTrue(box.isFocused)
     }
 
     @Test
-    fun `blank canvas tap creates and focuses a rich content box`() {
-        val router = InputRouter(InkEngine())
-        val tap = InputEvent.Tap(
-            pointers = listOf(InputPointer(id = 1, x = 32f, y = 64f, tool = PointerTool.TOUCH)),
-            x = 32f,
-            y = 64f,
-            canvas = InfiniteCanvas(),
+    fun `finger drag beyond threshold routes to pan not tap`() {
+        val router = InputRouter(tapSlop = 8f)
+        val canvas = InfiniteCanvas()
+
+        router.route(
+            canvas,
+            InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(0f, 0f), tool = PointerTool.Finger)),
+            ),
+        )
+        val moveResult = router.route(
+            canvas,
+            InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(12f, 0f), tool = PointerTool.Finger)),
+            ),
+        )
+        val upResult = router.route(
+            canvas,
+            InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(12f, 0f), tool = PointerTool.Finger)),
+            ),
         )
 
-        val result = assertIs<RouteResult.CreateOrFocusRichContentBox>(router.route(tap))
+        val pan = assertIs<InputAction.PanBy>(moveResult.action)
+        assertEquals(12f, pan.dx)
+        assertEquals(0f, pan.dy)
+        assertIs<InputAction.EndInteraction>(upResult.action)
+        assertTrue(upResult.canvas.objects.isEmpty())
+    }
 
-        val box = result.canvas.objects.single() as RichContentBox
-        assertEquals("rich-content-1", box.id)
-        assertEquals(32f, box.x)
-        assertEquals(64f, box.y)
-        assertTrue(box.isFocused)
+    @Test
+    fun `two finger gesture routes to zoom`() {
+        val router = InputRouter()
+        val canvas = InfiniteCanvas()
+        val event = InputEvent(
+            type = PointerEventType.Move,
+            pointers = listOf(
+                InputPointer(id = 1, position = CanvasPoint(0f, 0f), tool = PointerTool.Finger),
+                InputPointer(id = 2, position = CanvasPoint(10f, 10f), tool = PointerTool.Finger),
+            ),
+        )
+
+        val result = router.route(canvas, event)
+
+        val zoom = assertIs<InputAction.Zoom>(result.action)
+        assertEquals(CanvasPoint(5f, 5f), zoom.centroid)
+    }
+
+    @Test
+    fun `selection mode routes gestures to selection placeholders`() {
+        val router = InputRouter()
+        val canvas = InfiniteCanvas()
+        val event = InputEvent(
+            type = PointerEventType.Down,
+            pointers = listOf(InputPointer(id = 1, position = CanvasPoint(3f, 4f), tool = PointerTool.Finger)),
+        )
+
+        val result = router.route(canvas, event, mode = InputMode.Selection)
+
+        val action = assertIs<InputAction.BeginSelectionGesture>(result.action)
+        assertEquals(CanvasPoint(3f, 4f), action.position)
     }
 }

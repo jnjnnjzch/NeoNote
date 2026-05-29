@@ -1,12 +1,13 @@
 package com.neonote
 
+import com.neonote.engine.SelectionEngine
+import com.neonote.model.CanvasPoint
 import com.neonote.model.InfiniteCanvas
 import com.neonote.model.InkLayer
 import com.neonote.model.InkPoint
 import com.neonote.model.InkStroke
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
-import com.neonote.selection.SelectionEngine
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -16,7 +17,7 @@ class SelectionEngineTest {
     fun `selection can include rich content boxes and ink strokes and move both`() {
         val canvas = InfiniteCanvas(
             objects = listOf(
-                RichContentBox(id = "box-1", content = RichContent(), x = 10f, y = 20f),
+                RichContentBox(id = "box-1", content = RichContent(), position = CanvasPoint(10f, 20f)),
             ),
             inkLayer = InkLayer(
                 strokes = listOf(
@@ -34,8 +35,7 @@ class SelectionEngineTest {
 
         assertTrue(selection.isObjectSelected("box-1"))
         assertTrue(selection.isStrokeSelected("stroke-1"))
-        assertEquals(15f, (movedCanvas.objects.single() as RichContentBox).x)
-        assertEquals(18f, (movedCanvas.objects.single() as RichContentBox).y)
+        assertEquals(CanvasPoint(15f, 18f), (movedCanvas.objects.single() as RichContentBox).position)
         assertEquals(
             listOf(InkPoint(6f, 0f), InkPoint(8f, 2f)),
             movedCanvas.inkLayer.strokes.single().points,
