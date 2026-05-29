@@ -145,4 +145,53 @@ class DocumentSerializerTest {
         assertEquals(220f, decodedFormula.x)
         assertEquals(140f, decodedFormula.y)
     }
+
+    @Test
+    fun encodeDecode_preservesMixedTextContainerNodeOrderAndContent() {
+        val nodes = listOf(
+            ParagraphNode(text = "intro", id = "p-1"),
+            TableNode(
+                rows = 1,
+                columns = 2,
+                cells = listOf(listOf(TableCell(text = "A"), TableCell(text = "B"))),
+                id = "t-1"
+            ),
+            FormulaNode(source = "E=mc^2", id = "f-1"),
+            ParagraphNode(text = "middle", id = "p-2"),
+            ImageNode(assetPath = "/assets/diagram.png", id = "i-1"),
+            TableNode(
+                rows = 2,
+                columns = 1,
+                cells = listOf(listOf(TableCell(text = "C")), listOf(TableCell(text = "D"))),
+                id = "t-2"
+            ),
+            ParagraphNode(text = "outro", id = "p-3")
+        )
+        val document = TicDocument(
+            pages = listOf(
+                CanvasPage(
+                    blocks = listOf(
+                        TextContainerBlock(
+                            id = "block-1",
+                            content = TextContainerContent(nodes = nodes)
+                        )
+                    )
+                )
+            )
+        )
+
+        val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
+
+        assertNotNull(decoded)
+        val decodedNodes = (decoded!!.pages.first().blocks.first() as TextContainerBlock).content.nodes
+        assertEquals(nodes.size, decodedNodes.size)
+        assertEquals(listOf("p-1", "t-1", "f-1", "p-2", "i-1", "t-2", "p-3"), decodedNodes.map { it.id })
+        assertEquals("intro", (decodedNodes[0] as ParagraphNode).text)
+        assertEquals("A", (decodedNodes[1] as TableNode).cells[0][0].text)
+        assertEquals("E=mc^2", (decodedNodes[2] as FormulaNode).source)
+        assertEquals("middle", (decodedNodes[3] as ParagraphNode).text)
+        assertEquals("/assets/diagram.png", (decodedNodes[4] as ImageNode).assetPath)
+        assertEquals("D", (decodedNodes[5] as TableNode).cells[1][0].text)
+        assertEquals("outro", (decodedNodes[6] as ParagraphNode).text)
+    }
 }

@@ -67,6 +67,7 @@ import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -112,9 +113,12 @@ import com.example.cahier.core.ui.LocalTextureStore
 import com.example.cahier.core.ui.theme.NeoNoteVisualTokens
 import com.example.cahier.core.ui.theme.CahierAppTheme
 import com.example.cahier.core.utils.createDropTarget
+import com.example.cahier.core.document.FormulaNode
+import com.example.cahier.core.document.ImageNode
 import com.example.cahier.core.document.TableBlock
 import com.example.cahier.core.document.TableNode
 import com.example.cahier.core.document.TextContainerBlock
+import com.example.cahier.core.document.TextContainerContent
 import com.example.cahier.core.document.ParagraphNode
 import com.example.cahier.core.document.ImageBlock
 import com.example.cahier.core.document.FormulaBlock
@@ -414,7 +418,7 @@ private fun DrawingCanvasTopBar(
                 TextButton(onClick = drawingCanvasViewModel::clearSelection) { Text("Clear Selection") }
             }
             TextButton(onClick = { /* text entry tool reserved */ }) { Text("Text") }
-            TextButton(onClick = { drawingCanvasViewModel.insertInlineTableInTextContainer() }) { Text("Table") }
+            TextButton(onClick = { drawingCanvasViewModel.insertInlineTableAtEndOfPrimaryTextContainer() }) { Text("Table") }
             TextButton(onClick = onPasteImage) { Text("Image") }
             TextButton(onClick = onFormulaClick) { Text("Formula") }
         }
@@ -819,16 +823,11 @@ private fun DrawingSurfaceWithTarget(
         }
 
         textContainer?.let { container ->
-            val paragraphs = container.content.nodes.filterIsInstance<ParagraphNode>()
-            val tableNode = container.content.nodes.filterIsInstance<TableNode>().firstOrNull()
             TextContainerEditor(
-                paragraphBefore = paragraphs.getOrNull(0)?.text.orEmpty(),
-                paragraphAfter = paragraphs.getOrNull(1)?.text.orEmpty(),
-                tableNode = tableNode,
+                container = container,
                 canvasTransform = canvasTransform,
-                onParagraphBeforeChange = { drawingCanvasViewModel.updateTextContainerParagraphAt(0, it) },
-                onParagraphAfterChange = { drawingCanvasViewModel.updateTextContainerParagraphAt(1, it) },
-                onInsertTable = drawingCanvasViewModel::insertInlineTableInTextContainer,
+                onParagraphChange = drawingCanvasViewModel::updateParagraph,
+                onInsertTableAfter = { blockId, nodeId -> drawingCanvasViewModel.insertTableAfter(blockId, nodeId) },
                 onInlineTableCellChange = drawingCanvasViewModel::updateInlineTableCell,
                 onInlineCellFocused = {
                     selectedInlineCell = it
@@ -957,44 +956,42 @@ private fun DrawingSurfaceWithTarget(
 
 @Composable
 private fun TextContainerEditor(
-    paragraphBefore: String,
-    paragraphAfter: String,
-    tableNode: TableNode?,
+    container: TextContainerBlock,
     canvasTransform: CanvasTransform,
-    onParagraphBeforeChange: (String) -> Unit,
-    onParagraphAfterChange: (String) -> Unit,
-    onInsertTable: () -> Unit,
-    onInlineTableCellChange: (Int, Int, String) -> Unit,
+    onParagraphChange: (String, String, String) -> Unit,
+    onInsertTableAfter: (String, String) -> Unit,
+    onInlineTableCellChange: (String, String, Int, Int, String) -> Unit,
     onInlineCellFocused: (Pair<Int, Int>?) -> Unit,
-    onInlineTableAppendRow: () -> Unit,
-    onInlineToggleBold: (Int, Int) -> Unit,
-    onInlineToggleItalic: (Int, Int) -> Unit,
-    onInlineToggleUnderline: (Int, Int) -> Unit,
+    onInlineTableAppendRow: (String, String) -> Unit,
+    onInlineToggleBold: (String, String, Int, Int) -> Unit,
+    onInlineToggleItalic: (String, String, Int, Int) -> Unit,
+    onInlineToggleUnderline: (String, String, Int, Int) -> Unit,
     onMove: (Float, Float) -> Unit,
     isSelected: Boolean,
     requestFocusNonce: Int,
     modifier: Modifier = Modifier,
 ) {
-            var containerFocused by remember { mutableStateOf(false) }
-            val paragraphBeforeFocusRequester = remember { FocusRequester() }
-            LaunchedEffect(requestFocusNonce) {
-                if (requestFocusNonce > 0) {
-                    paragraphBeforeFocusRequester.requestFocus()
+    var containerFocused by remember { mutableStateOf(false) }
+    val firstParagraphFocusRequester = remember { FocusRequester() }
+    val firstParagraphId = container.content.nodes.filterIsInstance<ParagraphNode>().firstOrNull()?.id
+    LaunchedEffect(requestFocusNonce, firstParagraphId) {
+        if (requestFocusNonce > 0 && firstParagraphId != null) {
+            firstParagraphFocusRequester.requestFocus()
+        }
+    }
+    Surface(
+        modifier = modifier
+            .pointerInput(Unit) {
+                if (isSelected) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        onMove(
+                            screenToDocDelta(dragAmount.x, canvasTransform),
+                            screenToDocDelta(dragAmount.y, canvasTransform)
+                        )
+                    }
                 }
-            }
-            Surface(
-                modifier = modifier
-                    .pointerInput(Unit) {
-                        if (isSelected) {
-                            detectDragGestures { change, dragAmount ->
-                                change.consume()
-                                onMove(
-                                    screenToDocDelta(dragAmount.x, canvasTransform),
-                                    screenToDocDelta(dragAmount.y, canvasTransform)
-                                )
-                            }
-                        }
-                    },
+            },
         color = NeoNoteVisualTokens.containerSurface,
         tonalElevation = 1.dp,
         shape = MaterialTheme.shapes.medium,
@@ -1009,45 +1006,77 @@ private fun TextContainerEditor(
                 .padding(8.dp)
                 .testTag("text-container-editor")
         ) {
-            TextField(
-                value = paragraphBefore,
-                onValueChange = onParagraphBeforeChange,
-                placeholder = { Text("Type your note…") },
-                singleLine = false,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(paragraphBeforeFocusRequester)
-                    .onFocusChanged { containerFocused = it.isFocused || containerFocused }
-                    .testTag("tc-paragraph-before")
-            )
-            if (tableNode == null) {
-                TextButton(onClick = onInsertTable, modifier = Modifier.testTag("btn-insert-inline-table")) {
-                    Text("Insert Table")
+            container.content.nodes.forEachIndexed { index, node ->
+                key(node.id) {
+                    when (node) {
+                        is ParagraphNode -> TextField(
+                            value = node.text,
+                            onValueChange = { onParagraphChange(container.id, node.id, it) },
+                            placeholder = { Text(if (index == 0) "Type your note…" else "Continue notes…") },
+                            singleLine = false,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(
+                                    if (node.id == firstParagraphId) Modifier.focusRequester(firstParagraphFocusRequester)
+                                    else Modifier
+                                )
+                                .onFocusChanged { containerFocused = it.isFocused || containerFocused }
+                                .testTag("tc-paragraph-${node.id}")
+                        )
+
+                        is TableNode -> InlineTableNodeEditor(
+                            table = node,
+                            onCellChange = { row, col, text ->
+                                onInlineTableCellChange(container.id, node.id, row, col, text)
+                            },
+                            onSelectCell = { row, col -> onInlineCellFocused(row to col) },
+                            onToggleBold = { row, col -> onInlineToggleBold(container.id, node.id, row, col) },
+                            onToggleItalic = { row, col -> onInlineToggleItalic(container.id, node.id, row, col) },
+                            onToggleUnderline = { row, col -> onInlineToggleUnderline(container.id, node.id, row, col) },
+                            onAppendRow = { onInlineTableAppendRow(container.id, node.id) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                                .testTag("tc-table-${node.id}")
+                        )
+
+                        is FormulaNode -> Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp)
+                                .testTag("tc-formula-${node.id}")
+                        ) {
+                            Text(
+                                text = node.source,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = NeoNoteVisualTokens.normalText
+                            )
+                            Text(
+                                text = "Formula",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = NeoNoteVisualTokens.secondaryText
+                            )
+                        }
+
+                        is ImageNode -> AsyncImage(
+                            model = node.assetPath,
+                            contentDescription = "Inline image ${node.id}",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(160.dp)
+                                .padding(vertical = 8.dp)
+                                .testTag("tc-image-${node.id}")
+                        )
+                    }
+                    TextButton(
+                        onClick = { onInsertTableAfter(container.id, node.id) },
+                        modifier = Modifier.testTag("btn-insert-table-after-${node.id}")
+                    ) {
+                        Text("Insert Table")
+                    }
                 }
-            } else {
-                InlineTableNodeEditor(
-                    table = tableNode,
-                    onCellChange = onInlineTableCellChange,
-                    onSelectCell = { r, c -> onInlineCellFocused(r to c) },
-                    onToggleBold = onInlineToggleBold,
-                    onToggleItalic = onInlineToggleItalic,
-                    onToggleUnderline = onInlineToggleUnderline,
-                    onAppendRow = onInlineTableAppendRow,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f, fill = false)
-                )
             }
-            TextField(
-                value = paragraphAfter,
-                onValueChange = onParagraphAfterChange,
-                placeholder = { Text("Continue notes…") },
-                singleLine = false,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onFocusChanged { containerFocused = it.isFocused || containerFocused }
-                    .testTag("tc-paragraph-after")
-            )
         }
     }
 }
@@ -1452,19 +1481,20 @@ private fun NormalEditorEmptyPreview() {
 private fun TextContainerParagraphPreview() {
     CahierAppTheme {
         TextContainerEditor(
-            paragraphBefore = "Research notes for seminar.",
-            paragraphAfter = "",
-            tableNode = null,
+            container = TextContainerBlock(
+                content = TextContainerContent(
+                    nodes = listOf(ParagraphNode("Research notes for seminar."))
+                )
+            ),
             canvasTransform = CanvasTransform(),
-            onParagraphBeforeChange = {},
-            onParagraphAfterChange = {},
-            onInsertTable = {},
-            onInlineTableCellChange = { _, _, _ -> },
+            onParagraphChange = { _, _, _ -> },
+            onInsertTableAfter = { _, _ -> },
+            onInlineTableCellChange = { _, _, _, _, _ -> },
             onInlineCellFocused = {},
-            onInlineTableAppendRow = {},
-            onInlineToggleBold = { _, _ -> },
-            onInlineToggleItalic = { _, _ -> },
-            onInlineToggleUnderline = { _, _ -> },
+            onInlineTableAppendRow = { _, _ -> },
+            onInlineToggleBold = { _, _, _, _ -> },
+            onInlineToggleItalic = { _, _, _, _ -> },
+            onInlineToggleUnderline = { _, _, _, _ -> },
             onMove = { _, _ -> },
             isSelected = false,
             requestFocusNonce = 0,
@@ -1497,19 +1527,24 @@ private fun TextContainerInlineTablePreview() {
             )
         )
         TextContainerEditor(
-            paragraphBefore = "Draft outline:",
-            paragraphAfter = "Add final inference below.",
-            tableNode = table,
+            container = TextContainerBlock(
+                content = TextContainerContent(
+                    nodes = listOf(
+                        ParagraphNode("Draft outline:"),
+                        table,
+                        ParagraphNode("Add final inference below.")
+                    )
+                )
+            ),
             canvasTransform = CanvasTransform(),
-            onParagraphBeforeChange = {},
-            onParagraphAfterChange = {},
-            onInsertTable = {},
-            onInlineTableCellChange = { _, _, _ -> },
+            onParagraphChange = { _, _, _ -> },
+            onInsertTableAfter = { _, _ -> },
+            onInlineTableCellChange = { _, _, _, _, _ -> },
             onInlineCellFocused = {},
-            onInlineTableAppendRow = {},
-            onInlineToggleBold = { _, _ -> },
-            onInlineToggleItalic = { _, _ -> },
-            onInlineToggleUnderline = { _, _ -> },
+            onInlineTableAppendRow = { _, _ -> },
+            onInlineToggleBold = { _, _, _, _ -> },
+            onInlineToggleItalic = { _, _, _, _ -> },
+            onInlineToggleUnderline = { _, _, _, _ -> },
             onMove = { _, _ -> },
             isSelected = false,
             requestFocusNonce = 0,
