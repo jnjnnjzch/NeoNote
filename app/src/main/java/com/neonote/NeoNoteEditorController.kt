@@ -15,6 +15,7 @@ import com.neonote.engine.InputRouter
 import com.neonote.engine.SelectionCommand
 import com.neonote.engine.SelectionCommandResult
 import com.neonote.engine.SelectionEngine
+import com.neonote.input.InputDiagnostics
 import com.neonote.model.CanvasObject
 import com.neonote.model.CanvasPoint
 import com.neonote.model.CanvasSize
@@ -28,8 +29,6 @@ import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
 import com.neonote.model.SelectionState
-import com.neonote.model.ViewportState
-import com.neonote.input.InputDiagnostics
 
 private const val DefaultBoxWidth = 320f
 private const val DefaultBoxHeight = 160f
@@ -99,19 +98,12 @@ public class NeoNoteEditorController(
 
     public fun zoomViewportBy(zoomChange: Float, screenCentroid: CanvasPoint) {
         if (zoomChange == 1f) return
-        val oldViewport = state.viewport
-        val oldZoom = oldViewport.zoomScale
-        val newZoom = (oldZoom * zoomChange).coerceIn(MinZoomScale, MaxZoomScale)
-        if (newZoom == oldZoom) return
-
-        val scaleChange = newZoom / oldZoom
-        val newPanX = screenCentroid.x - (screenCentroid.x - oldViewport.panOffsetX) * scaleChange
-        val newPanY = screenCentroid.y - (screenCentroid.y - oldViewport.panOffsetY) * scaleChange
         state = state.copy(
-            viewport = oldViewport.copy(
-                panOffsetX = newPanX,
-                panOffsetY = newPanY,
-                zoomScale = newZoom,
+            viewport = state.viewport.zoomAroundScreenPoint(
+                zoomChange = zoomChange,
+                screenCentroid = screenCentroid,
+                minZoomScale = MinZoomScale,
+                maxZoomScale = MaxZoomScale,
             ),
         )
     }
@@ -181,16 +173,21 @@ public class NeoNoteEditorController(
 
     public fun moveSelectedObjectsByScreenDelta(screenDelta: Offset) {
         if (state.selection.selectedRefs.isEmpty()) return
-        val zoom = state.viewport.zoomScale
-        val dx = screenDelta.x / zoom
-        val dy = screenDelta.y / zoom
-        val movedCanvas = selectionEngine.moveSelection(currentCanvas, state.selection, dx = dx, dy = dy)
+        val documentDelta = screenDeltaToDocumentDelta(screenDelta)
+        val movedCanvas = selectionEngine.moveSelection(
+            canvas = currentCanvas,
+            selection = state.selection,
+            dx = documentDelta.x,
+            dy = documentDelta.y,
+        )
         state = state.copy(document = state.document.withCanvas(movedCanvas))
     }
 
     public fun screenToDocument(screenPosition: CanvasPoint): CanvasPoint = state.viewport.screenToDocument(screenPosition)
 
     public fun documentToScreen(documentPosition: CanvasPoint): CanvasPoint = state.viewport.documentToScreen(documentPosition)
+
+    public fun screenDeltaToDocumentDelta(screenDelta: Offset): Offset = state.viewport.screenDeltaToDocumentDelta(screenDelta)
 
     private fun nextRichContentBoxId(): String {
         val next = currentCanvas.objects
@@ -217,15 +214,6 @@ public fun createTestEditorState(): EditorState = EditorState(
     currentTool = EditorTool.Text,
 )
 
-public fun ViewportState.screenToDocument(screenPosition: CanvasPoint): CanvasPoint = CanvasPoint(
-    x = (screenPosition.x - panOffsetX) / zoomScale,
-    y = (screenPosition.y - panOffsetY) / zoomScale,
-)
-
-public fun ViewportState.documentToScreen(documentPosition: CanvasPoint): CanvasPoint = CanvasPoint(
-    x = documentPosition.x * zoomScale + panOffsetX,
-    y = documentPosition.y * zoomScale + panOffsetY,
-)
 
 public fun InfiniteCanvas.topMostObjectAt(position: CanvasPoint): CanvasObject? = objects
     .sortedWith(compareBy<CanvasObject> { it.zIndex }.thenBy { it.id })
