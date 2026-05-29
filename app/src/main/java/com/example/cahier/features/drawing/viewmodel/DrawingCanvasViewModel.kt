@@ -24,6 +24,8 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
+import android.provider.OpenableColumns
+import android.webkit.MimeTypeMap
 import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
@@ -56,6 +58,7 @@ import coil3.request.allowHardware
 import coil3.toBitmap
 import com.example.cahier.core.data.CustomBrush
 import com.example.cahier.core.data.NotesRepository
+import com.example.cahier.core.document.AssetManifestEntry
 import com.example.cahier.core.document.DocumentSerializer
 import com.example.cahier.core.document.Block
 import com.example.cahier.core.document.DocumentSettings
@@ -87,6 +90,7 @@ import com.example.cahier.features.drawing.PressureCurveMapper
 import com.example.cahier.features.drawing.StressDocumentFactory
 import com.example.cahier.features.drawing.StrokeIdMapper
 import com.example.cahier.features.drawing.export.ExportComposer
+import com.example.cahier.features.drawing.export.TicNoteArchiveAsset
 import com.example.cahier.features.drawing.export.TicNoteArchiveWriter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -1025,7 +1029,8 @@ class DrawingCanvasViewModel @Inject constructor(
     fun addImageBlock(assetPath: String) {
         val current = _document.value
         val page = current.pages.firstOrNull() ?: return
-        val imageBlock = ImageBlock(assetPath = assetPath)
+        val manifestEntry = current.assetManifest.firstOrNull { it.relativePath == assetPath }
+        val imageBlock = ImageBlock(assetId = manifestEntry?.assetId, assetPath = assetPath)
         persistDocument(current.copy(pages = listOf(page.copy(blocks = page.blocks + imageBlock))))
     }
 
@@ -1075,22 +1080,84 @@ class DrawingCanvasViewModel @Inject constructor(
         if (trimmed.isBlank()) return
         val current = _document.value
         val page = current.pages.firstOrNull() ?: return
-        val formulaBlock = FormulaBlock(source = trimmed, rendered = "f(x): $trimmed")
+        val formulaBlock = FormulaBlock(source = trimmed, rendered = "plain formula preview: $trimmed")
         persistDocument(current.copy(pages = listOf(page.copy(blocks = page.blocks + formulaBlock))))
     }
 
     fun importImageFromUriToAssets(uriString: String): String? {
         return runCatching {
             val uri = uriString.toUri()
+            val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+            val extension = extensionForMimeType(mimeType) ?: extensionFromDisplayName(uri) ?: "bin"
+            val originalName = displayNameForUri(uri) ?: "imported_image.$extension"
+            val assetId = UUID.randomUUID().toString()
+            val createdAt = System.currentTimeMillis()
+            val relativePath = "files/notes/$noteId/assets/$assetId.$extension"
+            val outFile = resolveRelativeAssetFile(relativePath).apply { parentFile?.mkdirs() }
             val input: InputStream = context.contentResolver.openInputStream(uri) ?: return null
-            input.use { stream ->
-                val dir = File(context.filesDir, "note_assets").apply { mkdirs() }
-                val name = "img_${System.currentTimeMillis()}.bin"
-                val outFile = File(dir, name)
-                FileOutputStream(outFile).use { out -> stream.copyTo(out) }
-                outFile.absolutePath
-            }
+            input.use { stream -> FileOutputStream(outFile).use { out -> stream.copyTo(out) } }
+            val dimensions = decodeImageDimensions(outFile)
+            val manifestEntry = AssetManifestEntry(
+                assetId = assetId,
+                mimeType = mimeType,
+                originalName = originalName,
+                relativePath = relativePath,
+                width = dimensions?.first,
+                height = dimensions?.second,
+                createdAt = createdAt
+            )
+            val current = _document.value
+            persistDocument(current.copy(assetManifest = current.assetManifest.filterNot { it.assetId == assetId } + manifestEntry))
+            relativePath
         }.getOrNull()
+    }
+
+    fun imageModelForBlock(image: ImageBlock): Any? {
+        val relativePath = image.assetId
+            ?.let { assetId -> _document.value.assetManifest.firstOrNull { it.assetId == assetId }?.relativePath }
+            ?: image.assetPath
+            ?: return null
+        return if (File(relativePath).isAbsolute) relativePath else resolveRelativeAssetFile(relativePath)
+    }
+
+    private fun resolveRelativeAssetFile(relativePath: String): File {
+        return if (File(relativePath).isAbsolute) {
+            File(relativePath)
+        } else {
+            File(context.filesDir.parentFile ?: context.filesDir, relativePath)
+        }
+    }
+
+    private fun extensionForMimeType(mimeType: String): String? {
+        return when (mimeType.lowercase()) {
+            "image/jpeg" -> "jpg"
+            "image/png" -> "png"
+            "image/webp" -> "webp"
+            "image/gif" -> "gif"
+            "image/heic" -> "heic"
+            "image/heif" -> "heif"
+            else -> MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)?.lowercase()
+        }
+    }
+
+    private fun extensionFromDisplayName(uri: Uri): String? {
+        return displayNameForUri(uri)
+            ?.substringAfterLast('.', missingDelimiterValue = "")
+            ?.takeIf { it.isNotBlank() }
+            ?.lowercase()
+    }
+
+    private fun displayNameForUri(uri: Uri): String? {
+        return context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+        }
+    }
+
+    private fun decodeImageDimensions(file: File): Pair<Int, Int>? {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, options)
+        return if (options.outWidth > 0 && options.outHeight > 0) options.outWidth to options.outHeight else null
     }
 
     fun pasteImageBlockFromClipboard(): Boolean {
@@ -1469,12 +1536,23 @@ class DrawingCanvasViewModel @Inject constructor(
             exportPdf(pdfFile, safeTitle, doc)
 
             val archiveFile = File(baseDir, "$safeTitle.ticnote")
-            val imageAssets = doc.pages.firstOrNull()?.blocks?.filterIsInstance<ImageBlock>()
-                ?.mapNotNull { img ->
-                    File(img.assetPath).takeIf { it.exists() }?.also { file ->
-                        File(assetsDir, file.name).writeBytes(file.readBytes())
-                    }
-                } ?: emptyList()
+            val manifestAssets = doc.assetManifest.mapNotNull { manifestEntry ->
+                val source = resolveRelativeAssetFile(manifestEntry.relativePath).takeIf { it.exists() } ?: return@mapNotNull null
+                val exported = File(assetsDir, File(manifestEntry.relativePath).name)
+                source.copyTo(exported, overwrite = true)
+                TicNoteArchiveAsset(file = exported, archivePath = "assets/${exported.name}")
+            }
+            val manifestAssetPaths = doc.assetManifest.map { it.relativePath }.toSet()
+            val legacyImageAssets = doc.pages.firstOrNull()?.blocks.orEmpty()
+                .filterIsInstance<ImageBlock>()
+                .mapNotNull { image -> image.assetPath?.takeIf { it !in manifestAssetPaths } }
+                .mapNotNull { path ->
+                    val source = resolveRelativeAssetFile(path).takeIf { it.exists() } ?: return@mapNotNull null
+                    val exported = File(assetsDir, File(path).name)
+                    source.copyTo(exported, overwrite = true)
+                    TicNoteArchiveAsset(file = exported, archivePath = "assets/${exported.name}")
+                }
+            val imageAssets = manifestAssets + legacyImageAssets
             TicNoteArchiveWriter.writeArchive(
                 archiveFile = archiveFile,
                 documentJson = DocumentSerializer.encode(doc),
@@ -1484,7 +1562,9 @@ class DrawingCanvasViewModel @Inject constructor(
                 title = safeTitle,
                 finalizedStrokeCount = strokeCount,
                 backgroundFile = File(assetsDir, "background.png"),
-                imageAssetFiles = imageAssets
+                imageAssetFiles = emptyList(),
+                assetManifest = doc.assetManifest,
+                archiveAssets = imageAssets
             )
             _lastExportDirectory.value = baseDir.absolutePath
             _lastExportResult.value = ExportResult(
@@ -1556,10 +1636,15 @@ class DrawingCanvasViewModel @Inject constructor(
                     canvas.drawText(preview.take(60), left + 8f, top + 48f, subPaint)
                 }
                 is ImageBlock -> {
-                    canvas.drawText("Image: ${File(block.assetPath).name}", left + 8f, top + 24f, subPaint)
+                    val assetName = block.assetId
+                        ?.let { assetId -> document.assetManifest.firstOrNull { it.assetId == assetId }?.relativePath }
+                        ?: block.assetPath
+                        ?: "missing-image"
+                    canvas.drawText("Image: ${File(assetName).name}", left + 8f, top + 24f, subPaint)
                 }
                 is FormulaBlock -> {
-                    canvas.drawText(block.rendered, left + 8f, top + 24f, subPaint)
+                    canvas.drawText("plain formula preview", left + 8f, top + 24f, subPaint)
+                    canvas.drawText(block.source.take(60), left + 8f, top + 48f, subPaint)
                 }
                 else -> {
                     canvas.drawText(block::class.simpleName.orEmpty(), left + 8f, top + 24f, subPaint)

@@ -24,6 +24,17 @@ data class DocumentSettings(
 )
 
 @Serializable
+data class AssetManifestEntry(
+    val assetId: String,
+    val mimeType: String,
+    val originalName: String,
+    val relativePath: String,
+    val width: Int? = null,
+    val height: Int? = null,
+    val createdAt: Long
+)
+
+@Serializable
 data class CanvasPage(
     val id: String = UUID.randomUUID().toString(),
     val blocks: List<Block> = emptyList(),
@@ -93,7 +104,8 @@ data class FormulaNode(
 @Serializable
 @SerialName("image_node")
 data class ImageNode(
-    val assetPath: String
+    val assetId: String? = null,
+    val assetPath: String? = null
 ) : ContentNode
 
 @Serializable
@@ -133,7 +145,8 @@ data class ImageBlock(
     override val y: Float = 64f,
     override val width: Float = 320f,
     override val height: Float = 240f,
-    val assetPath: String
+    val assetId: String? = null,
+    val assetPath: String? = null
 ) : Block
 
 @Serializable
