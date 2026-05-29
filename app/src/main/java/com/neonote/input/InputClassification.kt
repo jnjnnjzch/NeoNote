@@ -1,5 +1,6 @@
 package com.neonote.input
 
+import com.neonote.engine.InputInkSample
 import com.neonote.engine.PointerTool
 
 public data class InputDiagnostics(
@@ -34,6 +35,7 @@ public data class AndroidPointer(
     val toolType: Int,
     val pressure: Float,
     val source: Int,
+    val historicalSamples: List<InputInkSample> = emptyList(),
 )
 
 public enum class PlatformPointerType {

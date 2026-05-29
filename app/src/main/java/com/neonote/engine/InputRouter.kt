@@ -104,8 +104,8 @@ public class InputRouter(
     )
 
     private fun InputEvent.toInkAction(): InputAction = when (type) {
-        PointerEventType.Down -> InputAction.BeginInk(primaryPosition, primaryPressure)
-        PointerEventType.Move -> InputAction.ContinueInk(primaryPosition, primaryPressure)
+        PointerEventType.Down -> InputAction.BeginInk(primaryPosition, primaryPressure, primaryRawPressure)
+        PointerEventType.Move -> InputAction.ContinueInk(primaryInkSamples)
         PointerEventType.Up -> InputAction.EndInteraction
         PointerEventType.Cancel -> InputAction.CancelInteraction
     }
@@ -145,6 +145,14 @@ public data class InputPointer(
     val position: CanvasPoint,
     val tool: PointerTool,
     val pressure: Float = 1f,
+    val rawPressure: Float? = null,
+    val historicalSamples: List<InputInkSample> = emptyList(),
+)
+
+public data class InputInkSample(
+    val position: CanvasPoint,
+    val pressure: Float,
+    val rawPressure: Float? = null,
 )
 
 public data class InputEvent(
@@ -159,6 +167,12 @@ public data class InputEvent(
 
     val primaryPosition: CanvasPoint get() = pointers.first().position
     val primaryPressure: Float get() = pointers.first().pressure
+    val primaryRawPressure: Float? get() = pointers.first().rawPressure
+    val primaryInkSamples: List<InputInkSample>
+        get() {
+            val primary = pointers.first()
+            return primary.historicalSamples + InputInkSample(primary.position, primary.pressure, primary.rawPressure)
+        }
 }
 
 public data class InputRouteResult(
@@ -167,8 +181,8 @@ public data class InputRouteResult(
 )
 
 public sealed interface InputAction {
-    public data class BeginInk(val position: CanvasPoint, val pressure: Float) : InputAction
-    public data class ContinueInk(val position: CanvasPoint, val pressure: Float) : InputAction
+    public data class BeginInk(val position: CanvasPoint, val pressure: Float, val rawPressure: Float? = null) : InputAction
+    public data class ContinueInk(val samples: List<InputInkSample>) : InputAction
     public data class PendingTap(val position: CanvasPoint) : InputAction
     public data class PanBy(val dx: Float, val dy: Float) : InputAction
     public data class Zoom(val centroid: CanvasPoint) : InputAction

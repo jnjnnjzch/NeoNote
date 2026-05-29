@@ -2,6 +2,7 @@ package com.neonote
 
 import androidx.compose.ui.geometry.Offset
 import com.neonote.engine.InputEvent
+import com.neonote.engine.InputInkSample
 import com.neonote.engine.InputPointer
 import com.neonote.engine.InputRouter
 import com.neonote.engine.PointerEventType
@@ -107,9 +108,9 @@ class NeoNoteEditorControllerTest {
         assertEquals(10f, stroke.points[0].x)
         assertEquals(12f, stroke.points[0].y)
         assertEquals(0.4f, stroke.points[0].pressure)
-        assertEquals(20f, stroke.points[1].x)
-        assertEquals(24f, stroke.points[1].y)
-        assertEquals(0.8f, stroke.points[1].pressure)
+        assertEquals(16.5f, stroke.points[1].x)
+        assertEquals(19.8f, stroke.points[1].y)
+        assertEquals(0.66f, stroke.points[1].pressure, 0.0001f)
     }
 
     @Test
@@ -144,6 +145,56 @@ class NeoNoteEditorControllerTest {
     }
 
     @Test
+    fun `coalesced ink samples append in document order`() {
+        val controller = NeoNoteEditorController()
+        val router = InputRouter()
+        controller.panViewportBy(screenDx = 10f, screenDy = 20f)
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(10f, 20f), tool = PointerTool.SPen)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(
+                    InputPointer(
+                        id = 1,
+                        position = CanvasPoint(40f, 50f),
+                        tool = PointerTool.SPen,
+                        historicalSamples = listOf(
+                            InputInkSample(position = CanvasPoint(20f, 30f), pressure = 0.4f),
+                            InputInkSample(position = CanvasPoint(30f, 40f), pressure = 0.6f),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(40f, 50f), tool = PointerTool.SPen)),
+            ),
+        )
+
+        val points = controller.currentCanvas.inkLayer.strokes.single().points
+        assertEquals(4, points.size)
+        assertEquals(0f, points[0].x, 0.0001f)
+        assertEquals(0f, points[0].y, 0.0001f)
+        assertEquals(6.5f, points[1].x, 0.0001f)
+        assertEquals(6.5f, points[1].y, 0.0001f)
+        assertEquals(15.275f, points[2].x, 0.0001f)
+        assertEquals(15.275f, points[2].y, 0.0001f)
+        assertEquals(24.94625f, points[3].x, 0.0001f)
+        assertEquals(24.94625f, points[3].y, 0.0001f)
+    }
+
+    @Test
     fun `pan and zoom do not mutate stroke document coordinates`() {
         val controller = NeoNoteEditorController()
         val router = InputRouter()
@@ -175,8 +226,8 @@ class NeoNoteEditorControllerTest {
         val originalPoints = controller.currentCanvas.inkLayer.strokes.single().points
         assertEquals(25f, originalPoints[0].x)
         assertEquals(90f, originalPoints[0].y)
-        assertEquals(35f, originalPoints[1].x)
-        assertEquals(110f, originalPoints[1].y)
+        assertEquals(31.5f, originalPoints[1].x)
+        assertEquals(103f, originalPoints[1].y)
 
         controller.panViewportBy(screenDx = -30f, screenDy = 15f)
         controller.zoomViewportBy(zoomChange = 0.5f, screenCentroid = CanvasPoint(100f, 100f))

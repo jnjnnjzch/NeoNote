@@ -14,6 +14,7 @@ import com.neonote.engine.InkEngine
 import com.neonote.engine.InkSession
 import com.neonote.engine.InputAction
 import com.neonote.engine.InputEvent
+import com.neonote.engine.InputInkSample
 import com.neonote.engine.InputMode
 import com.neonote.engine.InputRouteResult
 import com.neonote.engine.InputRouter
@@ -83,8 +84,8 @@ public class NeoNoteEditorController(
     ): InputRouteResult {
         val result = router.route(canvas = currentCanvas, event = event, mode = mode)
         when (val action = result.action) {
-            is InputAction.BeginInk -> beginInk(action.position, action.pressure)
-            is InputAction.ContinueInk -> continueInk(action.position, action.pressure)
+            is InputAction.BeginInk -> beginInk(action.position, action.pressure, action.rawPressure)
+            is InputAction.ContinueInk -> continueInk(action.samples)
             InputAction.EndInteraction -> endInkIfActive()
             InputAction.CancelInteraction -> cancelInkIfActive()
             is InputAction.PanBy -> panViewportBy(action.dx, action.dy)
@@ -96,8 +97,8 @@ public class NeoNoteEditorController(
     }
 
 
-    private fun beginInk(screenPosition: CanvasPoint, pressure: Float) {
-        val point = screenPosition.toInkPoint(pressure)
+    private fun beginInk(screenPosition: CanvasPoint, pressure: Float, rawPressure: Float?) {
+        val point = screenPosition.toInkPoint(pressure, rawPressure)
         val result = inkEngine.execute(
             session = InkSession.fromCanvas(currentCanvas),
             command = InkCommand.BeginStroke(point),
@@ -105,13 +106,15 @@ public class NeoNoteEditorController(
         inkSession = result.session
     }
 
-    private fun continueInk(screenPosition: CanvasPoint, pressure: Float) {
+    private fun continueInk(samples: List<InputInkSample>) {
         if (inkSession.activeStroke == null) return
-        val result = inkEngine.execute(
-            session = inkSession,
-            command = InkCommand.AppendPoint(screenPosition.toInkPoint(pressure)),
-        ) as InkCommandResult.PointAppended
-        inkSession = result.session
+        samples.forEach { sample ->
+            val result = inkEngine.execute(
+                session = inkSession,
+                command = InkCommand.AppendPoint(sample.position.toInkPoint(sample.pressure, sample.rawPressure)),
+            ) as InkCommandResult.PointAppended
+            inkSession = result.session
+        }
     }
 
     private fun endInkIfActive() {
@@ -127,9 +130,14 @@ public class NeoNoteEditorController(
         inkSession = result.session
     }
 
-    private fun CanvasPoint.toInkPoint(pressure: Float): InkPoint {
+    private fun CanvasPoint.toInkPoint(pressure: Float, rawPressure: Float?): InkPoint {
         val documentPosition = screenToDocument(this)
-        return InkPoint(x = documentPosition.x, y = documentPosition.y, pressure = pressure)
+        return InkPoint(
+            x = documentPosition.x,
+            y = documentPosition.y,
+            pressure = pressure,
+            rawPressure = rawPressure,
+        )
     }
 
     private fun commitInkLayer(inkLayer: com.neonote.model.InkLayer) {
