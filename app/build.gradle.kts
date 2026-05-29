@@ -1,9 +1,13 @@
 plugins {
-    id("org.jetbrains.kotlin.jvm")
+    id("com.android.application")
 }
 
-kotlin {
-    sourceSets.main {
-        kotlin.srcDir("src/main/java")
+android {
+    namespace = "com.neonote"
+    compileSdk = 36
+
+    defaultConfig {
+        applicationId = "com.neonote"
+        minSdk = 26
     }
 }
