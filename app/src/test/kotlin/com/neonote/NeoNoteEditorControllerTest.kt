@@ -6,6 +6,7 @@ import com.neonote.engine.InputPointer
 import com.neonote.engine.InputRouter
 import com.neonote.engine.PointerEventType
 import com.neonote.engine.PointerTool
+import com.neonote.engine.toPlainText
 import com.neonote.model.CanvasPoint
 import com.neonote.model.RichContentBox
 import kotlin.test.Test
@@ -199,5 +200,21 @@ class NeoNoteEditorControllerTest {
         val box = controller.currentCanvas.objects.single() as RichContentBox
         assertTrue(controller.state.selection.isObjectSelected(boxId))
         assertEquals(CanvasPoint(35f, 35f), box.position)
+    }
+
+    @Test
+    fun `selection mode clears focus and ignores rich content text edits`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "editable")
+
+        controller.setSelectionMode(true)
+        controller.updateRichContentText(boxId, "ignored")
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals(null, controller.state.focusedRichContentBoxId)
+        assertEquals(false, box.isFocused)
+        assertEquals("editable", box.toPlainText())
     }
 }

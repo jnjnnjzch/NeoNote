@@ -17,6 +17,9 @@ import com.neonote.engine.InputEvent
 import com.neonote.engine.InputMode
 import com.neonote.engine.InputRouteResult
 import com.neonote.engine.InputRouter
+import com.neonote.engine.RichContentCommand
+import com.neonote.engine.RichContentCommandResult
+import com.neonote.engine.RichContentEngine
 import com.neonote.engine.SelectionCommand
 import com.neonote.engine.SelectionCommandResult
 import com.neonote.engine.SelectionEngine
@@ -29,10 +32,8 @@ import com.neonote.model.EditorTool
 import com.neonote.model.InfiniteCanvas
 import com.neonote.model.InkPoint
 import com.neonote.model.InkStroke
-import com.neonote.model.InlineText
 import com.neonote.model.NeoNoteDocument
 import com.neonote.model.NotePage
-import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
 import com.neonote.model.SelectionState
@@ -52,6 +53,7 @@ public class NeoNoteEditorController(
     private val canvasEngine: CanvasEngine = CanvasEngine(),
     private val selectionEngine: SelectionEngine = SelectionEngine(),
     private val inkEngine: InkEngine = InkEngine(SequentialIdGenerator()),
+    private val richContentEngine: RichContentEngine = RichContentEngine(),
 ) {
     public var state: EditorState by mutableStateOf(initialState)
         private set
@@ -140,7 +142,7 @@ public class NeoNoteEditorController(
     public fun setSelectionMode(enabled: Boolean) {
         state = state.copy(
             currentTool = if (enabled) EditorTool.Selection else EditorTool.Text,
-            focusedRichContentBoxId = if (enabled) null else state.focusedRichContentBoxId,
+            focusedRichContentBoxId = null,
             selection = if (enabled) state.selection else SelectionState(),
             document = state.document.withCanvas(currentCanvas.setFocusedRichContentBox(null)),
         )
@@ -180,7 +182,7 @@ public class NeoNoteEditorController(
             position = documentPosition,
             size = CanvasSize(DefaultBoxWidth, DefaultBoxHeight),
             zIndex = (currentCanvas.objects.maxOfOrNull { it.zIndex } ?: 0) + 1,
-            content = RichContent(blocks = listOf(ParagraphNode(inlines = listOf(InlineText(""))))),
+            content = RichContent(),
             isFocused = true,
         )
         val added = canvasEngine.execute(currentCanvas, CanvasCommand.AddObject(box)) as CanvasCommandResult.ObjectAdded
@@ -202,15 +204,15 @@ public class NeoNoteEditorController(
     }
 
     public fun updateRichContentText(boxId: String, text: String) {
-        val updatedCanvas = currentCanvas.copy(
-            objects = currentCanvas.objects.map { canvasObject ->
-                if (canvasObject.id == boxId && canvasObject is RichContentBox) {
-                    canvasObject.copy(content = RichContent(blocks = listOf(ParagraphNode(inlines = listOf(InlineText(text))))))
-                } else {
-                    canvasObject
-                }
-            },
-        )
+        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+
+        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val result = richContentEngine.execute(
+                box = box,
+                command = RichContentCommand.ReplacePlainText(text),
+            ) as RichContentCommandResult.ContentReplaced
+            result.box
+        }
         state = state.copy(document = state.document.withCanvas(updatedCanvas))
     }
 
@@ -274,6 +276,14 @@ public fun createTestEditorState(): EditorState = EditorState(
     currentTool = EditorTool.Text,
 )
 
+private fun InfiniteCanvas.updateRichContentBox(
+    boxId: String,
+    edit: (RichContentBox) -> RichContentBox,
+): InfiniteCanvas = copy(
+    objects = objects.map { canvasObject ->
+        if (canvasObject.id == boxId && canvasObject is RichContentBox) edit(canvasObject) else canvasObject
+    },
+)
 
 public fun InfiniteCanvas.topMostObjectAt(position: CanvasPoint): CanvasObject? = objects
     .sortedWith(compareBy<CanvasObject> { it.zIndex }.thenBy { it.id })
