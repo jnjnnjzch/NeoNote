@@ -152,3 +152,7 @@
 - Validation:
   - `.\gradlew.bat :app:assembleDebug` -> FAIL (wrapper download blocked by network permission)
   - `.\gradlew.bat :app:testDebugUnitTest` -> FAIL (same blocker)
+- Gate:
+  - `infinite_canvas = FAIL`
+  - `canvas_status = BROKEN_CANVAS`
+  - Do not proceed to image/formula/export polish until viewport zoom behavior is confirmed correct.

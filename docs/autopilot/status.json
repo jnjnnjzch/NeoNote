@@ -27,6 +27,8 @@
     "assembleDebug": "FAIL",
     "testDebugUnitTest": "FAIL"
   },
+  "infinite_canvas": "FAIL",
+  "canvas_status": "BROKEN_CANVAS",
   "blockers": [
     "Gradle wrapper distribution download blocked in current environment (services.gradle.org connect permission denied)."
   ]

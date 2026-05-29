@@ -3,6 +3,7 @@
 Date: 2026-05-29
 
 Current status: `PRODUCT_PROTOTYPE_NOT_ONE_NOTE_LIKE`
+Canvas status: `BROKEN_CANVAS` (`infinite_canvas=FAIL` until viewport zoom behavior is fully validated)
 
 This repair pack focused on unified interaction corrections only.
 
@@ -50,6 +51,7 @@ This repair pack focused on unified interaction corrections only.
 
 ## Still not complete / honest gaps
 
+- Pinch/pan correctness is a hard gate. Do not proceed to image/formula/export polish until viewport zoom is fixed.
 - Pressure sensitivity is code-path enabled but still requires physical Samsung S Pen verification for user-visible confidence.
 - Formula rendering quality is still not full math-grade renderer in all contexts.
 - Export retrieval/share UX is improved but still needs full Android share/open integration hardening.

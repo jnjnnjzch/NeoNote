@@ -577,6 +577,7 @@ private fun DrawingSurfaceWithTarget(
     var lastFingerX by remember { mutableStateOf(0f) }
     var lastFingerY by remember { mutableStateOf(0f) }
     var lastFingerDistance by remember { mutableStateOf(0f) }
+    var lastCentroid by remember { mutableStateOf(GesturePoint(0f, 0f)) }
     val page = drawingCanvasViewModel.document.collectAsStateWithLifecycle().value.pages.firstOrNull()
     val tableBlock = page?.blocks?.filterIsInstance<TableBlock>()?.firstOrNull()
     val textContainer = page?.blocks?.filterIsInstance<TextContainerBlock>()?.firstOrNull()
@@ -637,6 +638,10 @@ private fun DrawingSurfaceWithTarget(
                             val dx = event.getX(0) - event.getX(1)
                             val dy = event.getY(0) - event.getY(1)
                             lastFingerDistance = kotlin.math.sqrt(dx * dx + dy * dy)
+                            lastCentroid = GesturePoint(
+                                x = (event.getX(0) + event.getX(1)) / 2f,
+                                y = (event.getY(0) + event.getY(1)) / 2f
+                            )
                         }
                         true
                     }
@@ -645,18 +650,26 @@ private fun DrawingSurfaceWithTarget(
                             val dx = event.getX(0) - event.getX(1)
                             val dy = event.getY(0) - event.getY(1)
                             val distance = kotlin.math.sqrt(dx * dx + dy * dy)
-                            if (lastFingerDistance > 0f) {
-                                val ratio = (distance / lastFingerDistance).coerceIn(0.5f, 2.0f)
-                                val newScale = (canvasTransform.scale * ratio).coerceIn(0.5f, 4.0f)
-                                canvasTransform = canvasTransform.copy(scale = newScale)
-                            }
+                            val centroid = GesturePoint(
+                                x = (event.getX(0) + event.getX(1)) / 2f,
+                                y = (event.getY(0) + event.getY(1)) / 2f
+                            )
+                            canvasTransform = CanvasTransformGesture.applyTwoFingerPinchPan(
+                                current = canvasTransform,
+                                previousCentroid = lastCentroid,
+                                currentCentroid = centroid,
+                                previousDistance = lastFingerDistance,
+                                currentDistance = distance
+                            )
                             lastFingerDistance = distance
+                            lastCentroid = centroid
                         } else {
                             val dx = event.x - lastFingerX
                             val dy = event.y - lastFingerY
-                            canvasTransform = canvasTransform.copy(
-                                panX = canvasTransform.panX + dx,
-                                panY = canvasTransform.panY + dy
+                            canvasTransform = CanvasTransformGesture.applyOneFingerPan(
+                                current = canvasTransform,
+                                dxScreen = dx,
+                                dyScreen = dy
                             )
                             lastFingerX = event.x
                             lastFingerY = event.y
@@ -972,13 +985,15 @@ private fun TextContainerEditor(
             Surface(
                 modifier = modifier
                     .pointerInput(Unit) {
-                        detectDragGestures { change, dragAmount ->
-                    change.consume()
-                    onMove(
-                        screenToDocDelta(dragAmount.x, canvasTransform),
-                        screenToDocDelta(dragAmount.y, canvasTransform)
-                    )
-                }
+                        if (isSelected) {
+                            detectDragGestures { change, dragAmount ->
+                                change.consume()
+                                onMove(
+                                    screenToDocDelta(dragAmount.x, canvasTransform),
+                                    screenToDocDelta(dragAmount.y, canvasTransform)
+                                )
+                            }
+                        }
                     },
         color = NeoNoteVisualTokens.containerSurface,
         tonalElevation = 1.dp,
