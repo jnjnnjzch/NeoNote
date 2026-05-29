@@ -24,7 +24,6 @@ import android.net.Uri
 import android.view.KeyEvent as AndroidKeyEvent
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewConfiguration
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -67,8 +66,8 @@ import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSiz
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -104,25 +103,22 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.ink.rendering.android.canvas.CanvasStrokeRenderer
 import androidx.ink.strokes.Stroke
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.cahier.R
 import com.example.cahier.core.ui.ColorPickerDialog
 import com.example.cahier.core.ui.ConfirmationDialog
-import com.example.cahier.core.ui.DrawingInputRoute
-import com.example.cahier.core.ui.DrawingInputRouter
-import com.example.cahier.core.ui.DrawingInputRoutingConfig
 import com.example.cahier.core.ui.DrawingSurface
 import com.example.cahier.core.ui.FocusedFieldEnum
 import com.example.cahier.core.ui.LocalTextureStore
 import com.example.cahier.core.ui.theme.NeoNoteVisualTokens
 import com.example.cahier.core.ui.theme.CahierAppTheme
 import com.example.cahier.core.utils.createDropTarget
+import com.example.cahier.core.document.FormulaNode
+import com.example.cahier.core.document.ImageNode
 import com.example.cahier.core.document.TableBlock
 import com.example.cahier.core.document.TableNode
 import com.example.cahier.core.document.TextContainerBlock
+import com.example.cahier.core.document.TextContainerContent
 import com.example.cahier.core.document.ParagraphNode
 import com.example.cahier.core.document.ImageBlock
 import com.example.cahier.core.document.FormulaBlock
@@ -134,81 +130,7 @@ import com.example.cahier.features.drawing.CanvasTransformMapper.screenToDocDelt
 import com.example.cahier.features.home.AppMode
 import com.example.cahier.features.drawing.viewmodel.DrawingCanvasViewModel
 import coil3.compose.AsyncImage
-import kotlin.math.hypot
 
-internal data class FingerTapThresholds(
-    val touchSlop: Float,
-    val maxDurationMillis: Long = ViewConfiguration.getTapTimeout().toLong()
-)
-
-internal class FingerTapGestureTracker(
-    private val thresholds: FingerTapThresholds
-) {
-    private var downX = 0f
-    private var downY = 0f
-    private var downTimeMillis = 0L
-    private var tapCandidate = false
-
-    fun onDown(x: Float, y: Float, eventTimeMillis: Long) {
-        downX = x
-        downY = y
-        downTimeMillis = eventTimeMillis
-        tapCandidate = true
-    }
-
-    fun onMove(x: Float, y: Float) {
-        if (hypot(x - downX, y - downY) > thresholds.touchSlop) {
-            tapCandidate = false
-        }
-    }
-
-    fun onMultiPointerGesture() {
-        tapCandidate = false
-    }
-
-    fun onUp(x: Float, y: Float, eventTimeMillis: Long): Boolean {
-        onMove(x, y)
-        val isTap = tapCandidate && eventTimeMillis - downTimeMillis <= thresholds.maxDurationMillis
-        tapCandidate = false
-        return isTap
-    }
-
-    fun onCancel() {
-        tapCandidate = false
-    }
-}
-
-internal fun routeForDrawingCanvasFingerEvent(
-    event: MotionEvent,
-    config: DrawingInputRoutingConfig
-): DrawingInputRoute = DrawingInputRouter.routeFor(event, config)
-
-internal sealed interface FingerTapTextTarget {
-    data object FocusExisting : FingerTapTextTarget
-    data class PlaceAt(val docX: Float, val docY: Float) : FingerTapTextTarget
-}
-
-internal fun resolveFingerTapTextTarget(
-    sx: Float,
-    sy: Float,
-    textContainer: TextContainerBlock?,
-    canvasTransform: CanvasTransform
-): FingerTapTextTarget {
-    val container = textContainer
-    if (container != null) {
-        val left = docToScreenX(container.x, canvasTransform)
-        val top = docToScreenY(container.y, canvasTransform)
-        val right = left + (container.width * canvasTransform.scale)
-        val bottom = top + (container.height * canvasTransform.scale)
-        if (sx in left..right && sy in top..bottom) {
-            return FingerTapTextTarget.FocusExisting
-        }
-    }
-    return FingerTapTextTarget.PlaceAt(
-        docX = screenToCanvasX(sx, canvasTransform),
-        docY = screenToCanvasY(sy, canvasTransform)
-    )
-}
 
 @OptIn(
     ExperimentalFoundationApi::class,
@@ -264,19 +186,6 @@ fun DrawingCanvas(
     LaunchedEffect(Unit) {
         drawingCanvasViewModel.ensureDefaultTextContainer()
     }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, drawingCanvasViewModel) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) {
-                drawingCanvasViewModel.flushEdits()
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            drawingCanvasViewModel.flushEdits()
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
 
     Column(
         modifier = modifier
@@ -305,10 +214,7 @@ fun DrawingCanvas(
         DrawingCanvasTopBar(
             drawingCanvasViewModel = drawingCanvasViewModel,
             appMode = appMode,
-            onNavigateUp = {
-                drawingCanvasViewModel.flushEdits()
-                navigateUp()
-            },
+            onNavigateUp = navigateUp,
             onResetView = { resetViewNonce++ },
             onFormulaClick = { formulaDialogOpen = true },
             onExportClick = { exportDialogOpen = true },
@@ -322,10 +228,7 @@ fun DrawingCanvas(
         DrawingCanvasContent(
             drawingCanvasViewModel = drawingCanvasViewModel,
             imagePickerLauncher = imagePickerLauncher,
-            onNavigateUp = {
-                drawingCanvasViewModel.flushEdits()
-                navigateUp()
-            },
+            onNavigateUp = navigateUp,
             navigateToBrushGraph = navigateToBrushGraph,
             appMode = appMode,
             resetViewNonce = resetViewNonce,
@@ -515,7 +418,7 @@ private fun DrawingCanvasTopBar(
                 TextButton(onClick = drawingCanvasViewModel::clearSelection) { Text("Clear Selection") }
             }
             TextButton(onClick = { /* text entry tool reserved */ }) { Text("Text") }
-            TextButton(onClick = { drawingCanvasViewModel.insertInlineTableInTextContainer() }) { Text("Table") }
+            TextButton(onClick = { drawingCanvasViewModel.insertInlineTableAtEndOfPrimaryTextContainer() }) { Text("Table") }
             TextButton(onClick = onPasteImage) { Text("Image") }
             TextButton(onClick = onFormulaClick) { Text("Formula") }
         }
@@ -664,7 +567,6 @@ private fun DrawingSurfaceWithTarget(
     val hasSelection by drawingCanvasViewModel.hasSelection.collectAsStateWithLifecycle()
     val textContainerSelected by drawingCanvasViewModel.selectedTextContainer.collectAsStateWithLifecycle()
     val strokeTranslations by drawingCanvasViewModel.strokeTranslations.collectAsStateWithLifecycle()
-    val stylusWritesByDefault by drawingCanvasViewModel.stylusWritesByDefault.collectAsStateWithLifecycle()
     val fingerPanZoomEnabled by drawingCanvasViewModel.fingerPansByDefault.collectAsStateWithLifecycle()
     val strokes = remember { mutableStateListOf<Stroke>() }
     val textureStore = LocalTextureStore.current
@@ -688,29 +590,6 @@ private fun DrawingSurfaceWithTarget(
     var selectedInlineCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var selectedImageIndex by remember { mutableStateOf<Int?>(null) }
     var requestTextFocusNonce by remember { mutableStateOf(0) }
-    val inputRoutingConfig = DrawingInputRoutingConfig(
-        stylusWritesByDefault = stylusWritesByDefault,
-        fingerPansByDefault = fingerPanZoomEnabled,
-        isSelectionMode = isSelectionMode,
-        isEraserMode = isEraserMode
-    )
-    val fingerTapTracker = remember(view.context) {
-        FingerTapGestureTracker(
-            FingerTapThresholds(
-                touchSlop = ViewConfiguration.get(view.context).scaledTouchSlop.toFloat()
-            )
-        )
-    }
-
-    fun handleFingerTap(sx: Float, sy: Float) {
-        when (val target = resolveFingerTapTextTarget(sx, sy, textContainer, canvasTransform)) {
-            FingerTapTextTarget.FocusExisting -> requestTextFocusNonce++
-            is FingerTapTextTarget.PlaceAt -> {
-                drawingCanvasViewModel.placePrimaryTextContainerAt(target.docX, target.docY)
-                requestTextFocusNonce++
-            }
-        }
-    }
 
     val dropTarget = remember {
         createDropTarget(activity) { uri, permissions ->
@@ -746,24 +625,23 @@ private fun DrawingSurfaceWithTarget(
         modifier = modifier
             .fillMaxSize()
             .pointerInteropFilter { event ->
-                val route = routeForDrawingCanvasFingerEvent(event, inputRoutingConfig)
-                if (route != DrawingInputRoute.FingerPanZoom || selectedImageIndex != null) {
+                if (!fingerPanZoomEnabled || isSelectionMode || selectedImageIndex != null) {
                     return@pointerInteropFilter false
                 }
-
+                val toolType = event.getToolType(0)
+                val isFinger = toolType == MotionEvent.TOOL_TYPE_FINGER
+                if (!isFinger) return@pointerInteropFilter false
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
                         lastFingerX = event.x
                         lastFingerY = event.y
-                        fingerTapTracker.onDown(event.x, event.y, event.eventTime)
                         true
                     }
                     MotionEvent.ACTION_POINTER_DOWN -> {
-                        fingerTapTracker.onMultiPointerGesture()
                         if (event.pointerCount >= 2) {
                             val dx = event.getX(0) - event.getX(1)
                             val dy = event.getY(0) - event.getY(1)
-                            lastFingerDistance = hypot(dx, dy)
+                            lastFingerDistance = kotlin.math.sqrt(dx * dx + dy * dy)
                             lastCentroid = GesturePoint(
                                 x = (event.getX(0) + event.getX(1)) / 2f,
                                 y = (event.getY(0) + event.getY(1)) / 2f
@@ -773,10 +651,9 @@ private fun DrawingSurfaceWithTarget(
                     }
                     MotionEvent.ACTION_MOVE -> {
                         if (event.pointerCount >= 2) {
-                            fingerTapTracker.onMultiPointerGesture()
                             val dx = event.getX(0) - event.getX(1)
                             val dy = event.getY(0) - event.getY(1)
-                            val distance = hypot(dx, dy)
+                            val distance = kotlin.math.sqrt(dx * dx + dy * dy)
                             val centroid = GesturePoint(
                                 x = (event.getX(0) + event.getX(1)) / 2f,
                                 y = (event.getY(0) + event.getY(1)) / 2f
@@ -791,7 +668,6 @@ private fun DrawingSurfaceWithTarget(
                             lastFingerDistance = distance
                             lastCentroid = centroid
                         } else {
-                            fingerTapTracker.onMove(event.x, event.y)
                             val dx = event.x - lastFingerX
                             val dy = event.y - lastFingerY
                             canvasTransform = CanvasTransformGesture.applyOneFingerPan(
@@ -802,16 +678,6 @@ private fun DrawingSurfaceWithTarget(
                             lastFingerX = event.x
                             lastFingerY = event.y
                         }
-                        true
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        if (fingerTapTracker.onUp(event.x, event.y, event.eventTime)) {
-                            handleFingerTap(event.x, event.y)
-                        }
-                        true
-                    }
-                    MotionEvent.ACTION_CANCEL -> {
-                        fingerTapTracker.onCancel()
                         true
                     }
                     else -> false
@@ -888,8 +754,25 @@ private fun DrawingSurfaceWithTarget(
                 )
             },
             onRawMotionEvent = drawingCanvasViewModel::onRawMotionEvent,
-            inputRoutingConfig = inputRoutingConfig,
-            onFingerTap = ::handleFingerTap,
+            consumeFingerInkInput = true,
+            onFingerTap = { sx, sy ->
+                val container = textContainer
+                if (container != null) {
+                    val left = docToScreenX(container.x, canvasTransform)
+                    val top = docToScreenY(container.y, canvasTransform)
+                    val right = left + (container.width * canvasTransform.scale)
+                    val bottom = top + (container.height * canvasTransform.scale)
+                    val hitsContainer = sx in left..right && sy in top..bottom
+                    if (hitsContainer) {
+                        requestTextFocusNonce++
+                        return@DrawingSurface
+                    }
+                }
+                val docX = screenToCanvasX(sx, canvasTransform)
+                val docY = screenToCanvasY(sy, canvasTransform)
+                drawingCanvasViewModel.placePrimaryTextContainerAt(docX, docY)
+                requestTextFocusNonce++
+            },
             modifier = Modifier.fillMaxSize()
         )
 
@@ -940,25 +823,17 @@ private fun DrawingSurfaceWithTarget(
         }
 
         textContainer?.let { container ->
-            val paragraphs = container.content.nodes.filterIsInstance<ParagraphNode>()
-            val tableNode = container.content.nodes.filterIsInstance<TableNode>().firstOrNull()
             TextContainerEditor(
-                paragraphBefore = paragraphs.getOrNull(0)?.text.orEmpty(),
-                paragraphAfter = paragraphs.getOrNull(1)?.text.orEmpty(),
-                tableNode = tableNode,
+                container = container,
                 canvasTransform = canvasTransform,
-                onParagraphBeforeChange = { drawingCanvasViewModel.updateTextContainerParagraphAt(0, it) },
-                onParagraphAfterChange = { drawingCanvasViewModel.updateTextContainerParagraphAt(1, it) },
-                onInsertTable = drawingCanvasViewModel::insertInlineTableInTextContainer,
+                onParagraphChange = drawingCanvasViewModel::updateParagraph,
+                onInsertTableAfter = { blockId, nodeId -> drawingCanvasViewModel.insertTableAfter(blockId, nodeId) },
                 onInlineTableCellChange = drawingCanvasViewModel::updateInlineTableCell,
                 onInlineCellFocused = {
                     selectedInlineCell = it
                     onInlineTableCellFocused(it)
                 },
                 onInlineTableAppendRow = drawingCanvasViewModel::appendInlineTableRow,
-                onContainerFocused = { focused ->
-                    if (focused) drawingCanvasViewModel.setFocusedBlockId(container.id)
-                },
                 onInlineToggleBold = drawingCanvasViewModel::toggleInlineTableCellBold,
                 onInlineToggleItalic = drawingCanvasViewModel::toggleInlineTableCellItalic,
                 onInlineToggleUnderline = drawingCanvasViewModel::toggleInlineTableCellUnderline,
@@ -980,7 +855,7 @@ private fun DrawingSurfaceWithTarget(
         imageBlocks.forEachIndexed { index, image ->
             val isSelectedImage = selectedImageIndex == index
             AsyncImage(
-                model = drawingCanvasViewModel.imageModelForBlock(image),
+                model = image.assetPath,
                 contentDescription = "Image block $index",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -1054,9 +929,9 @@ private fun DrawingSurfaceWithTarget(
             ) {
                 Column(modifier = Modifier.padding(8.dp)) {
                     Text(
-                        text = "plain formula preview",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = NeoNoteVisualTokens.secondaryText
+                        text = formula.rendered,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = NeoNoteVisualTokens.normalText
                     )
                     Text(
                         text = formula.source,
@@ -1081,45 +956,42 @@ private fun DrawingSurfaceWithTarget(
 
 @Composable
 private fun TextContainerEditor(
-    paragraphBefore: String,
-    paragraphAfter: String,
-    tableNode: TableNode?,
+    container: TextContainerBlock,
     canvasTransform: CanvasTransform,
-    onParagraphBeforeChange: (String) -> Unit,
-    onParagraphAfterChange: (String) -> Unit,
-    onInsertTable: () -> Unit,
-    onInlineTableCellChange: (Int, Int, String) -> Unit,
+    onParagraphChange: (String, String, String) -> Unit,
+    onInsertTableAfter: (String, String) -> Unit,
+    onInlineTableCellChange: (String, String, Int, Int, String) -> Unit,
     onInlineCellFocused: (Pair<Int, Int>?) -> Unit,
-    onInlineTableAppendRow: () -> Unit,
-    onContainerFocused: (Boolean) -> Unit = {},
-    onInlineToggleBold: (Int, Int) -> Unit,
-    onInlineToggleItalic: (Int, Int) -> Unit,
-    onInlineToggleUnderline: (Int, Int) -> Unit,
+    onInlineTableAppendRow: (String, String) -> Unit,
+    onInlineToggleBold: (String, String, Int, Int) -> Unit,
+    onInlineToggleItalic: (String, String, Int, Int) -> Unit,
+    onInlineToggleUnderline: (String, String, Int, Int) -> Unit,
     onMove: (Float, Float) -> Unit,
     isSelected: Boolean,
     requestFocusNonce: Int,
     modifier: Modifier = Modifier,
 ) {
-            var containerFocused by remember { mutableStateOf(false) }
-            val paragraphBeforeFocusRequester = remember { FocusRequester() }
-            LaunchedEffect(requestFocusNonce) {
-                if (requestFocusNonce > 0) {
-                    paragraphBeforeFocusRequester.requestFocus()
+    var containerFocused by remember { mutableStateOf(false) }
+    val firstParagraphFocusRequester = remember { FocusRequester() }
+    val firstParagraphId = container.content.nodes.filterIsInstance<ParagraphNode>().firstOrNull()?.id
+    LaunchedEffect(requestFocusNonce, firstParagraphId) {
+        if (requestFocusNonce > 0 && firstParagraphId != null) {
+            firstParagraphFocusRequester.requestFocus()
+        }
+    }
+    Surface(
+        modifier = modifier
+            .pointerInput(Unit) {
+                if (isSelected) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        onMove(
+                            screenToDocDelta(dragAmount.x, canvasTransform),
+                            screenToDocDelta(dragAmount.y, canvasTransform)
+                        )
+                    }
                 }
-            }
-            Surface(
-                modifier = modifier
-                    .pointerInput(Unit) {
-                        if (isSelected) {
-                            detectDragGestures { change, dragAmount ->
-                                change.consume()
-                                onMove(
-                                    screenToDocDelta(dragAmount.x, canvasTransform),
-                                    screenToDocDelta(dragAmount.y, canvasTransform)
-                                )
-                            }
-                        }
-                    },
+            },
         color = NeoNoteVisualTokens.containerSurface,
         tonalElevation = 1.dp,
         shape = MaterialTheme.shapes.medium,
@@ -1134,54 +1006,77 @@ private fun TextContainerEditor(
                 .padding(8.dp)
                 .testTag("text-container-editor")
         ) {
-            TextField(
-                value = paragraphBefore,
-                onValueChange = onParagraphBeforeChange,
-                placeholder = { Text("Type your note…") },
-                singleLine = false,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(paragraphBeforeFocusRequester)
-                    .onFocusChanged {
-                        containerFocused = it.isFocused || containerFocused
-                        if (it.isFocused) onContainerFocused(true)
+            container.content.nodes.forEachIndexed { index, node ->
+                key(node.id) {
+                    when (node) {
+                        is ParagraphNode -> TextField(
+                            value = node.text,
+                            onValueChange = { onParagraphChange(container.id, node.id, it) },
+                            placeholder = { Text(if (index == 0) "Type your note…" else "Continue notes…") },
+                            singleLine = false,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(
+                                    if (node.id == firstParagraphId) Modifier.focusRequester(firstParagraphFocusRequester)
+                                    else Modifier
+                                )
+                                .onFocusChanged { containerFocused = it.isFocused || containerFocused }
+                                .testTag("tc-paragraph-${node.id}")
+                        )
+
+                        is TableNode -> InlineTableNodeEditor(
+                            table = node,
+                            onCellChange = { row, col, text ->
+                                onInlineTableCellChange(container.id, node.id, row, col, text)
+                            },
+                            onSelectCell = { row, col -> onInlineCellFocused(row to col) },
+                            onToggleBold = { row, col -> onInlineToggleBold(container.id, node.id, row, col) },
+                            onToggleItalic = { row, col -> onInlineToggleItalic(container.id, node.id, row, col) },
+                            onToggleUnderline = { row, col -> onInlineToggleUnderline(container.id, node.id, row, col) },
+                            onAppendRow = { onInlineTableAppendRow(container.id, node.id) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                                .testTag("tc-table-${node.id}")
+                        )
+
+                        is FormulaNode -> Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp)
+                                .testTag("tc-formula-${node.id}")
+                        ) {
+                            Text(
+                                text = node.source,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = NeoNoteVisualTokens.normalText
+                            )
+                            Text(
+                                text = "Formula",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = NeoNoteVisualTokens.secondaryText
+                            )
+                        }
+
+                        is ImageNode -> AsyncImage(
+                            model = node.assetPath,
+                            contentDescription = "Inline image ${node.id}",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(160.dp)
+                                .padding(vertical = 8.dp)
+                                .testTag("tc-image-${node.id}")
+                        )
                     }
-                    .testTag("tc-paragraph-before")
-            )
-            if (tableNode == null) {
-                TextButton(onClick = onInsertTable, modifier = Modifier.testTag("btn-insert-inline-table")) {
-                    Text("Insert Table")
+                    TextButton(
+                        onClick = { onInsertTableAfter(container.id, node.id) },
+                        modifier = Modifier.testTag("btn-insert-table-after-${node.id}")
+                    ) {
+                        Text("Insert Table")
+                    }
                 }
-            } else {
-                InlineTableNodeEditor(
-                    table = tableNode,
-                    onCellChange = onInlineTableCellChange,
-                    onSelectCell = { r, c ->
-                        onContainerFocused(true)
-                        onInlineCellFocused(r to c)
-                    },
-                    onToggleBold = onInlineToggleBold,
-                    onToggleItalic = onInlineToggleItalic,
-                    onToggleUnderline = onInlineToggleUnderline,
-                    onAppendRow = onInlineTableAppendRow,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f, fill = false)
-                )
             }
-            TextField(
-                value = paragraphAfter,
-                onValueChange = onParagraphAfterChange,
-                placeholder = { Text("Continue notes…") },
-                singleLine = false,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onFocusChanged {
-                        containerFocused = it.isFocused || containerFocused
-                        if (it.isFocused) onContainerFocused(true)
-                    }
-                    .testTag("tc-paragraph-after")
-            )
         }
     }
 }
@@ -1278,7 +1173,7 @@ private fun InlineTableNodeEditor(
                         )
                         cell.latex?.takeIf { it.isNotBlank() }?.let { formula ->
                             Text(
-                                text = "plain formula preview: $formula",
+                                text = "f(x): $formula",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = NeoNoteVisualTokens.secondaryText,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
@@ -1586,20 +1481,20 @@ private fun NormalEditorEmptyPreview() {
 private fun TextContainerParagraphPreview() {
     CahierAppTheme {
         TextContainerEditor(
-            paragraphBefore = "Research notes for seminar.",
-            paragraphAfter = "",
-            tableNode = null,
+            container = TextContainerBlock(
+                content = TextContainerContent(
+                    nodes = listOf(ParagraphNode("Research notes for seminar."))
+                )
+            ),
             canvasTransform = CanvasTransform(),
-            onParagraphBeforeChange = {},
-            onParagraphAfterChange = {},
-            onInsertTable = {},
-            onInlineTableCellChange = { _, _, _ -> },
+            onParagraphChange = { _, _, _ -> },
+            onInsertTableAfter = { _, _ -> },
+            onInlineTableCellChange = { _, _, _, _, _ -> },
             onInlineCellFocused = {},
-            onInlineTableAppendRow = {},
-            onContainerFocused = {},
-            onInlineToggleBold = { _, _ -> },
-            onInlineToggleItalic = { _, _ -> },
-            onInlineToggleUnderline = { _, _ -> },
+            onInlineTableAppendRow = { _, _ -> },
+            onInlineToggleBold = { _, _, _, _ -> },
+            onInlineToggleItalic = { _, _, _, _ -> },
+            onInlineToggleUnderline = { _, _, _, _ -> },
             onMove = { _, _ -> },
             isSelected = false,
             requestFocusNonce = 0,
@@ -1632,20 +1527,24 @@ private fun TextContainerInlineTablePreview() {
             )
         )
         TextContainerEditor(
-            paragraphBefore = "Draft outline:",
-            paragraphAfter = "Add final inference below.",
-            tableNode = table,
+            container = TextContainerBlock(
+                content = TextContainerContent(
+                    nodes = listOf(
+                        ParagraphNode("Draft outline:"),
+                        table,
+                        ParagraphNode("Add final inference below.")
+                    )
+                )
+            ),
             canvasTransform = CanvasTransform(),
-            onParagraphBeforeChange = {},
-            onParagraphAfterChange = {},
-            onInsertTable = {},
-            onInlineTableCellChange = { _, _, _ -> },
+            onParagraphChange = { _, _, _ -> },
+            onInsertTableAfter = { _, _ -> },
+            onInlineTableCellChange = { _, _, _, _, _ -> },
             onInlineCellFocused = {},
-            onInlineTableAppendRow = {},
-            onContainerFocused = {},
-            onInlineToggleBold = { _, _ -> },
-            onInlineToggleItalic = { _, _ -> },
-            onInlineToggleUnderline = { _, _ -> },
+            onInlineTableAppendRow = { _, _ -> },
+            onInlineToggleBold = { _, _, _, _ -> },
+            onInlineToggleItalic = { _, _, _, _ -> },
+            onInlineToggleUnderline = { _, _, _, _ -> },
             onMove = { _, _ -> },
             isSelected = false,
             requestFocusNonce = 0,

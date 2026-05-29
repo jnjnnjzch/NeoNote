@@ -59,6 +59,7 @@ import coil3.toBitmap
 import com.example.cahier.core.data.CustomBrush
 import com.example.cahier.core.data.NotesRepository
 import com.example.cahier.core.document.AssetManifestEntry
+import com.example.cahier.core.document.ContentNode
 import com.example.cahier.core.document.DocumentSerializer
 import com.example.cahier.core.document.Block
 import com.example.cahier.core.document.DocumentSettings
@@ -866,51 +867,26 @@ class DrawingCanvasViewModel @Inject constructor(
         persistDocument(updated)
     }
 
-    fun updateTextContainerParagraph(text: String) {
-        updateFirstTextContainer { container ->
-            val nodes = container.content.nodes.toMutableList()
-            val firstParagraph = nodes.indexOfFirst { it is ParagraphNode }
-            if (firstParagraph >= 0) {
-                nodes[firstParagraph] = ParagraphNode(text)
-            } else {
-                nodes.add(0, ParagraphNode(text))
+    fun updateParagraph(blockId: String, nodeId: String, text: String) {
+        updateTextContainer(blockId) { container ->
+            container.updateNode(nodeId) { node ->
+                if (node is ParagraphNode) node.copy(text = text) else node
             }
+        }
+    }
+
+    fun insertTableAfter(blockId: String, nodeId: String, rows: Int = 3, columns: Int = 3) {
+        updateTextContainer(blockId) { container ->
+            val nodes = container.content.nodes.toMutableList()
+            val insertIndex = nodes.indexOfFirst { it.id == nodeId }
+            if (insertIndex < 0) return@updateTextContainer container
+            nodes.add(insertIndex + 1, TableNode(rows = rows, columns = columns))
             container.copy(content = container.content.copy(nodes = nodes))
         }
     }
 
-    fun updateTextContainerParagraphAt(index: Int, text: String) {
-        updateFirstTextContainer { container ->
-            val nodes = container.content.nodes.toMutableList()
-            val paragraphIndexes = nodes.mapIndexedNotNull { i, n -> if (n is ParagraphNode) i else null }
-            val targetNodeIndex = paragraphIndexes.getOrNull(index)
-            if (targetNodeIndex != null) {
-                nodes[targetNodeIndex] = ParagraphNode(text)
-            } else {
-                nodes.add(ParagraphNode(text))
-            }
-            container.copy(content = container.content.copy(nodes = nodes))
-        }
-    }
-
-    fun insertInlineTableInTextContainer(rows: Int = 3, columns: Int = 3) {
-        updateFirstTextContainer { container ->
-            val nodes = container.content.nodes.toMutableList()
-            if (nodes.any { it is TableNode }) return@updateFirstTextContainer container
-            if (nodes.isEmpty()) {
-                nodes.add(ParagraphNode(""))
-            }
-            nodes.add(TableNode(rows = rows, columns = columns))
-            nodes.add(ParagraphNode(""))
-            container.copy(content = container.content.copy(nodes = nodes))
-        }
-    }
-
-    fun updateInlineTableCell(row: Int, col: Int, text: String) {
-        updateFirstTextContainer { container ->
-            val tableIndex = container.content.nodes.indexOfFirst { it is TableNode }
-            if (tableIndex < 0) return@updateFirstTextContainer container
-            val table = container.content.nodes[tableIndex] as TableNode
+    fun updateInlineTableCell(blockId: String, nodeId: String, row: Int, col: Int, text: String) {
+        updateTableNode(blockId, nodeId) { table ->
             val updatedCells = table.cells.mapIndexed { rowIndex, rowCells ->
                 rowCells.mapIndexed { colIndex, cell ->
                     if (rowIndex == row && colIndex == col) {
@@ -926,37 +902,38 @@ class DrawingCanvasViewModel @Inject constructor(
                     }
                 }
             }
-            val nodes = container.content.nodes.toMutableList()
-            nodes[tableIndex] = table.copy(cells = updatedCells)
-            container.copy(content = container.content.copy(nodes = nodes))
+            table.copy(cells = updatedCells)
         }
     }
 
-    fun appendInlineTableRow() {
-        updateFirstTextContainer { container ->
-            val tableIndex = container.content.nodes.indexOfFirst { it is TableNode }
-            if (tableIndex < 0) return@updateFirstTextContainer container
-            val table = container.content.nodes[tableIndex] as TableNode
+    fun appendInlineTableRow(blockId: String, nodeId: String) {
+        updateTableNode(blockId, nodeId) { table ->
             val newRow = List(table.columns) { TableCell() }
-            val nodes = container.content.nodes.toMutableList()
-            nodes[tableIndex] = table.copy(
+            table.copy(
                 rows = table.rows + 1,
                 cells = table.cells + listOf(newRow)
             )
-            container.copy(content = container.content.copy(nodes = nodes))
         }
     }
 
-    fun toggleInlineTableCellBold(row: Int, col: Int) {
-        updateInlineTableCellStyle(row, col) { it.copy(bold = !it.bold) }
+    fun toggleInlineTableCellBold(blockId: String, nodeId: String, row: Int, col: Int) {
+        updateInlineTableCellStyle(blockId, nodeId, row, col) { it.copy(bold = !it.bold) }
     }
 
-    fun toggleInlineTableCellItalic(row: Int, col: Int) {
-        updateInlineTableCellStyle(row, col) { it.copy(italic = !it.italic) }
+    fun toggleInlineTableCellItalic(blockId: String, nodeId: String, row: Int, col: Int) {
+        updateInlineTableCellStyle(blockId, nodeId, row, col) { it.copy(italic = !it.italic) }
     }
 
-    fun toggleInlineTableCellUnderline(row: Int, col: Int) {
-        updateInlineTableCellStyle(row, col) { it.copy(underline = !it.underline) }
+    fun toggleInlineTableCellUnderline(blockId: String, nodeId: String, row: Int, col: Int) {
+        updateInlineTableCellStyle(blockId, nodeId, row, col) { it.copy(underline = !it.underline) }
+    }
+
+    fun insertInlineTableAtEndOfPrimaryTextContainer(rows: Int = 3, columns: Int = 3) {
+        val current = _document.value
+        val page = current.pages.firstOrNull() ?: return
+        val container = page.blocks.filterIsInstance<TextContainerBlock>().firstOrNull() ?: return
+        val anchor = container.content.nodes.lastOrNull()?.id ?: return
+        insertTableAfter(container.id, anchor, rows, columns)
     }
 
     fun moveTextContainerBy(dx: Float, dy: Float) {
@@ -1059,20 +1036,22 @@ class DrawingCanvasViewModel @Inject constructor(
         persistDocument(current.copy(pages = listOf(page.copy(blocks = blocks))))
     }
 
-    fun attachImageAssetToInlineCell(row: Int, col: Int, assetPath: String) {
-        updateFirstTextContainer { container ->
-            val tableIndex = container.content.nodes.indexOfFirst { it is TableNode }
-            if (tableIndex < 0) return@updateFirstTextContainer container
-            val table = container.content.nodes[tableIndex] as TableNode
+    fun attachImageAssetToInlineCell(blockId: String, nodeId: String, row: Int, col: Int, assetPath: String) {
+        updateTableNode(blockId, nodeId) { table ->
             val updatedCells = table.cells.mapIndexed { rowIndex, rowCells ->
                 rowCells.mapIndexed { colIndex, cell ->
                     if (rowIndex == row && colIndex == col) cell.copy(imageUri = assetPath) else cell
                 }
             }
-            val nodes = container.content.nodes.toMutableList()
-            nodes[tableIndex] = table.copy(cells = updatedCells)
-            container.copy(content = container.content.copy(nodes = nodes))
+            table.copy(cells = updatedCells)
         }
+    }
+
+    private fun attachImageAssetToFirstInlineCell(row: Int, col: Int, assetPath: String) {
+        val page = _document.value.pages.firstOrNull() ?: return
+        val container = page.blocks.filterIsInstance<TextContainerBlock>().firstOrNull() ?: return
+        val table = container.content.nodes.filterIsInstance<TableNode>().firstOrNull() ?: return
+        attachImageAssetToInlineCell(container.id, table.id, row, col, assetPath)
     }
 
     fun addFormulaBlock(source: String) {
@@ -1179,7 +1158,7 @@ class DrawingCanvasViewModel @Inject constructor(
         val asset = importImageFromUriToAssets(uri.toString()) ?: return false
         when {
             target == ImagePasteTarget.INLINE_TABLE_CELL && inlineCell != null -> {
-                attachImageAssetToInlineCell(inlineCell.first, inlineCell.second, asset)
+                attachImageAssetToFirstInlineCell(inlineCell.first, inlineCell.second, asset)
             }
             target == ImagePasteTarget.INLINE_TABLE_CELL && inlineCell == null -> {
                 _userMessage.value = "Image paste into table cell is not supported until a cell is focused. Inserted as canvas image."
@@ -1248,7 +1227,14 @@ class DrawingCanvasViewModel @Inject constructor(
     private fun updateFirstTextContainer(transform: (TextContainerBlock) -> TextContainerBlock) {
         val current = _document.value
         val page = current.pages.firstOrNull() ?: return
-        val idx = page.blocks.indexOfFirst { it is TextContainerBlock }
+        val target = page.blocks.filterIsInstance<TextContainerBlock>().firstOrNull() ?: return
+        updateTextContainer(target.id, transform)
+    }
+
+    private fun updateTextContainer(blockId: String, transform: (TextContainerBlock) -> TextContainerBlock) {
+        val current = _document.value
+        val page = current.pages.firstOrNull() ?: return
+        val idx = page.blocks.indexOfFirst { it is TextContainerBlock && it.id == blockId }
         if (idx < 0) return
         val target = page.blocks[idx] as TextContainerBlock
         val updatedBlocks = page.blocks.toMutableList()
@@ -1257,23 +1243,43 @@ class DrawingCanvasViewModel @Inject constructor(
         persistDocument(updated)
     }
 
+    private fun TextContainerBlock.updateNode(
+        nodeId: String,
+        transform: (ContentNode) -> ContentNode
+    ): TextContainerBlock {
+        val nodeIndex = content.nodes.indexOfFirst { it.id == nodeId }
+        if (nodeIndex < 0) return this
+        val nodes = content.nodes.toMutableList()
+        nodes[nodeIndex] = transform(nodes[nodeIndex])
+        return copy(content = content.copy(nodes = nodes))
+    }
+
+    private fun updateTableNode(
+        blockId: String,
+        nodeId: String,
+        transform: (TableNode) -> TableNode
+    ) {
+        updateTextContainer(blockId) { container ->
+            container.updateNode(nodeId) { node ->
+                if (node is TableNode) transform(node) else node
+            }
+        }
+    }
+
     private fun updateInlineTableCellStyle(
+        blockId: String,
+        nodeId: String,
         row: Int,
         col: Int,
         transform: (TableCell) -> TableCell
     ) {
-        updateFirstTextContainer { container ->
-            val tableIndex = container.content.nodes.indexOfFirst { it is TableNode }
-            if (tableIndex < 0) return@updateFirstTextContainer container
-            val table = container.content.nodes[tableIndex] as TableNode
+        updateTableNode(blockId, nodeId) { table ->
             val updatedCells = table.cells.mapIndexed { rowIndex, rowCells ->
                 rowCells.mapIndexed { colIndex, cell ->
                     if (rowIndex == row && colIndex == col) transform(cell) else cell
                 }
             }
-            val nodes = container.content.nodes.toMutableList()
-            nodes[tableIndex] = table.copy(cells = updatedCells)
-            container.copy(content = container.content.copy(nodes = nodes))
+            table.copy(cells = updatedCells)
         }
     }
 

@@ -79,12 +79,15 @@ sealed interface Block {
 }
 
 @Serializable
-sealed interface ContentNode
+sealed interface ContentNode {
+    val id: String
+}
 
 @Serializable
 @SerialName("paragraph")
 data class ParagraphNode(
-    val text: String = ""
+    val text: String = "",
+    override val id: String = UUID.randomUUID().toString()
 ) : ContentNode
 
 @Serializable
@@ -92,19 +95,22 @@ data class ParagraphNode(
 data class TableNode(
     val rows: Int = 3,
     val columns: Int = 3,
-    val cells: List<List<TableCell>> = List(3) { List(3) { TableCell() } }
+    val cells: List<List<TableCell>> = List(3) { List(3) { TableCell() } },
+    override val id: String = UUID.randomUUID().toString()
 ) : ContentNode
 
 @Serializable
 @SerialName("formula_node")
 data class FormulaNode(
-    val source: String = ""
+    val source: String = "",
+    override val id: String = UUID.randomUUID().toString()
 ) : ContentNode
 
 @Serializable
 @SerialName("image_node")
 data class ImageNode(
     val assetId: String? = null,
+    override val id: String = UUID.randomUUID().toString()
     val assetPath: String? = null
 ) : ContentNode
 

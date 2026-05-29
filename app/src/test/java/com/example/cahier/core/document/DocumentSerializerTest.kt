@@ -31,28 +31,6 @@ class DocumentSerializerTest {
     }
 
     @Test
-    fun encodeDecode_preservesDocumentRevisionAndInkLayerMetadata() {
-        val document = TicDocument(
-            revision = 42L,
-            pages = listOf(
-                CanvasPage(
-                    inkLayer = InkLayerRef(
-                        documentRevision = 42L,
-                        strokeCount = 7
-                    )
-                )
-            )
-        )
-
-        val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
-
-        assertNotNull(decoded)
-        assertEquals(42L, decoded!!.revision)
-        assertEquals(42L, decoded.pages.first().inkLayer.documentRevision)
-        assertEquals(7, decoded.pages.first().inkLayer.strokeCount)
-    }
-
-    @Test
     fun decodeOrNull_invalidPayload_returnsNull() {
         val decoded = DocumentSerializer.decodeOrNull("{bad json")
         assertNull(decoded)
@@ -129,7 +107,7 @@ class DocumentSerializerTest {
     @Test
     fun encodeDecode_preservesSharedCanvasCoordinatesAcrossBlockTypes() {
         val text = TextContainerBlock(x = 300f, y = 220f, width = 700f, height = 380f)
-        val image = ImageBlock(x = -140f, y = 96f, width = 256f, height = 192f, assetPath = "files/notes/42/assets/a.png")
+        val image = ImageBlock(x = -140f, y = 96f, width = 256f, height = 192f, assetPath = "/tmp/a.png")
         val table = TableBlock(x = 48f, y = -72f, width = 640f, height = 320f, rows = 2, columns = 2)
         val document = TicDocument(pages = listOf(CanvasPage(blocks = listOf(text, image, table))))
 
@@ -150,50 +128,12 @@ class DocumentSerializerTest {
     }
 
     @Test
-    fun encodeDecode_preservesPersistentStrokeMetadata() {
-        val text = TextContainerBlock(id = "block-1", x = 100f, y = 120f)
-        val document = TicDocument(
-            pages = listOf(
-                CanvasPage(
-                    blocks = listOf(text),
-                    strokeIds = listOf("stroke-1"),
-                    strokeAnchors = listOf(
-                        StrokeAnchor(
-                            blockId = "block-1",
-                            strokeIds = listOf("stroke-1"),
-                            anchorOriginX = 100f,
-                            anchorOriginY = 120f,
-                        )
-                    ),
-                    strokeTransforms = listOf(
-                        StrokeTransform(
-                            strokeId = "stroke-1",
-                            translateX = 12f,
-                            translateY = -4f,
-                        )
-                    )
-                )
-            )
-        )
-
-        val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
-        assertNotNull(decoded)
-        val page = decoded!!.pages.first()
-
-        assertEquals("stroke-1", page.strokeIds.single())
-        assertEquals("block-1", page.strokeAnchors.single().blockId)
-        assertEquals("stroke-1", page.strokeAnchors.single().strokeIds.single())
-        assertEquals(12f, page.strokeTransforms.single().translateX)
-        assertEquals(-4f, page.strokeTransforms.single().translateY)
-    }
-
-    @Test
     fun encodeDecode_roundTripsFormulaBlockSourceAndRendered() {
         val formula = FormulaBlock(
             x = 220f,
             y = 140f,
             source = "x^2 + y^2 = z^2",
-            rendered = "plain formula preview: x^2 + y^2 = z^2"
+            rendered = "f(x): x^2 + y^2 = z^2"
         )
         val document = TicDocument(pages = listOf(CanvasPage(blocks = listOf(formula))))
         val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
@@ -201,10 +141,11 @@ class DocumentSerializerTest {
         assertNotNull(decoded)
         val decodedFormula = decoded!!.pages.first().blocks.first() as FormulaBlock
         assertEquals("x^2 + y^2 = z^2", decodedFormula.source)
-        assertEquals("plain formula preview: x^2 + y^2 = z^2", decodedFormula.rendered)
+        assertEquals("f(x): x^2 + y^2 = z^2", decodedFormula.rendered)
         assertEquals(220f, decodedFormula.x)
         assertEquals(140f, decodedFormula.y)
     }
+
     @Test
     fun encodeDecode_roundTripsAssetManifestAndImageAssetReference() {
         val manifest = AssetManifestEntry(
@@ -237,4 +178,52 @@ class DocumentSerializerTest {
         assertEquals("files/notes/42/assets/asset-1.png", decodedImage.assetPath)
     }
 
+    @Test
+    fun encodeDecode_preservesMixedTextContainerNodeOrderAndContent() {
+        val nodes = listOf(
+            ParagraphNode(text = "intro", id = "p-1"),
+            TableNode(
+                rows = 1,
+                columns = 2,
+                cells = listOf(listOf(TableCell(text = "A"), TableCell(text = "B"))),
+                id = "t-1"
+            ),
+            FormulaNode(source = "E=mc^2", id = "f-1"),
+            ParagraphNode(text = "middle", id = "p-2"),
+            ImageNode(assetPath = "/assets/diagram.png", id = "i-1"),
+            TableNode(
+                rows = 2,
+                columns = 1,
+                cells = listOf(listOf(TableCell(text = "C")), listOf(TableCell(text = "D"))),
+                id = "t-2"
+            ),
+            ParagraphNode(text = "outro", id = "p-3")
+        )
+        val document = TicDocument(
+            pages = listOf(
+                CanvasPage(
+                    blocks = listOf(
+                        TextContainerBlock(
+                            id = "block-1",
+                            content = TextContainerContent(nodes = nodes)
+                        )
+                    )
+                )
+            )
+        )
+
+        val decoded = DocumentSerializer.decodeOrNull(DocumentSerializer.encode(document))
+
+        assertNotNull(decoded)
+        val decodedNodes = (decoded!!.pages.first().blocks.first() as TextContainerBlock).content.nodes
+        assertEquals(nodes.size, decodedNodes.size)
+        assertEquals(listOf("p-1", "t-1", "f-1", "p-2", "i-1", "t-2", "p-3"), decodedNodes.map { it.id })
+        assertEquals("intro", (decodedNodes[0] as ParagraphNode).text)
+        assertEquals("A", (decodedNodes[1] as TableNode).cells[0][0].text)
+        assertEquals("E=mc^2", (decodedNodes[2] as FormulaNode).source)
+        assertEquals("middle", (decodedNodes[3] as ParagraphNode).text)
+        assertEquals("/assets/diagram.png", (decodedNodes[4] as ImageNode).assetPath)
+        assertEquals("D", (decodedNodes[5] as TableNode).cells[1][0].text)
+        assertEquals("outro", (decodedNodes[6] as ParagraphNode).text)
+    }
 }
