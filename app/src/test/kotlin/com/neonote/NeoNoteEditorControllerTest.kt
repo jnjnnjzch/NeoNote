@@ -2,11 +2,21 @@ package com.neonote
 
 import androidx.compose.ui.geometry.Offset
 import com.neonote.engine.InputEvent
+import com.neonote.engine.InputMode
 import com.neonote.engine.InputPointer
 import com.neonote.engine.InputRouter
 import com.neonote.engine.PointerEventType
 import com.neonote.engine.PointerTool
 import com.neonote.model.CanvasPoint
+import com.neonote.model.CanvasSize
+import com.neonote.model.EditorState
+import com.neonote.model.InfiniteCanvas
+import com.neonote.model.InkLayer
+import com.neonote.model.InkPoint
+import com.neonote.model.InkStroke
+import com.neonote.model.NeoNoteDocument
+import com.neonote.model.NotePage
+import com.neonote.model.ViewportState
 import com.neonote.model.RichContentBox
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -200,4 +210,89 @@ class NeoNoteEditorControllerTest {
         assertTrue(controller.state.selection.isObjectSelected(boxId))
         assertEquals(CanvasPoint(35f, 35f), box.position)
     }
+
+    @Test
+    fun `selection mode drag moves mixed lasso selection in document coordinates under zoom`() {
+        val controller = NeoNoteEditorController(initialState = editorStateWithMixedCanvas())
+        val router = InputRouter()
+
+        controller.setSelectionMode(true)
+        val lassoSelection = controller.selectWithLasso(
+            listOf(
+                CanvasPoint(0f, 0f),
+                CanvasPoint(80f, 0f),
+                CanvasPoint(80f, 80f),
+                CanvasPoint(0f, 80f),
+            ),
+        )
+        controller.panViewportBy(screenDx = 50f, screenDy = -20f)
+        controller.zoomViewportBy(zoomChange = 2f, screenCentroid = CanvasPoint(0f, 0f))
+
+        val start = controller.documentToScreen(CanvasPoint(15f, 15f))
+        val end = CanvasPoint(start.x + 20f, start.y + 10f)
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = start, tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(InputPointer(id = 1, position = end, tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = end, tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+
+        val movedBox = controller.currentCanvas.objects.single() as RichContentBox
+        val movedStroke = controller.currentCanvas.inkLayer.strokes.single()
+        assertTrue(lassoSelection.isObjectSelected("box-1"))
+        assertTrue(lassoSelection.isStrokeSelected("stroke-1"))
+        assertEquals(CanvasPoint(20f, 15f), movedBox.position)
+        assertEquals(listOf(InkPoint(15f, 25f), InkPoint(70f, 25f)), movedStroke.points)
+    }
+
 }
+
+private fun editorStateWithMixedCanvas(): EditorState = EditorState(
+    document = NeoNoteDocument(
+        id = "test-document-mixed",
+        title = "Mixed selection test",
+        assetStoreId = "test-assets",
+        pages = listOf(
+            NotePage(
+                id = "test-page-mixed",
+                canvas = InfiniteCanvas(
+                    objects = listOf(
+                        RichContentBox(
+                            id = "box-1",
+                            position = CanvasPoint(10f, 10f),
+                            size = CanvasSize(20f, 20f),
+                        ),
+                    ),
+                    inkLayer = InkLayer(
+                        strokes = listOf(
+                            InkStroke(
+                                id = "stroke-1",
+                                points = listOf(InkPoint(5f, 20f), InkPoint(60f, 20f)),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    ),
+    currentPageId = "test-page-mixed",
+    viewport = ViewportState(),
+)
