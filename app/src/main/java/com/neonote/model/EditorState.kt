@@ -20,14 +20,6 @@ enum class EditorTool {
 }
 
 /**
- * Structured selection state for canvas objects and individual strokes.
- */
-data class SelectionState(
-    val selectedObjectIds: Set<String> = emptySet(),
-    val selectedStrokeIds: Set<String> = emptySet(),
-)
-
-/**
  * Minimal editor session state for opening a v2 document model.
  */
 data class EditorState(

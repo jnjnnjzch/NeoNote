@@ -1,3 +1,5 @@
+import org.gradle.api.tasks.testing.Test
+
 plugins {
     id("com.android.application")
 }
@@ -9,14 +11,15 @@ android {
     defaultConfig {
         applicationId = "com.neonote"
         minSdk = 26
+        targetSdk = 36
     }
 }
 
 dependencies {
-    testImplementation(kotlin("test-junit5"))
+    testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:2.2.21")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-tasks.test {
+tasks.withType<Test>().configureEach {
     useJUnitPlatform()
 }

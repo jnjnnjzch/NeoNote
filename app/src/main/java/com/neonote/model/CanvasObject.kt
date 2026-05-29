@@ -33,6 +33,9 @@ data class CanvasRect(
     val right: Float,
     val bottom: Float,
 ) {
+    fun contains(point: CanvasPoint): Boolean =
+        point.x in left..right && point.y in top..bottom
+
     companion object {
         fun from(position: CanvasPoint, size: CanvasSize): CanvasRect = CanvasRect(
             left = position.x,
@@ -46,9 +49,9 @@ data class CanvasRect(
 /**
  * Top-level floating items that can be placed on an infinite canvas.
  *
- * Geometry values are expressed in a single, shared infinite canvas coordinate
- * system so CanvasEngine and SelectionEngine can reason about all objects
- * consistently.
+ * Geometry values are expressed only as [CanvasPoint] plus [CanvasSize] in a
+ * shared infinite-canvas coordinate system. Canvas objects deliberately do not
+ * expose any parallel coordinate state.
  */
 sealed interface CanvasObject {
     val id: String
@@ -68,7 +71,7 @@ data class RichContentBox(
     override val size: CanvasSize = CanvasSize.Zero,
     override val zIndex: Int = 0,
     val content: RichContent = RichContent(),
-    val position: CanvasPosition = CanvasPosition(0f, 0f),
+    val isFocused: Boolean = false,
 ) : CanvasObject
 
 /**
@@ -81,5 +84,4 @@ data class FloatingImage(
     override val zIndex: Int = 0,
     val assetId: String,
     val altText: String? = null,
-    val position: CanvasPosition = CanvasPosition(0f, 0f),
 ) : CanvasObject

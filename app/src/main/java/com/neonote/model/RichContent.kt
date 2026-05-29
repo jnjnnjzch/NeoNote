@@ -1,7 +1,8 @@
 package com.neonote.model
 
 /**
- * Structured rich content. Formulas exist here as inline or block nodes.
+ * Structured rich content. Formulas exist here as inline or display/block rich
+ * content nodes, not as default top-level canvas objects.
  */
 data class RichContent(
     val blocks: List<BlockNode> = emptyList(),
@@ -12,13 +13,13 @@ sealed interface BlockNode
 sealed interface InlineNode
 
 data class ParagraphNode(
-    val id: String,
     val inlines: List<InlineNode> = emptyList(),
+    val id: String = "",
 ) : BlockNode
 
 data class TableNode(
-    val id: String,
     val rows: List<List<TableCell>> = emptyList(),
+    val id: String = "",
 ) : BlockNode
 
 data class TableCell(
@@ -41,12 +42,12 @@ data class InlineImage(
 ) : InlineNode
 
 data class BlockFormula(
-    val id: String,
     val expression: String,
+    val id: String = "",
 ) : BlockNode
 
 data class BlockImage(
-    val id: String,
     val assetId: String,
     val altText: String? = null,
+    val id: String = "",
 ) : BlockNode
