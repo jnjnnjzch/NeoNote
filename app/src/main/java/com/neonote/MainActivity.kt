@@ -66,6 +66,7 @@ import com.neonote.engine.InputRouter
 import com.neonote.engine.PointerEventType
 import com.neonote.engine.toPlainText
 import com.neonote.input.AndroidPointerSnapshot
+import com.neonote.input.AndroidStylusInputAdapter
 import com.neonote.input.ComposeInputAdapter
 import com.neonote.input.InputDiagnostics
 import com.neonote.input.describeAndroidSource
@@ -205,8 +206,23 @@ private fun InfiniteCanvasViewport(
         modifier = modifier
             .background(Color(0xFFEFF6FF))
             .pointerInteropFilter { motionEvent ->
-                platformSnapshotStore.latest = motionEvent.toAndroidPointerSnapshot()
-                false
+                if (AndroidStylusInputAdapter.isStylusOrEraser(motionEvent)) {
+                    val inputEvent = AndroidStylusInputAdapter.toInputEvent(motionEvent)
+                    controller.updateInputDiagnostics(AndroidStylusInputAdapter.toDiagnostics(motionEvent))
+
+                    if (inputEvent != null) {
+                        controller.routeInputEvent(
+                            router = router,
+                            event = inputEvent,
+                            mode = InputMode.Write,
+                        )
+                    }
+
+                    true
+                } else {
+                    platformSnapshotStore.latest = motionEvent.toAndroidPointerSnapshot()
+                    false
+                }
             }
             .pointerInput(selectionMode) {
                 handleCanvasPointerInput(
