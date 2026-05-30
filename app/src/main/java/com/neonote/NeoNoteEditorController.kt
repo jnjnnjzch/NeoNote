@@ -186,7 +186,7 @@ public class NeoNoteEditorController(
             is InputAction.ContinueInk -> continueInk(action.samples)
             is InputAction.PanBy -> panViewportBy(action.dx, action.dy)
             is InputAction.CreateOrFocusRichContentBox -> focusOrCreateRichContentBox(screenToDocument(action.position))
-            is InputAction.FocusExisting -> action.objectId?.let(::focusRichContentBox)
+            is InputAction.FocusExisting -> action.objectId?.let(::activateRichContentBox)
             is InputAction.BeginSelectionGesture -> beginSelectionGesture(action.position)
             is InputAction.UpdateSelectionGesture -> updateSelectionGesture(action.position)
             InputAction.EndInteraction -> endActiveInteraction()
@@ -279,7 +279,7 @@ public class NeoNoteEditorController(
     public fun focusOrCreateRichContentBox(documentPosition: CanvasPoint) {
         val existing = currentCanvas.topMostObjectAt(documentPosition) as? RichContentBox
         if (existing != null) {
-            focusRichContentBox(existing.id)
+            activateRichContentBox(existing.id)
             return
         }
 
@@ -300,7 +300,21 @@ public class NeoNoteEditorController(
         )
     }
 
+    /**
+     * User intent for tapping an existing floating text box. Selection mode
+     * selects the canvas object only; text mode enters editing and allows the
+     * platform keyboard to appear.
+     */
+    public fun activateRichContentBox(boxId: String) {
+        if (state.currentTool == EditorTool.Selection) {
+            selectCanvasObject(boxId)
+        } else {
+            focusRichContentBox(boxId)
+        }
+    }
+
     public fun focusRichContentBox(boxId: String) {
+        if (state.currentTool == EditorTool.Selection) return
         state = state.copy(
             document = state.document.withCanvas(currentCanvas.setFocusedRichContentBox(boxId)),
             focusedRichContentBoxId = boxId,

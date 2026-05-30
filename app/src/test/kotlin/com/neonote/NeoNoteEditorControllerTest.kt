@@ -131,7 +131,6 @@ class NeoNoteEditorControllerTest {
         assertEquals(originalBox.size, box.size)
     }
 
-
     @Test
     fun `routed blank tap converts screen point to document point once`() {
         val controller = NeoNoteEditorController()
@@ -386,6 +385,77 @@ class NeoNoteEditorControllerTest {
         assertTrue(lassoSelection.isStrokeSelected("stroke-1"))
         assertEquals(CanvasPoint(20f, 15f), movedBox.position)
         assertEquals(listOf(InkPoint(15f, 25f), InkPoint(70f, 25f)), movedStroke.points)
+    }
+
+    @Test
+    fun `activating an existing text box in text mode focuses it for editing`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "editable")
+        controller.setSelectionMode(true)
+        controller.setSelectionMode(false)
+
+        controller.activateRichContentBox(boxId)
+        controller.updateRichContentText(boxId, "edited again")
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals(boxId, controller.state.focusedRichContentBoxId)
+        assertEquals(true, box.isFocused)
+        assertTrue(controller.state.selection.selectedRefs.isEmpty())
+        assertEquals("edited again", box.toPlainText())
+    }
+
+    @Test
+    fun `activating an existing text box in selection mode selects without focusing`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "select me")
+
+        controller.setSelectionMode(true)
+        controller.activateRichContentBox(boxId)
+        controller.updateRichContentText(boxId, "keyboard edit should be ignored")
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertTrue(controller.state.selection.isObjectSelected(boxId))
+        assertNull(controller.state.focusedRichContentBoxId)
+        assertEquals(false, box.isFocused)
+        assertEquals("select me", box.toPlainText())
+    }
+
+    @Test
+    fun `routed selection mode tap on text box selects without focusing`() {
+        val controller = NeoNoteEditorController()
+        val router = InputRouter()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "select me")
+        controller.setSelectionMode(true)
+        val screenTap = controller.documentToScreen(CanvasPoint(30f, 35f))
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = screenTap, tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = screenTap, tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertTrue(controller.state.selection.isObjectSelected(boxId))
+        assertNull(controller.state.focusedRichContentBoxId)
+        assertEquals(false, box.isFocused)
+        assertEquals("select me", box.toPlainText())
     }
 
     @Test

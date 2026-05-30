@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -51,10 +52,13 @@ import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -347,7 +351,11 @@ private fun RichContentBoxView(
     val borderColor = when {
         selected -> Color(0xFF2563EB)
         box.isFocused -> Color(0xFF7C3AED)
-        else -> Color(0xFFCBD5E1)
+        else -> Color(0xFFE2E8F0)
+    }
+    val borderWidth = when {
+        selected || box.isFocused -> 2.dp
+        else -> 1.dp
     }
     val modifier = Modifier
         .offset { IntOffset(box.position.x.roundToInt(), box.position.y.roundToInt()) }
@@ -357,16 +365,43 @@ private fun RichContentBoxView(
         )
         .clip(RoundedCornerShape(14.dp))
         .background(Color.White)
-        .border(width = 2.dp, color = borderColor, shape = RoundedCornerShape(14.dp))
+        .border(width = borderWidth, color = borderColor, shape = RoundedCornerShape(14.dp))
 
-    Box(modifier = modifier.padding(8.dp)) {
+    val contentModifier = modifier
+        .padding(8.dp)
+        .then(
+            if (selectionMode) {
+                Modifier.pointerInput(box.id, selectionMode) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        controller.activateRichContentBox(box.id)
+                    }
+                }
+            } else {
+                Modifier
+            },
+        )
+
+    Box(modifier = contentModifier) {
         TextField(
             value = box.toPlainText(),
             onValueChange = { controller.updateRichContentText(box.id, it) },
             enabled = !selectionMode && !selected,
+            singleLine = false,
+            minLines = 3,
+            maxLines = 8,
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Sentences,
+                imeAction = ImeAction.Default,
+            ),
             modifier = Modifier
                 .fillMaxSize()
-                .focusRequester(focusRequester),
+                .focusRequester(focusRequester)
+                .onFocusChanged { focusState ->
+                    if (focusState.isFocused && !selectionMode && !selected && !box.isFocused) {
+                        controller.activateRichContentBox(box.id)
+                    }
+                },
             placeholder = { Text("Start typing…") },
         )
     }
