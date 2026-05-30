@@ -7,6 +7,10 @@ public data class InputDiagnostics(
     val tool: PointerTool = PointerTool.Finger,
     val pressure: Float = 1f,
     val pointerCount: Int = 0,
+    val pressureMin: Float = pressure,
+    val pressureMax: Float = pressure,
+    val historicalSampleCount: Int = 0,
+    val eventSampleCount: Int = if (historicalSampleCount > 0 || pointerCount > 0) historicalSampleCount + 1 else 0,
     val deviceId: Int? = null,
     val source: Int? = null,
     val sourceDescription: String = "source=unknown",
@@ -14,11 +18,25 @@ public data class InputDiagnostics(
     public fun asToolbarText(): String = buildString {
         append("tool=").append(tool)
         append(" pressure=").append("%.2f".format(pressure))
+        append(" range=").append("%.2f..%.2f".format(pressureMin, pressureMax))
+        append(" samples=").append(eventSampleCount)
+        append(" hist=").append(historicalSampleCount)
         append(" pointers=").append(pointerCount)
         append(" device=").append(deviceId?.toString() ?: "unknown")
         append(' ')
         append(sourceDescription)
     }
+}
+
+public fun InputDiagnostics.withPressureSamples(samples: List<InputInkSample>): InputDiagnostics {
+    if (samples.isEmpty()) return copy(pressureMin = pressure, pressureMax = pressure, eventSampleCount = 0)
+    val pressures = samples.map { it.pressure }
+    return copy(
+        pressureMin = pressures.minOrNull() ?: pressure,
+        pressureMax = pressures.maxOrNull() ?: pressure,
+        historicalSampleCount = (samples.size - 1).coerceAtLeast(0),
+        eventSampleCount = samples.size,
+    )
 }
 
 public data class AndroidPointerSnapshot(

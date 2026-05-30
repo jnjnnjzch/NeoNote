@@ -55,14 +55,17 @@ public class ComposeInputAdapter {
             androidToolType = primaryPlatformPointer?.toolType ?: AndroidToolTypes.Unknown,
             androidSource = source,
         )
+        val currentPressure = primaryPlatformPointer?.pressure ?: 1f
+        val pressureSamples = primaryPlatformPointer?.historicalSamples.orEmpty() +
+            InputInkSample(position = CanvasPoint(0f, 0f), pressure = currentPressure, rawPressure = primaryPlatformPointer?.pressure)
         return InputDiagnostics(
             tool = tool,
-            pressure = primaryPlatformPointer?.pressure ?: 1f,
+            pressure = currentPressure,
             pointerCount = pointerCount,
             deviceId = platformSnapshot?.deviceId,
             source = platformSnapshot?.source,
             sourceDescription = describeAndroidSource(platformSnapshot?.source),
-        )
+        ).withPressureSamples(pressureSamples)
     }
 
     private fun PointerInputChange.toInputPointer(platformPointer: AndroidPointer?, source: Int): InputPointer = InputPointer(

@@ -276,6 +276,52 @@ class NeoNoteEditorControllerTest {
         assertEquals(15.275f, points[2].y, 0.0001f)
         assertEquals(24.84625f, points[3].x, 0.0001f)
         assertEquals(24.84625f, points[3].y, 0.0001f)
+        assertEquals(listOf(1f, 0.4f, 0.6f, 1f), points.map { it.rawPressure })
+        assertTrue(points.map { it.pressure }.distinct().size > 1)
+    }
+
+    @Test
+    fun `coalesced move samples preserve changing pressure`() {
+        val controller = NeoNoteEditorController()
+        val router = InputRouter()
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(0f, 0f), tool = PointerTool.SPen, pressure = 0.2f, rawPressure = 0.2f)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(
+                    InputPointer(
+                        id = 1,
+                        position = CanvasPoint(30f, 0f),
+                        tool = PointerTool.SPen,
+                        pressure = 0.4f,
+                        rawPressure = 0.4f,
+                        historicalSamples = listOf(
+                            InputInkSample(position = CanvasPoint(10f, 0f), pressure = 0.8f, rawPressure = 0.8f),
+                            InputInkSample(position = CanvasPoint(20f, 0f), pressure = 0.6f, rawPressure = 0.6f),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(30f, 0f), tool = PointerTool.SPen, pressure = 0.4f, rawPressure = 0.4f)),
+            ),
+        )
+
+        val points = controller.currentCanvas.inkLayer.strokes.single().points
+        assertEquals(listOf(0.2f, 0.8f, 0.6f, 0.4f), points.map { it.rawPressure })
+        assertTrue(points.map { it.pressure }.distinct().size > 1)
     }
 
     @Test

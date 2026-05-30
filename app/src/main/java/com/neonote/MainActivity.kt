@@ -22,11 +22,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -69,6 +66,7 @@ import com.neonote.input.ComposeInputAdapter
 import com.neonote.input.InputDiagnostics
 import com.neonote.input.describeAndroidSource
 import com.neonote.input.toAndroidPointerSnapshot
+import com.neonote.input.withPressureSamples
 import com.neonote.model.CanvasObject
 import com.neonote.model.CanvasPoint
 import com.neonote.model.CanvasRect
@@ -108,7 +106,7 @@ private fun NeoNoteEditorScreen(controller: NeoNoteEditorController) {
             title = state.document.title,
             selectionMode = selectionMode,
             viewportLabel = "pan=(${state.viewport.panOffsetX.roundToInt()}, ${state.viewport.panOffsetY.roundToInt()}) zoom=${"%.2f".format(state.viewport.zoomScale)}x",
-            diagnosticsLabel = controller.inputDiagnostics.asToolbarText(),
+            diagnosticsLabel = if (BuildConfig.DEBUG) controller.inputDiagnostics.asToolbarText() else "",
             persistenceStatus = controller.persistenceStatus,
             pageLabel = "Page ${controller.currentPageNumber} / ${controller.pageCount}",
             canGoToPreviousPage = controller.canSwitchToPreviousPage,
@@ -155,7 +153,9 @@ private fun EditorToolbar(
         Column(modifier = Modifier.weight(1f)) {
             Text(text = title, fontWeight = FontWeight.SemiBold, color = Color(0xFF0F172A))
             Text(text = viewportLabel, style = MaterialTheme.typography.bodySmall, color = Color(0xFF64748B))
-            Text(text = diagnosticsLabel, style = MaterialTheme.typography.bodySmall, color = Color(0xFF475569))
+            if (diagnosticsLabel.isNotBlank()) {
+                Text(text = diagnosticsLabel, style = MaterialTheme.typography.bodySmall, color = Color(0xFF475569))
+            }
             Text(text = persistenceStatus, style = MaterialTheme.typography.bodySmall, color = Color(0xFF0369A1))
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -196,19 +196,19 @@ private fun InfiniteCanvasViewport(
 ) {
     val router = remember { InputRouter() }
     val inputAdapter = remember { ComposeInputAdapter() }
-    var platformSnapshot by remember { mutableStateOf<AndroidPointerSnapshot?>(null) }
+    val platformSnapshotStore = remember { PlatformSnapshotStore() }
     Box(
         modifier = modifier
             .background(Color(0xFFEFF6FF))
             .pointerInteropFilter { motionEvent ->
-                platformSnapshot = motionEvent.toAndroidPointerSnapshot()
+                platformSnapshotStore.latest = motionEvent.toAndroidPointerSnapshot()
                 false
             }
             .pointerInput(selectionMode) {
                 handleCanvasPointerInput(
                     router = router,
                     inputAdapter = inputAdapter,
-                    platformSnapshotProvider = { platformSnapshot },
+                    platformSnapshotProvider = { platformSnapshotStore.latest },
                     controller = controller,
                     selectionMode = selectionMode,
                 )
@@ -258,6 +258,9 @@ private fun InfiniteCanvasViewport(
     }
 }
 
+private class PlatformSnapshotStore {
+    var latest: AndroidPointerSnapshot? = null
+}
 
 @Composable
 private fun InkLayer(
@@ -272,7 +275,7 @@ private fun InkLayer(
                     color = Color(0xFF0F172A),
                     start = Offset(start.x, start.y),
                     end = Offset(end.x, end.y),
-                    strokeWidth = InkStrokeWidthMapper.widthForPressure((start.pressure + end.pressure) / 2f),
+                    strokeWidth = InkStrokeWidthMapper.widthForSegment(start, end),
                     cap = StrokeCap.Round,
                 )
             }
@@ -468,7 +471,7 @@ private fun routePointerEvent(
             deviceId = platformSnapshot?.deviceId,
             source = platformSnapshot?.source,
             sourceDescription = describeAndroidSource(platformSnapshot?.source),
-        ),
+        ).withPressureSamples(inputEvent.primaryInkSamples),
     )
     controller.routeInputEvent(
         router = router,

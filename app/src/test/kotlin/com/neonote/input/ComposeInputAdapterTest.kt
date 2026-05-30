@@ -1,6 +1,8 @@
 package com.neonote.input
 
+import com.neonote.engine.InputInkSample
 import com.neonote.engine.PointerTool
+import com.neonote.model.CanvasPoint
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -54,8 +56,34 @@ class ComposeInputAdapterTest {
 
         assertTrue("tool=SPen" in text)
         assertTrue("pressure=0.63" in text)
+        assertTrue("range=0.63..0.63" in text)
+        assertTrue("samples=1" in text)
+        assertTrue("hist=0" in text)
         assertTrue("pointers=2" in text)
         assertTrue("device=7" in text)
         assertTrue("source=stylus" in text)
+    }
+
+    @Test
+    fun `diagnostic text includes pressure range and historical sample count`() {
+        val diagnostics = InputDiagnostics(
+            tool = PointerTool.SPen,
+            pressure = 0.8f,
+            pointerCount = 1,
+            sourceDescription = describeAndroidSource(AndroidInputSources.Stylus),
+        ).withPressureSamples(
+            listOf(
+                InputInkSample(position = CanvasPoint(1f, 1f), pressure = 0.25f, rawPressure = 0.25f),
+                InputInkSample(position = CanvasPoint(2f, 2f), pressure = 0.6f, rawPressure = 0.6f),
+                InputInkSample(position = CanvasPoint(3f, 3f), pressure = 0.8f, rawPressure = 0.8f),
+            ),
+        )
+
+        val text = diagnostics.asToolbarText()
+
+        assertTrue("pressure=0.80" in text)
+        assertTrue("range=0.25..0.80" in text)
+        assertTrue("samples=3" in text)
+        assertTrue("hist=2" in text)
     }
 }
