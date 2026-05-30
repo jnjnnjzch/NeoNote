@@ -2,6 +2,7 @@ package com.neonote
 
 import com.neonote.engine.SelectionEngine
 import com.neonote.model.CanvasPoint
+import com.neonote.model.CanvasRect
 import com.neonote.model.CanvasSize
 import com.neonote.model.InfiniteCanvas
 import com.neonote.model.InkLayer
@@ -9,6 +10,7 @@ import com.neonote.model.InkPoint
 import com.neonote.model.InkStroke
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
+import com.neonote.model.SelectionState
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -111,5 +113,52 @@ class SelectionEngineTest {
 
         assertEquals(setOf("inside-box"), selection.selectedObjectIds)
         assertEquals(setOf("crossing-stroke"), selection.selectedStrokeIds)
+    }
+    @Test
+    fun `selected bounds union selected objects and ink stroke point extents`() {
+        val engine = SelectionEngine()
+        val canvas = InfiniteCanvas(
+            objects = listOf(
+                RichContentBox(
+                    id = "box-1",
+                    position = CanvasPoint(10f, 20f),
+                    size = CanvasSize(30f, 40f),
+                ),
+                RichContentBox(
+                    id = "box-2",
+                    position = CanvasPoint(-100f, -100f),
+                    size = CanvasSize(10f, 10f),
+                ),
+            ),
+            inkLayer = InkLayer(
+                strokes = listOf(
+                    InkStroke(
+                        id = "stroke-1",
+                        points = listOf(InkPoint(5f, 75f), InkPoint(70f, 15f), InkPoint(45f, 90f)),
+                    ),
+                    InkStroke(
+                        id = "stroke-2",
+                        points = listOf(InkPoint(-50f, -50f), InkPoint(-40f, -40f)),
+                    ),
+                ),
+            ),
+        )
+        val selection = engine.select(canvas, objectIds = setOf("box-1"), strokeIds = setOf("stroke-1"))
+
+        val bounds = engine.selectedBounds(canvas, selection)
+
+        assertEquals(CanvasRect(left = 5f, top = 15f, right = 70f, bottom = 90f), bounds)
+    }
+
+    @Test
+    fun `selected bounds are null for empty selection and empty selected strokes`() {
+        val engine = SelectionEngine()
+        val canvas = InfiniteCanvas(
+            inkLayer = InkLayer(strokes = listOf(InkStroke(id = "empty-stroke"))),
+        )
+        val selection = engine.select(canvas, strokeIds = setOf("empty-stroke"))
+
+        assertEquals(null, engine.selectedBounds(canvas, SelectionState()))
+        assertEquals(null, engine.selectedBounds(canvas, selection))
     }
 }

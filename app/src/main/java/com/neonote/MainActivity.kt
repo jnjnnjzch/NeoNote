@@ -32,8 +32,10 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -68,6 +70,7 @@ import com.neonote.input.describeAndroidSource
 import com.neonote.input.toAndroidPointerSnapshot
 import com.neonote.model.CanvasObject
 import com.neonote.model.CanvasPoint
+import com.neonote.model.CanvasRect
 import com.neonote.model.InkLayer as ModelInkLayer
 import com.neonote.model.InkStroke
 import com.neonote.model.RichContentBox
@@ -232,6 +235,11 @@ private fun InfiniteCanvasViewport(
                     controller = controller,
                 )
             }
+            SelectionOverlay(
+                activeLassoPath = controller.activeLassoPath,
+                selectedBounds = controller.selectedBounds,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
         Text(
             text = "Tap blank canvas to create text · Drag blank canvas to pan · Pinch to zoom",
@@ -265,6 +273,35 @@ private fun InkLayer(
                     cap = StrokeCap.Round,
                 )
             }
+        }
+    }
+}
+@Composable
+private fun SelectionOverlay(
+    activeLassoPath: List<CanvasPoint>,
+    selectedBounds: CanvasRect?,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier) {
+        selectedBounds?.let { bounds ->
+            drawRect(
+                color = Color(0xFF2563EB),
+                topLeft = Offset(bounds.left, bounds.top),
+                size = Size(
+                    width = bounds.right - bounds.left,
+                    height = bounds.bottom - bounds.top,
+                ),
+                style = Stroke(width = 2f),
+            )
+        }
+        activeLassoPath.zipWithNext { start, end ->
+            drawLine(
+                color = Color(0xFF2563EB),
+                start = Offset(start.x, start.y),
+                end = Offset(end.x, end.y),
+                strokeWidth = 2f,
+                cap = StrokeCap.Round,
+            )
         }
     }
 }

@@ -33,6 +33,7 @@ import com.neonote.input.InputDiagnostics
 import com.neonote.model.CanvasObject
 import com.neonote.model.CanvasObjectRef
 import com.neonote.model.CanvasPoint
+import com.neonote.model.CanvasRect
 import com.neonote.model.CanvasSize
 import com.neonote.model.EditorState
 import com.neonote.model.EditorTool
@@ -79,6 +80,12 @@ public class NeoNoteEditorController(
     public val activeInkStroke: InkStroke?
         get() = inkSession.activeStroke
 
+    public val activeLassoPath: List<CanvasPoint>
+        get() = (activeSelectionGesture as? ActiveSelectionGesture.Lasso)?.path.orEmpty()
+
+    public val selectedBounds: CanvasRect?
+        get() = selectionEngine.selectedBounds(currentCanvas, state.selection)
+
     public val currentCanvas: InfiniteCanvas
         get() = currentPage.canvas
 
@@ -97,7 +104,7 @@ public class NeoNoteEditorController(
     public val canSwitchToNextPage: Boolean
         get() = currentPageIndex < pageCount - 1
 
-    private var activeSelectionGesture: ActiveSelectionGesture? = null
+    private var activeSelectionGesture: ActiveSelectionGesture? by mutableStateOf(null)
 
     private val currentPage: NotePage
         get() = state.document.pages.first { it.id == state.currentPageId }
@@ -348,6 +355,11 @@ public class NeoNoteEditorController(
 
     private fun beginSelectionGesture(screenPosition: CanvasPoint) {
         val documentPosition = screenToDocument(screenPosition)
+        if (selectionHitBoundsContains(documentPosition)) {
+            activeSelectionGesture = ActiveSelectionGesture.Drag(lastScreenPosition = screenPosition)
+            return
+        }
+
         val hitRef = hitSelectableAt(documentPosition)
         if (hitRef != null) {
             if (hitRef !in state.selection.selectedRefs) {
@@ -409,6 +421,9 @@ public class NeoNoteEditorController(
             document = state.document.withCanvas(currentCanvas.setFocusedRichContentBox(null)),
         )
     }
+
+    private fun selectionHitBoundsContains(documentPosition: CanvasPoint): Boolean =
+        state.selection.selectedRefs.isNotEmpty() && selectedBounds?.contains(documentPosition) == true
 
     private fun hitSelectableAt(documentPosition: CanvasPoint): com.neonote.model.SelectableRef? {
         val objectHit = selectionEngine.hitTestCanvasObjects(currentCanvas, documentPosition).firstOrNull()
