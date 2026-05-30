@@ -55,6 +55,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.neonote.engine.InkStrokeWidthMapper
 import com.neonote.engine.InputMode
 import com.neonote.engine.JsonFilePersistenceStore
@@ -82,10 +83,12 @@ public class MainActivity : ComponentActivity() {
 }
 
 @Composable
-public fun NeoNoteApp(controller: NeoNoteEditorController = remember { NeoNoteEditorController() }) {
+public fun NeoNoteApp(controller: NeoNoteEditorController? = null) {
+    val editorController = controller ?: viewModel<NeoNoteEditorViewModel>().controller
+
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF8FAFC)) {
-            NeoNoteEditorScreen(controller = controller)
+            NeoNoteEditorScreen(controller = editorController)
         }
     }
 }
