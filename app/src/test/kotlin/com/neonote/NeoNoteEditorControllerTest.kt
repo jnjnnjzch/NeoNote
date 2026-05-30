@@ -403,6 +403,91 @@ class NeoNoteEditorControllerTest {
         assertEquals(false, box.isFocused)
         assertEquals("editable", box.toPlainText())
     }
+    @Test
+    fun `selection mode exposes active lasso path in document coordinates while drawing`() {
+        val controller = NeoNoteEditorController(initialState = editorStateWithMixedCanvas())
+        val router = InputRouter()
+        controller.setSelectionMode(true)
+        controller.panViewportBy(screenDx = 10f, screenDy = 20f)
+        controller.zoomViewportBy(zoomChange = 2f, screenCentroid = CanvasPoint(0f, 0f))
+
+        val down = controller.documentToScreen(CanvasPoint(50f, 50f))
+        val move = controller.documentToScreen(CanvasPoint(60f, 70f))
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = down, tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(InputPointer(id = 1, position = move, tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+
+        assertEquals(listOf(CanvasPoint(50f, 50f), CanvasPoint(60f, 70f)), controller.activeLassoPath)
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = move, tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+
+        assertTrue(controller.activeLassoPath.isEmpty())
+    }
+
+    @Test
+    fun `selection mode drag can start from inside selected bounds between selected geometries`() {
+        val controller = NeoNoteEditorController(initialState = editorStateWithMixedCanvas())
+        val router = InputRouter()
+        controller.setSelectionMode(true)
+        controller.selectWithLasso(
+            listOf(
+                CanvasPoint(0f, 0f),
+                CanvasPoint(80f, 0f),
+                CanvasPoint(80f, 80f),
+                CanvasPoint(0f, 80f),
+            ),
+        )
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(50f, 28f), tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(60f, 33f), tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(60f, 33f), tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+
+        val movedBox = controller.currentCanvas.objects.single() as RichContentBox
+        val movedStroke = controller.currentCanvas.inkLayer.strokes.single()
+        assertEquals(CanvasPoint(20f, 15f), movedBox.position)
+        assertEquals(listOf(InkPoint(15f, 25f), InkPoint(70f, 25f)), movedStroke.points)
+    }
 }
 
 private fun editorStateWithMixedCanvas(): EditorState = EditorState(

@@ -104,6 +104,16 @@ public class SelectionEngine {
         ),
     )
 
+    public fun selectedBounds(canvas: InfiniteCanvas, selection: SelectionState): CanvasRect? {
+        val objectBounds = canvas.objects
+            .filter { selection.isObjectSelected(it.id) }
+            .map { it.bounds }
+        val strokeBounds = canvas.inkLayer.strokes
+            .filter { selection.isStrokeSelected(it.id) }
+            .mapNotNull { it.boundsOrNull() }
+        return (objectBounds + strokeBounds).unionOrNull()
+    }
+
     public fun moveSelection(
         canvas: InfiniteCanvas,
         selection: SelectionState,
@@ -237,6 +247,26 @@ public class SelectionEngine {
     public companion object {
         public const val DefaultStrokeHitTolerance: Float = 6f
         private const val GeometryEpsilon: Float = 0.0001f
+    }
+
+    private fun InkStroke.boundsOrNull(): CanvasRect? {
+        if (points.isEmpty()) return null
+        return CanvasRect(
+            left = points.minOf { it.x },
+            top = points.minOf { it.y },
+            right = points.maxOf { it.x },
+            bottom = points.maxOf { it.y },
+        )
+    }
+
+    private fun List<CanvasRect>.unionOrNull(): CanvasRect? {
+        if (isEmpty()) return null
+        return CanvasRect(
+            left = minOf { it.left },
+            top = minOf { it.top },
+            right = maxOf { it.right },
+            bottom = maxOf { it.bottom },
+        )
     }
 
     private fun InkStroke.translate(dx: Float, dy: Float): InkStroke = copy(
