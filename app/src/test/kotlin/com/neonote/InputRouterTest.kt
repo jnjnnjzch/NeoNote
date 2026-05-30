@@ -2,6 +2,7 @@ package com.neonote
 
 import com.neonote.engine.InputAction
 import com.neonote.engine.InputEvent
+import com.neonote.engine.InputInkSample
 import com.neonote.engine.InputMode
 import com.neonote.engine.InputPointer
 import com.neonote.engine.InputRouter
@@ -29,6 +30,34 @@ class InputRouterTest {
         val action = assertIs<InputAction.ContinueInk>(result.action)
         assertEquals(CanvasPoint(4f, 5f), action.samples.single().position)
         assertEquals(0.75f, action.samples.single().pressure)
+    }
+
+    @Test
+    fun `s pen move includes historical samples before current sample`() {
+        val router = InputRouter()
+        val canvas = InfiniteCanvas()
+        val event = InputEvent(
+            type = PointerEventType.Move,
+            pointers = listOf(
+                InputPointer(
+                    id = 1,
+                    position = CanvasPoint(30f, 30f),
+                    tool = PointerTool.SPen,
+                    pressure = 0.9f,
+                    rawPressure = 0.9f,
+                    historicalSamples = listOf(
+                        InputInkSample(position = CanvasPoint(10f, 10f), pressure = 0.2f, rawPressure = 0.2f),
+                        InputInkSample(position = CanvasPoint(20f, 20f), pressure = 0.6f, rawPressure = 0.6f),
+                    ),
+                ),
+            ),
+        )
+
+        val action = assertIs<InputAction.ContinueInk>(router.route(canvas, event).action)
+
+        assertEquals(listOf(CanvasPoint(10f, 10f), CanvasPoint(20f, 20f), CanvasPoint(30f, 30f)), action.samples.map { it.position })
+        assertEquals(listOf(0.2f, 0.6f, 0.9f), action.samples.map { it.pressure })
+        assertEquals(listOf(0.2f, 0.6f, 0.9f), action.samples.map { it.rawPressure })
     }
 
     @Test

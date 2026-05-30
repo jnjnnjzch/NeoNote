@@ -109,6 +109,9 @@ public object InkStrokeWidthMapper {
         }
         return lerp(MinStrokeWidth, MaxStrokeWidth, normalizedPressure)
     }
+
+    public fun widthForSegment(start: InkPoint, end: InkPoint): Float =
+        widthForPressure((start.pressure + end.pressure) / 2f)
 }
 
 private fun lerp(start: Float, stop: Float, amount: Float): Float = start + (stop - start) * amount

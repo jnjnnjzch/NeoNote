@@ -44,6 +44,18 @@ class InkQualityTest {
     }
 
     @Test
+    fun `segment width uses adjacent point pressure average`() {
+        val start = InkPoint(x = 0f, y = 0f, pressure = 0.2f)
+        val end = InkPoint(x = 10f, y = 0f, pressure = 0.8f)
+
+        val width = InkStrokeWidthMapper.widthForSegment(start, end)
+
+        assertEquals(InkStrokeWidthMapper.widthForPressure(0.5f), width)
+        assertTrue(width > InkStrokeWidthMapper.widthForPressure(start.pressure))
+        assertTrue(width < InkStrokeWidthMapper.widthForPressure(end.pressure))
+    }
+
+    @Test
     fun `smoothing keeps first point unchanged`() {
         val smoother = InkStrokeSmoother(smoothing = 0.5f)
         val current = InkPoint(x = 10f, y = 20f, pressure = 0.8f)
