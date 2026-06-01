@@ -1,5 +1,6 @@
 package com.neonote
 
+import com.neonote.engine.DefaultDocumentJson
 import com.neonote.engine.JsonFilePersistenceStore
 import com.neonote.model.BlockFormula
 import com.neonote.model.BlockImage
@@ -24,10 +25,12 @@ import com.neonote.model.TableNode
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 
 class PersistenceStoreTest {
     @Test
@@ -127,6 +130,108 @@ class PersistenceStoreTest {
         assertEquals(stroke, loaded.pages.single().canvas.inkLayer.strokes.single())
         assertEquals(-0.125f, loaded.pages.single().canvas.inkLayer.strokes.single().points.first().x)
         assertEquals(1_024.5f, loaded.pages.single().canvas.inkLayer.strokes.single().points.first().y)
+    }
+
+    @Test
+    fun savesCompactJsonAndLoadsItWithoutDroppingInkPressure() = runBlocking {
+        val document = testDocument(
+            id = "compact-document",
+            revision = 4L,
+            pages = listOf(
+                NotePage(
+                    id = "compact-page",
+                    canvas = InfiniteCanvas(
+                        inkLayer = InkLayer(
+                            strokes = listOf(
+                                InkStroke(
+                                    id = "compact-stroke",
+                                    points = listOf(
+                                        InkPoint(x = 10f, y = 20f),
+                                        InkPoint(x = 30.5f, y = -40.25f, pressure = 0.375f, rawPressure = 0.875f),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val directory = Files.createTempDirectory("neonote-compact-persistence").toFile()
+        val store = JsonFilePersistenceStore(directory)
+
+        val saved = store.save(document)
+        val jsonText = directory.resolve("compact-document.json").readText()
+        val loaded = assertNotNull(store.load(document.id).document)
+        val loadedPoints = loaded.pages.single().canvas.inkLayer.strokes.single().points
+
+        assertEquals(document, loaded)
+        assertEquals(saved.diagnostics?.fileSizeBytes, jsonText.length.toLong())
+        assertFalse(jsonText.contains('\n'), "Compact JSON should be emitted without pretty-print newlines")
+        assertFalse(jsonText.contains("\"rawPressure\":null"), "Null rawPressure defaults should be omitted")
+        assertEquals(1f, loadedPoints.first().pressure)
+        assertEquals(null, loadedPoints.first().rawPressure)
+        assertEquals(0.375f, loadedPoints.last().pressure)
+        assertEquals(0.875f, loadedPoints.last().rawPressure)
+    }
+
+    @Test
+    fun loadsLegacyPrettyJsonWithEncodedDefaults() = runBlocking {
+        val directory = Files.createTempDirectory("neonote-legacy-pretty-persistence").toFile()
+        val legacyJson = requireNotNull(javaClass.classLoader?.getResource("persistence/legacy-pretty-document.json"))
+            .readText()
+        directory.resolve("legacy-pretty-document.json").writeText(legacyJson)
+        val store = JsonFilePersistenceStore(directory)
+
+        val loaded = assertNotNull(store.load("legacy-pretty-document").document)
+        val points = loaded.pages.single().canvas.inkLayer.strokes.single().points
+
+        assertEquals("Legacy Pretty Document", loaded.title)
+        assertEquals("legacy-assets", loaded.assetStoreId)
+        assertEquals(12L, loaded.revision)
+        assertEquals(InkPoint(x = 1.5f, y = -2.25f, pressure = 0.5f, rawPressure = 0.75f), points.first())
+        assertEquals(InkPoint(x = 3f, y = 4f, pressure = 1f, rawPressure = null), points.last())
+    }
+
+    @Test
+    fun missingDefaultFieldsLoadWithCurrentDefaultSemantics() = runBlocking {
+        val directory = Files.createTempDirectory("neonote-default-field-persistence").toFile()
+        directory.resolve("default-field-document.json").writeText(
+            """
+            {"id":"default-field-document","title":"Default Field Document","assetStoreId":"default-assets","pages":[{"id":"default-page","canvas":{"inkLayer":{"strokes":[{"id":"default-stroke","points":[{"x":7.0,"y":8.0}]}]}}},{"id":"blank-default-page"}]}
+            """.trimIndent(),
+        )
+        val store = JsonFilePersistenceStore(directory)
+
+        val loaded = assertNotNull(store.load("default-field-document").document)
+        val page = loaded.pages.first()
+        val blankPage = loaded.pages.last()
+        val stroke = page.canvas.inkLayer.strokes.single()
+        val point = stroke.points.single()
+
+        assertEquals(0L, loaded.revision)
+        assertEquals(emptyList(), page.canvas.objects)
+        assertEquals(InkPoint(x = 7f, y = 8f, pressure = 1f, rawPressure = null), point)
+        assertEquals(InfiniteCanvas(), blankPage.canvas)
+    }
+
+    @Test
+    fun largeInkDocumentIsSmallerAsCompactJsonThanLegacyPrettyJson() = runBlocking {
+        val document = largeInkDocument()
+        val prettyDirectory = Files.createTempDirectory("neonote-large-pretty-persistence").toFile()
+        val compactDirectory = Files.createTempDirectory("neonote-large-compact-persistence").toFile()
+        val legacyPrettyJson = Json(DefaultDocumentJson) {
+            encodeDefaults = true
+            prettyPrint = true
+        }
+        val prettyStore = JsonFilePersistenceStore(prettyDirectory, legacyPrettyJson)
+        val compactStore = JsonFilePersistenceStore(compactDirectory)
+
+        val prettySize = assertNotNull(prettyStore.save(document).diagnostics).fileSizeBytes
+        val compactSize = assertNotNull(compactStore.save(document).diagnostics).fileSizeBytes
+        val loaded = assertNotNull(compactStore.load(document.id).document)
+
+        assertEquals(document, loaded)
+        assertTrue(compactSize < prettySize, "Compact JSON ($compactSize bytes) should be smaller than legacy pretty JSON ($prettySize bytes)")
     }
 
     @Test
@@ -269,11 +374,42 @@ class PersistenceStoreTest {
         return assertNotNull(store.load(id).document)
     }
 
-    private fun testDocument(revision: Long, pages: List<NotePage>): NeoNoteDocument = NeoNoteDocument(
-        id = "test-document",
+    private fun testDocument(
+        revision: Long,
+        pages: List<NotePage>,
+        id: String = "test-document",
+    ): NeoNoteDocument = NeoNoteDocument(
+        id = id,
         title = "Test document",
         assetStoreId = "test-assets",
         revision = revision,
         pages = pages,
+    )
+
+    private fun largeInkDocument(): NeoNoteDocument = testDocument(
+        id = "large-ink-document",
+        revision = 100L,
+        pages = listOf(
+            NotePage(
+                id = "large-ink-page",
+                canvas = InfiniteCanvas(
+                    inkLayer = InkLayer(
+                        strokes = List(48) { strokeIndex ->
+                            InkStroke(
+                                id = "large-stroke-$strokeIndex",
+                                points = List(160) { pointIndex ->
+                                    InkPoint(
+                                        x = strokeIndex * 12.5f + pointIndex * 0.5f,
+                                        y = pointIndex * 1.25f - strokeIndex,
+                                        pressure = if (pointIndex % 4 == 0) 1f else 0.2f + (pointIndex % 8) * 0.1f,
+                                        rawPressure = if (pointIndex % 5 == 0) null else 0.15f + (pointIndex % 10) * 0.05f,
+                                    )
+                                },
+                            )
+                        },
+                    ),
+                ),
+            ),
+        ),
     )
 }
