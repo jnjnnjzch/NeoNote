@@ -22,6 +22,8 @@ import com.neonote.model.InlineFormula
 import com.neonote.model.InlineImage
 import com.neonote.model.InlineLineBreak
 import com.neonote.model.InlineText
+import com.neonote.model.ListItemMetadata
+import com.neonote.model.ListKind
 import com.neonote.model.NeoNoteDocument
 import com.neonote.model.NotePage
 import com.neonote.model.ParagraphNode
@@ -162,6 +164,11 @@ class PersistenceStoreTest {
                                                 InlineImage(assetId = "inline-image-1", altText = "inline alt"),
                                             ),
                                         ),
+                                        ParagraphNode(
+                                            id = "todo-paragraph",
+                                            inlines = listOf(InlineText("Persist checked todo")),
+                                            listMetadata = ListItemMetadata(kind = ListKind.Todo, checked = true),
+                                        ),
                                         TableNode(
                                             id = "table-1",
                                             rows = listOf(
@@ -209,6 +216,9 @@ class PersistenceStoreTest {
         assertTrue(loadedStyledText.bold)
         assertTrue(loadedStyledText.italic)
         assertTrue(loadedStyledText.underline)
+        val loadedTodo = assertIs<ParagraphNode>(loadedBox.content.blocks[1])
+        assertEquals(ListKind.Todo, loadedTodo.listMetadata?.kind)
+        assertTrue(loadedTodo.listMetadata?.checked == true)
     }
 
     @Test
