@@ -4,6 +4,9 @@ import kotlinx.serialization.Serializable
 
 /**
  * Dedicated handwriting layer that is separate from rich content objects.
+ *
+ * These committed vector strokes are the source of truth for persistence,
+ * selection/lasso hit testing, and rebuilding any page-level render cache.
  */
 @Serializable
 data class InkLayer(

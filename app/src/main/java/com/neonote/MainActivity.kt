@@ -60,7 +60,6 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.neonote.engine.InkStrokeWidthMapper
 import com.neonote.engine.InputMode
 import com.neonote.engine.JsonFilePersistenceStore
 import com.neonote.engine.InputRouter
@@ -76,8 +75,6 @@ import com.neonote.input.withPressureSamples
 import com.neonote.model.CanvasObject
 import com.neonote.model.CanvasPoint
 import com.neonote.model.CanvasRect
-import com.neonote.model.InkLayer as ModelInkLayer
-import com.neonote.model.InkStroke
 import com.neonote.model.RichContentBox
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
@@ -250,7 +247,8 @@ private fun InfiniteCanvasViewport(
                     transformOrigin = TransformOrigin(0f, 0f)
                 },
         ) {
-            InkLayer(
+            InkLayerView(
+                pageId = controller.state.currentPageId,
                 inkLayer = controller.currentCanvas.inkLayer,
                 activeStroke = controller.activeInkStroke,
                 modifier = Modifier.fillMaxSize(),
@@ -287,26 +285,6 @@ private class PlatformSnapshotStore {
     var latest: AndroidPointerSnapshot? = null
 }
 
-@Composable
-private fun InkLayer(
-    inkLayer: ModelInkLayer,
-    activeStroke: InkStroke?,
-    modifier: Modifier = Modifier,
-) {
-    Canvas(modifier = modifier) {
-        (inkLayer.strokes + listOfNotNull(activeStroke)).forEach { stroke ->
-            stroke.points.zipWithNext { start, end ->
-                drawLine(
-                    color = Color(0xFF0F172A),
-                    start = Offset(start.x, start.y),
-                    end = Offset(end.x, end.y),
-                    strokeWidth = InkStrokeWidthMapper.widthForSegment(start, end),
-                    cap = StrokeCap.Round,
-                )
-            }
-        }
-    }
-}
 @Composable
 private fun SelectionOverlay(
     activeLassoPath: List<CanvasPoint>,
