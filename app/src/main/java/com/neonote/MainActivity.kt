@@ -1,6 +1,7 @@
 package com.neonote
 
 import android.os.Bundle
+import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
@@ -208,7 +209,11 @@ private fun InfiniteCanvasViewport(
             .pointerInteropFilter { motionEvent ->
                 if (AndroidStylusInputAdapter.isStylusOrEraser(motionEvent)) {
                     val inputEvent = AndroidStylusInputAdapter.toInputEvent(motionEvent)
-                    controller.updateInputDiagnostics(AndroidStylusInputAdapter.toDiagnostics(motionEvent))
+                    controller.updateInputDiagnostics(
+                        diagnostics = AndroidStylusInputAdapter.toDiagnostics(motionEvent),
+                        eventTimeMillis = motionEvent.eventTime,
+                        force = motionEvent.actionMasked != MotionEvent.ACTION_MOVE,
+                    )
 
                     if (inputEvent != null) {
                         controller.routeInputEvent(
@@ -450,7 +455,6 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
         while (true) {
             val event = awaitPointerEvent(pass = PointerEventPass.Final)
             val platformSnapshot = platformSnapshotProvider()
-            controller.updateInputDiagnostics(inputAdapter.diagnostics(event, platformSnapshot))
             if (event.changes.any { it.isConsumed }) return@awaitEachGesture
 
             val pressedChanges = event.changes.filter { it.pressed }
@@ -523,6 +527,7 @@ private fun routePointerEvent(
             source = platformSnapshot?.source,
             sourceDescription = describeAndroidSource(platformSnapshot?.source),
         ).withPressureSamples(inputEvent.primaryInkSamples),
+        force = type != PointerEventType.Move,
     )
     controller.routeInputEvent(
         router = router,
