@@ -23,7 +23,9 @@ import com.neonote.model.TextSelection
 public class RichContentEngine {
     public fun execute(box: RichContentBox, command: RichContentCommand): RichContentCommandResult = when (command) {
         is RichContentCommand.InsertText -> insertText(box, command.text, command.selection, command.typingStyle)
+        is RichContentCommand.PastePlainText -> pastePlainText(box, command.text, command.selection, command.typingStyle)
         is RichContentCommand.DeleteBackward -> deleteBackward(box, command.selection)
+        is RichContentCommand.DeleteSelection -> deleteSelection(box, command.selection)
         is RichContentCommand.InsertParagraph -> if (command.selection == null) {
             insertParagraphBlock(box, command.text, command.index)
         } else {
@@ -58,11 +60,23 @@ public class RichContentEngine {
         return RichContentCommandResult.ContentEdited(box = insertResult.box, selection = insertResult.selection)
     }
 
+    public fun pastePlainText(
+        box: RichContentBox,
+        text: String,
+        selection: TextSelection,
+        typingStyle: TypingStyle = TypingStyle(),
+    ): RichContentCommandResult.ContentEdited = insertText(box, text.normalizePlainTextNewlines(), selection, typingStyle)
+
+    public fun deleteSelection(box: RichContentBox, selection: TextSelection): RichContentCommandResult.ContentEdited {
+        val prepared = box.ensureEditableSelection(selection)
+        val deleteResult = prepared.box.deleteSelection(prepared.selection)
+        return RichContentCommandResult.ContentEdited(box = deleteResult.box, selection = deleteResult.selection)
+    }
+
     public fun deleteBackward(box: RichContentBox, selection: TextSelection): RichContentCommandResult.ContentEdited {
         val prepared = box.ensureEditableSelection(selection)
         if (!prepared.selection.isCollapsed) {
-            val deleteResult = prepared.box.deleteSelection(prepared.selection)
-            return RichContentCommandResult.ContentEdited(box = deleteResult.box, selection = deleteResult.selection)
+            return deleteSelection(prepared.box, prepared.selection)
         }
 
         val cursor = prepared.selection.start
@@ -201,7 +215,7 @@ public class RichContentEngine {
      * paragraph blocks so top-level line navigation stays simple.
      */
     public fun replacePlainText(box: RichContentBox, text: String): RichContentCommandResult.ContentReplaced {
-        val paragraphs = text.split("\n").map { line ->
+        val paragraphs = text.normalizePlainTextNewlines().split("\n").map { line ->
             ParagraphNode(inlines = listOf(InlineText(line)))
         }
         return RichContentCommandResult.ContentReplaced(box = box.copy(content = RichContent(blocks = paragraphs)))
@@ -262,7 +276,13 @@ public sealed interface RichContentCommand {
         val selection: TextSelection,
         val typingStyle: TypingStyle = TypingStyle(),
     ) : RichContentCommand
+    public data class PastePlainText(
+        val text: String,
+        val selection: TextSelection,
+        val typingStyle: TypingStyle = TypingStyle(),
+    ) : RichContentCommand
     public data class DeleteBackward(val selection: TextSelection) : RichContentCommand
+    public data class DeleteSelection(val selection: TextSelection) : RichContentCommand
 
     /**
      * If [selection] is supplied, split text at that selection. If omitted,
@@ -367,17 +387,19 @@ private fun RichContentBox.deleteSelection(selection: TextSelection): EditOperat
 }
 
 private fun RichContentBox.insertPlainTextAt(position: TextCursorPosition, text: String, typingStyle: TypingStyle): EditOperationResult {
-    if (text.isEmpty()) return EditOperationResult(box = this, selection = TextSelection.cursor(position))
+    val normalizedText = text.normalizePlainTextNewlines()
+    if (normalizedText.isEmpty()) return EditOperationResult(box = this, selection = TextSelection.cursor(position))
 
     val blocks = content.blocks
     val paragraph = blocks[position.blockIndex] as ParagraphNode
     val existingChars = paragraph.toStyledChars()
     val before = existingChars.take(position.inlineOffset)
     val after = existingChars.drop(position.inlineOffset)
-    val lines = text.split("\n")
+    val effectiveTypingStyle = typingStyle.effectiveAtInsertionPoint(before = before, after = after)
+    val lines = normalizedText.split("\n")
 
     if (lines.size == 1) {
-        val inserted = lines.single().toStyledChars(typingStyle)
+        val inserted = lines.single().toStyledChars(effectiveTypingStyle)
         val updatedParagraph = paragraph.copy(inlines = (before + inserted + after).toInlineTextNodes())
         val cursor = position.copy(inlineOffset = position.inlineOffset + inserted.size)
         return EditOperationResult(
@@ -387,11 +409,11 @@ private fun RichContentBox.insertPlainTextAt(position: TextCursorPosition, text:
     }
 
     val insertedParagraphs = buildList {
-        add(paragraph.copy(inlines = (before + lines.first().toStyledChars(typingStyle)).toInlineTextNodes()))
+        add(paragraph.copy(inlines = (before + lines.first().toStyledChars(effectiveTypingStyle)).toInlineTextNodes()))
         lines.drop(1).dropLast(1).forEach { line ->
-            add(ParagraphNode(inlines = line.toStyledChars(typingStyle).toInlineTextNodes(), listMetadata = paragraph.listMetadata))
+            add(ParagraphNode(inlines = line.toStyledChars(effectiveTypingStyle).toInlineTextNodes(), listMetadata = paragraph.listMetadata))
         }
-        add(paragraph.copy(inlines = (lines.last().toStyledChars(typingStyle) + after).toInlineTextNodes()))
+        add(paragraph.copy(inlines = (lines.last().toStyledChars(effectiveTypingStyle) + after).toInlineTextNodes()))
     }
     val updatedBlocks = blocks.take(position.blockIndex) + insertedParagraphs + blocks.drop(position.blockIndex + 1)
     val cursor = TextCursorPosition(
@@ -425,6 +447,19 @@ private fun ParagraphNode.toStyledChars(): List<StyledChar> = inlines.flatMap { 
         InlineLineBreak -> listOf(StyledChar('\n'))
         else -> emptyList()
     }
+}
+
+
+private fun String.normalizePlainTextNewlines(): String = replace("\r\n", "\n").replace('\r', '\n')
+
+private fun TypingStyle.effectiveAtInsertionPoint(before: List<StyledChar>, after: List<StyledChar>): TypingStyle {
+    if (bold || italic || underline) return this
+    val surrounding = before.lastOrNull() ?: after.firstOrNull() ?: return this
+    return TypingStyle(
+        bold = surrounding.bold,
+        italic = surrounding.italic,
+        underline = surrounding.underline,
+    )
 }
 
 private fun String.toStyledChars(typingStyle: TypingStyle = TypingStyle()): List<StyledChar> = map {
