@@ -1,6 +1,7 @@
 package com.neonote.engine
 
 import com.neonote.model.InlineText
+import com.neonote.model.ListKind
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContentBox
 import com.neonote.model.TextCursorPosition
@@ -97,6 +98,24 @@ public class RichContentEditorSession(
     public fun toggleItalic(): RichContentEditorEdit = toggleStyle(InlineStyle.Italic)
 
     public fun toggleUnderline(): RichContentEditorEdit = toggleStyle(InlineStyle.Underline)
+
+    public fun toggleList(kind: ListKind): RichContentEditorEdit = applyCommand(
+        when (kind) {
+            ListKind.Bullet -> RichContentCommand.ToggleBulletList(selection)
+            ListKind.Numbered -> RichContentCommand.ToggleNumberedList(selection)
+            ListKind.Todo -> RichContentCommand.ToggleTodo(selection)
+        },
+    )
+
+    public fun toggleBulletList(): RichContentEditorEdit = toggleList(ListKind.Bullet)
+
+    public fun toggleNumberedList(): RichContentEditorEdit = toggleList(ListKind.Numbered)
+
+    public fun toggleTodo(): RichContentEditorEdit = toggleList(ListKind.Todo)
+
+    public fun toggleTodoCheckedState(blockIndex: Int): RichContentEditorEdit = applyCommand(
+        RichContentCommand.ToggleTodoCheckedState(blockIndex = blockIndex),
+    )
 
     /**
      * Translate a platform TextField text snapshot into semantic commands.

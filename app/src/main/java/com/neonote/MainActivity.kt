@@ -5,6 +5,7 @@ import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -50,6 +52,7 @@ import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -86,6 +89,10 @@ import com.neonote.input.withPressureSamples
 import com.neonote.model.CanvasObject
 import com.neonote.model.CanvasPoint
 import com.neonote.model.CanvasRect
+import com.neonote.model.InlineLineBreak
+import com.neonote.model.InlineText
+import com.neonote.model.ListKind
+import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContentBox
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
@@ -404,62 +411,157 @@ private fun RichContentBoxView(
     }
 
     Box(modifier = contentModifier) {
-        TextField(
-            value = platformTextFieldValue,
-            onValueChange = { nextValue ->
-                val previousValue = platformTextFieldValue
-                platformTextFieldValue = nextValue
-                controller.updateRichContentFromPlatformInput(
-                    boxId = box.id,
-                    previousText = previousValue.text,
-                    nextText = nextValue.text,
-                    selectionStart = nextValue.selection.start,
-                    selectionEnd = nextValue.selection.end,
-                    hasActiveComposition = nextValue.composition != null,
-                )
-            },
-            enabled = !selectionMode && !selected,
-            singleLine = false,
-            minLines = 1,
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Sentences,
-                imeAction = ImeAction.Default,
-            ),
-            modifier = Modifier
-                .fillMaxSize()
-                .focusRequester(focusRequester)
-                .onPreviewKeyEvent { keyEvent ->
-                    val style = keyEvent.richContentShortcutStyle()
-                    if (style != null && box.isFocused) {
-                        controller.toggleRichContentStyle(
-                            boxId = box.id,
-                            style = style,
-                            selectionStart = platformTextFieldValue.selection.start,
-                            selectionEnd = platformTextFieldValue.selection.end,
-                        )
-                        true
-                    } else {
-                        false
-                    }
-                }
-                .onFocusChanged { focusState ->
-                    if (focusState.isFocused && !selectionMode && !selected && !box.isFocused) {
-                        controller.activateRichContentBox(box.id)
-                    } else if (!focusState.isFocused && box.isFocused) {
-                        controller.commitRichContentEditing(box.id)
-                    }
+        if (!box.isFocused) {
+            RichContentDisplay(
+                box = box,
+                selectionMode = selectionMode,
+                selected = selected,
+                onFocus = { controller.activateRichContentBox(box.id) },
+                onToggleTodoChecked = { blockIndex ->
+                    controller.toggleRichContentTodoCheckedState(boxId = box.id, blockIndex = blockIndex)
                 },
-            placeholder = { Text("Start typing…") },
-        )
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            TextField(
+                value = platformTextFieldValue,
+                onValueChange = { nextValue ->
+                    val previousValue = platformTextFieldValue
+                    platformTextFieldValue = nextValue
+                    controller.updateRichContentFromPlatformInput(
+                        boxId = box.id,
+                        previousText = previousValue.text,
+                        nextText = nextValue.text,
+                        selectionStart = nextValue.selection.start,
+                        selectionEnd = nextValue.selection.end,
+                        hasActiveComposition = nextValue.composition != null,
+                    )
+                },
+                enabled = !selectionMode && !selected,
+                singleLine = false,
+                minLines = 1,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    imeAction = ImeAction.Default,
+                ),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .focusRequester(focusRequester)
+                    .onPreviewKeyEvent { keyEvent ->
+                        val style = keyEvent.richContentShortcutStyle()
+                        val listKind = keyEvent.richContentShortcutListKind()
+                        when {
+                            style != null && box.isFocused -> {
+                                controller.toggleRichContentStyle(
+                                    boxId = box.id,
+                                    style = style,
+                                    selectionStart = platformTextFieldValue.selection.start,
+                                    selectionEnd = platformTextFieldValue.selection.end,
+                                )
+                                true
+                            }
+                            listKind != null && box.isFocused -> {
+                                controller.toggleRichContentList(
+                                    boxId = box.id,
+                                    kind = listKind,
+                                    selectionStart = platformTextFieldValue.selection.start,
+                                    selectionEnd = platformTextFieldValue.selection.end,
+                                )
+                                true
+                            }
+                            else -> false
+                        }
+                    }
+                    .onFocusChanged { focusState ->
+                        if (focusState.isFocused && !selectionMode && !selected && !box.isFocused) {
+                            controller.activateRichContentBox(box.id)
+                        } else if (!focusState.isFocused && box.isFocused) {
+                            controller.commitRichContentEditing(box.id)
+                        }
+                    },
+                placeholder = { Text("Start typing…") },
+            )
+        }
+    }
+}
+
+@Composable
+private fun RichContentDisplay(
+    box: RichContentBox,
+    selectionMode: Boolean,
+    selected: Boolean,
+    onFocus: () -> Unit,
+    onToggleTodoChecked: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val focusModifier = if (!selectionMode && !selected) {
+        Modifier.clickable(onClick = onFocus)
+    } else {
+        Modifier
+    }
+    Column(
+        modifier = modifier
+            .then(focusModifier)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+    ) {
+        if (box.content.blocks.isEmpty()) {
+            Text("Start typing…", color = Color(0xFF94A3B8))
+        }
+        var numberedIndex = 0
+        var previousNumbered = false
+        box.content.blocks.forEachIndexed { blockIndex, block ->
+            val paragraph = block as? ParagraphNode ?: return@forEachIndexed
+            val metadata = paragraph.listMetadata
+            val markerNumber = if (metadata?.kind == ListKind.Numbered) {
+                numberedIndex = if (previousNumbered) numberedIndex + 1 else 1
+                previousNumbered = true
+                numberedIndex
+            } else {
+                previousNumbered = false
+                numberedIndex = 0
+                0
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                when (metadata?.kind) {
+                    ListKind.Bullet -> Text("•", modifier = Modifier.padding(end = 8.dp), color = Color(0xFF334155))
+                    ListKind.Numbered -> Text("$markerNumber.", modifier = Modifier.padding(end = 8.dp), color = Color(0xFF334155))
+                    ListKind.Todo -> Checkbox(
+                        checked = metadata.checked,
+                        onCheckedChange = { onToggleTodoChecked(blockIndex) },
+                        enabled = !selectionMode && !selected,
+                    )
+                    null -> Unit
+                }
+                Text(text = paragraph.displayText(), color = Color(0xFF0F172A))
+            }
+        }
+    }
+}
+
+private fun ParagraphNode.displayText(): String = inlines.joinToString("") { inline ->
+    when (inline) {
+        is InlineText -> inline.text
+        InlineLineBreak -> "\n"
+        else -> ""
     }
 }
 
 private fun androidx.compose.ui.input.key.KeyEvent.richContentShortcutStyle(): InlineStyle? {
-    if (type != KeyEventType.KeyDown || !isCtrlPressed) return null
+    if (type != KeyEventType.KeyDown || !isCtrlPressed || isShiftPressed) return null
     return when (key) {
         Key.B -> InlineStyle.Bold
         Key.I -> InlineStyle.Italic
         Key.U -> InlineStyle.Underline
+        else -> null
+    }
+}
+
+private fun androidx.compose.ui.input.key.KeyEvent.richContentShortcutListKind(): ListKind? {
+    if (type != KeyEventType.KeyDown || !isCtrlPressed || !isShiftPressed) return null
+    return when (key) {
+        Key.B -> ListKind.Bullet
+        Key.N -> ListKind.Numbered
+        Key.T -> ListKind.Todo
         else -> null
     }
 }

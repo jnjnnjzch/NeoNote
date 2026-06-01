@@ -30,7 +30,26 @@ sealed interface InlineNode
 data class ParagraphNode(
     val inlines: List<InlineNode> = emptyList(),
     val id: String = "",
+    val listMetadata: ListItemMetadata? = null,
 ) : BlockNode
+
+@Serializable
+data class ListItemMetadata(
+    val kind: ListKind,
+    val checked: Boolean = false,
+)
+
+@Serializable
+enum class ListKind {
+    @SerialName("bullet")
+    Bullet,
+
+    @SerialName("numbered")
+    Numbered,
+
+    @SerialName("todo")
+    Todo,
+}
 
 @Serializable
 @SerialName("table")

@@ -45,6 +45,7 @@ import com.neonote.model.InfiniteCanvas
 import com.neonote.model.InkPoint
 import com.neonote.model.InkStroke
 import com.neonote.model.InkStrokeRef
+import com.neonote.model.ListKind
 import com.neonote.model.NeoNoteDocument
 import com.neonote.model.NotePage
 import com.neonote.model.RichContent
@@ -434,6 +435,30 @@ public class NeoNoteEditorController(
             val session = editorSessionFor(boxId, box)
             session.setSelectionFromPlainOffsets(selectionStart, selectionEnd)
             richContentMeasurer.resizeBoxToMeasuredContent(session.toggleStyle(style).box)
+        }
+        state = state.copy(document = state.document.withCanvas(updatedCanvas))
+    }
+
+    public fun toggleRichContentList(
+        boxId: String,
+        kind: ListKind,
+        selectionStart: Int,
+        selectionEnd: Int = selectionStart,
+    ) {
+        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+
+        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val session = editorSessionFor(boxId, box)
+            session.setSelectionFromPlainOffsets(selectionStart, selectionEnd)
+            richContentMeasurer.resizeBoxToMeasuredContent(session.toggleList(kind).box)
+        }
+        state = state.copy(document = state.document.withCanvas(updatedCanvas))
+    }
+
+    public fun toggleRichContentTodoCheckedState(boxId: String, blockIndex: Int) {
+        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val session = editorSessionFor(boxId, box)
+            richContentMeasurer.resizeBoxToMeasuredContent(session.toggleTodoCheckedState(blockIndex).box)
         }
         state = state.copy(document = state.document.withCanvas(updatedCanvas))
     }

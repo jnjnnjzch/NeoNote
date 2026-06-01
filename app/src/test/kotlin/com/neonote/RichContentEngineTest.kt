@@ -10,6 +10,8 @@ import com.neonote.engine.TypingStyle
 import com.neonote.model.CanvasSize
 import com.neonote.model.InlineLineBreak
 import com.neonote.model.InlineText
+import com.neonote.model.ListItemMetadata
+import com.neonote.model.ListKind
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
@@ -220,6 +222,87 @@ class RichContentEngineTest {
         val merged = assertIs<InlineText>(paragraph.inlines.single())
         assertEquals("hello", merged.text)
         assertTrue(merged.bold)
+    }
+
+
+    @Test
+    fun `toggle list commands add and remove paragraph metadata`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(
+                blocks = listOf(
+                    ParagraphNode(inlines = listOf(InlineText("first"))),
+                    ParagraphNode(inlines = listOf(InlineText("second"))),
+                ),
+            ),
+        )
+        val selection = TextSelection(
+            TextRange(
+                start = TextCursorPosition(blockIndex = 0, inlineOffset = 0),
+                end = TextCursorPosition(blockIndex = 1, inlineOffset = 6),
+            ),
+        )
+
+        val bulleted = engine.execute(box, RichContentCommand.ToggleBulletList(selection)) as RichContentCommandResult.ContentEdited
+
+        assertEquals(ListKind.Bullet, assertIs<ParagraphNode>(bulleted.box.content.blocks[0]).listMetadata?.kind)
+        assertEquals(ListKind.Bullet, assertIs<ParagraphNode>(bulleted.box.content.blocks[1]).listMetadata?.kind)
+
+        val plain = engine.execute(bulleted.box, RichContentCommand.ToggleBulletList(selection)) as RichContentCommandResult.ContentEdited
+
+        assertEquals(null, assertIs<ParagraphNode>(plain.box.content.blocks[0]).listMetadata)
+        assertEquals(null, assertIs<ParagraphNode>(plain.box.content.blocks[1]).listMetadata)
+    }
+
+    @Test
+    fun `todo checked toggle only changes requested block`() {
+        val engine = RichContentEngine()
+        val todo = ListItemMetadata(kind = ListKind.Todo)
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(
+                blocks = listOf(
+                    ParagraphNode(inlines = listOf(InlineText("first")), listMetadata = todo),
+                    ParagraphNode(inlines = listOf(InlineText("second")), listMetadata = todo.copy(checked = true)),
+                ),
+            ),
+        )
+
+        val result = engine.execute(box, RichContentCommand.ToggleTodoCheckedState(blockIndex = 0)) as RichContentCommandResult.ContentEdited
+
+        assertTrue(assertIs<ParagraphNode>(result.box.content.blocks[0]).listMetadata?.checked == true)
+        assertTrue(assertIs<ParagraphNode>(result.box.content.blocks[1]).listMetadata?.checked == true)
+    }
+
+    @Test
+    fun `insert paragraph continues list item metadata and resets todo checked state`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(
+                blocks = listOf(
+                    ParagraphNode(
+                        inlines = listOf(InlineText("done item")),
+                        listMetadata = ListItemMetadata(kind = ListKind.Todo, checked = true),
+                    ),
+                ),
+            ),
+        )
+
+        val result = engine.execute(
+            box = box,
+            command = RichContentCommand.InsertParagraph(
+                selection = TextSelection.cursor(TextCursorPosition(blockIndex = 0, inlineOffset = "done item".length)),
+            ),
+        ) as RichContentCommandResult.ContentEdited
+
+        assertEquals("done item\n", result.box.toPlainText())
+        assertEquals(ListKind.Todo, assertIs<ParagraphNode>(result.box.content.blocks[0]).listMetadata?.kind)
+        val continued = assertIs<ParagraphNode>(result.box.content.blocks[1])
+        assertEquals(ListKind.Todo, continued.listMetadata?.kind)
+        assertFalse(continued.listMetadata?.checked == true)
+        assertEquals(TextCursorPosition(blockIndex = 1, inlineOffset = 0), result.selection.start)
     }
 
     @Test

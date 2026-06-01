@@ -6,6 +6,8 @@ import com.neonote.model.BlockNode
 import com.neonote.model.InlineLineBreak
 import com.neonote.model.InlineNode
 import com.neonote.model.InlineText
+import com.neonote.model.ListItemMetadata
+import com.neonote.model.ListKind
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
@@ -30,6 +32,10 @@ public class RichContentEngine {
         is RichContentCommand.ToggleBold -> toggleStyle(box, command.selection, InlineStyle.Bold)
         is RichContentCommand.ToggleItalic -> toggleStyle(box, command.selection, InlineStyle.Italic)
         is RichContentCommand.ToggleUnderline -> toggleStyle(box, command.selection, InlineStyle.Underline)
+        is RichContentCommand.ToggleBulletList -> toggleList(box, command.selection, ListKind.Bullet)
+        is RichContentCommand.ToggleNumberedList -> toggleList(box, command.selection, ListKind.Numbered)
+        is RichContentCommand.ToggleTodo -> toggleList(box, command.selection, ListKind.Todo)
+        is RichContentCommand.ToggleTodoCheckedState -> toggleTodoCheckedState(box, command.blockIndex)
         is RichContentCommand.InsertTable -> insertTable(box, command.rows, command.columns, command.index)
         is RichContentCommand.InsertBlockImage -> insertBlockImage(box, command.assetId, command.altText, command.index)
         is RichContentCommand.InsertBlockFormula -> insertBlockFormula(box, command.expression, command.index)
@@ -94,9 +100,12 @@ public class RichContentEngine {
         val chars = paragraph.toStyledChars()
         val before = chars.take(cursor.inlineOffset).toInlineTextNodes()
         val after = chars.drop(cursor.inlineOffset).toInlineTextNodes()
+        val nextListMetadata = paragraph.listMetadata?.let { metadata ->
+            if (metadata.kind == ListKind.Todo) metadata.copy(checked = false) else metadata
+        }
         val updatedBlocks = blocks.take(cursor.blockIndex) +
             paragraph.copy(inlines = before) +
-            paragraph.copy(inlines = after) +
+            paragraph.copy(inlines = after, listMetadata = nextListMetadata) +
             blocks.drop(cursor.blockIndex + 1)
         val updatedCursor = TextCursorPosition(blockIndex = cursor.blockIndex + 1, inlineOffset = 0)
         return RichContentCommandResult.ContentEdited(
@@ -132,6 +141,56 @@ public class RichContentEngine {
         return RichContentCommandResult.ContentEdited(
             box = prepared.box.copy(content = RichContent(blocks = updatedBlocks)),
             selection = ordered,
+        )
+    }
+
+    public fun toggleList(
+        box: RichContentBox,
+        selection: TextSelection,
+        kind: ListKind,
+    ): RichContentCommandResult.ContentEdited {
+        val prepared = box.ensureEditableSelection(selection)
+        val ordered = prepared.selection.ordered()
+        val blockRange = ordered.listTargetBlockRange()
+        val blocks = prepared.box.content.blocks
+        val allAlreadyTargetKind = blockRange.all { index ->
+            (blocks[index] as? ParagraphNode)?.listMetadata?.kind == kind
+        }
+        val updatedBlocks = blocks.mapIndexed { index, block ->
+            val paragraph = block as? ParagraphNode ?: return@mapIndexed block
+            if (index !in blockRange) return@mapIndexed block
+            val nextMetadata = if (allAlreadyTargetKind) {
+                null
+            } else {
+                ListItemMetadata(kind = kind, checked = kind == ListKind.Todo && paragraph.listMetadata?.checked == true)
+            }
+            paragraph.copy(listMetadata = nextMetadata)
+        }
+        return RichContentCommandResult.ContentEdited(
+            box = prepared.box.copy(content = RichContent(blocks = updatedBlocks)),
+            selection = ordered,
+        )
+    }
+
+    public fun toggleTodoCheckedState(box: RichContentBox, blockIndex: Int): RichContentCommandResult.ContentEdited {
+        require(blockIndex in box.content.blocks.indices) { "blockIndex must address an existing block" }
+        val block = box.content.blocks[blockIndex] as? ParagraphNode
+            ?: return RichContentCommandResult.ContentEdited(
+                box = box,
+                selection = TextSelection.cursor(TextCursorPosition(blockIndex = blockIndex, inlineOffset = 0)),
+            )
+        val metadata = block.listMetadata
+        if (metadata?.kind != ListKind.Todo) {
+            return RichContentCommandResult.ContentEdited(
+                box = box,
+                selection = TextSelection.cursor(TextCursorPosition(blockIndex = blockIndex, inlineOffset = 0)),
+            )
+        }
+        val updatedBlock = block.copy(listMetadata = metadata.copy(checked = !metadata.checked))
+        val cursor = TextCursorPosition(blockIndex = blockIndex, inlineOffset = block.textLength())
+        return RichContentCommandResult.ContentEdited(
+            box = box.copy(content = RichContent(blocks = box.content.blocks.replaceAt(blockIndex, updatedBlock))),
+            selection = TextSelection.cursor(cursor),
         )
     }
 
@@ -218,6 +277,10 @@ public sealed interface RichContentCommand {
     public data class ToggleBold(val selection: TextSelection) : RichContentCommand
     public data class ToggleItalic(val selection: TextSelection) : RichContentCommand
     public data class ToggleUnderline(val selection: TextSelection) : RichContentCommand
+    public data class ToggleBulletList(val selection: TextSelection) : RichContentCommand
+    public data class ToggleNumberedList(val selection: TextSelection) : RichContentCommand
+    public data class ToggleTodo(val selection: TextSelection) : RichContentCommand
+    public data class ToggleTodoCheckedState(val blockIndex: Int) : RichContentCommand
     public data class InsertTable(val rows: Int, val columns: Int, val index: Int? = null) : RichContentCommand
     public data class InsertBlockImage(val assetId: String, val altText: String? = null, val index: Int? = null) : RichContentCommand
     public data class InsertBlockFormula(val expression: String, val index: Int? = null) : RichContentCommand
@@ -326,7 +389,7 @@ private fun RichContentBox.insertPlainTextAt(position: TextCursorPosition, text:
     val insertedParagraphs = buildList {
         add(paragraph.copy(inlines = (before + lines.first().toStyledChars(typingStyle)).toInlineTextNodes()))
         lines.drop(1).dropLast(1).forEach { line ->
-            add(ParagraphNode(inlines = line.toStyledChars(typingStyle).toInlineTextNodes()))
+            add(ParagraphNode(inlines = line.toStyledChars(typingStyle).toInlineTextNodes(), listMetadata = paragraph.listMetadata))
         }
         add(paragraph.copy(inlines = (lines.last().toStyledChars(typingStyle) + after).toInlineTextNodes()))
     }
@@ -395,6 +458,11 @@ private fun StyledChar.asInlineText(): InlineText = InlineText(
     italic = italic,
     underline = underline,
 )
+
+private fun TextSelection.listTargetBlockRange(): IntRange {
+    val last = if (end.blockIndex > start.blockIndex && end.inlineOffset == 0) end.blockIndex - 1 else end.blockIndex
+    return start.blockIndex..last.coerceAtLeast(start.blockIndex)
+}
 
 private fun List<BlockNode>.selectedChars(selection: TextSelection): List<StyledChar> = flatMapIndexed { index, block ->
     val paragraph = block as? ParagraphNode ?: return@flatMapIndexed emptyList()
