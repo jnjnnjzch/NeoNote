@@ -4,8 +4,13 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * Structured rich content. Formulas exist here as inline or display/block rich
- * content nodes, not as default top-level canvas objects.
+ * Structured rich content. Formula, image, and table nodes in this model are
+ * lightweight placeholders for document content inside a [RichContentBox].
+ *
+ * These placeholders intentionally do not provide production formula rendering,
+ * a full spreadsheet/Office-style table editor, nested table UI, image paste, or
+ * a binary asset pipeline. Canvas-level floating media remains modeled by
+ * [FloatingImage] in CanvasObject.kt instead of by these RichContent nodes.
  *
  * The block list is the source of truth for the document. Editing commands
  * should transform these blocks instead of maintaining a parallel plain string.
@@ -51,6 +56,7 @@ enum class ListKind {
     Todo,
 }
 
+/** Static block-level table placeholder. Cells keep nested [RichContent], but UI renders only a simple grid preview. */
 @Serializable
 @SerialName("table")
 data class TableNode(
@@ -58,6 +64,7 @@ data class TableNode(
     val id: String = "",
 ) : BlockNode
 
+/** A table cell owns RichContent so serialization can preserve rich nested cell content. */
 @Serializable
 data class TableCell(
     val content: RichContent = RichContent(),
@@ -77,12 +84,14 @@ data class InlineText(
 @SerialName("lineBreak")
 data object InlineLineBreak : InlineNode
 
+/** Inline formula placeholder that displays the raw expression text. */
 @Serializable
 @SerialName("formula")
 data class InlineFormula(
     val expression: String,
 ) : InlineNode
 
+/** Inline image placeholder referencing an asset id plus optional alt text. */
 @Serializable
 @SerialName("image")
 data class InlineImage(
@@ -90,6 +99,7 @@ data class InlineImage(
     val altText: String? = null,
 ) : InlineNode
 
+/** Block formula placeholder that displays the raw expression text. */
 @Serializable
 @SerialName("blockFormula")
 data class BlockFormula(
@@ -97,6 +107,7 @@ data class BlockFormula(
     val id: String = "",
 ) : BlockNode
 
+/** Block image placeholder referencing an asset id plus optional alt text. */
 @Serializable
 @SerialName("blockImage")
 data class BlockImage(

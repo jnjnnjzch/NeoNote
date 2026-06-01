@@ -3,7 +3,10 @@ package com.neonote.engine
 /**
  * Asset reference API for local images and other binary resources.
  *
- * This interface deliberately does not define cloud upload, sync, or sharing behavior.
+ * RichContent inline/block images and canvas-level FloatingImage objects both
+ * reference asset ids from this boundary. This interface deliberately does not
+ * define image paste, cloud upload, sync, sharing behavior, or a larger binary
+ * asset pipeline.
  */
 public interface AssetStore {
     public suspend fun put(asset: AssetDraft): AssetReference
