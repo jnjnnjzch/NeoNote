@@ -77,10 +77,14 @@ public class JsonFilePersistenceStore(
     }.joinToString(separator = "").ifBlank { "document" }
 }
 
+/**
+ * Canonical whole-document JSON format. Model constructor defaults remain the source of truth for
+ * fields omitted by compact encoding, so older pretty-printed files with explicit defaults still decode.
+ */
 public val DefaultDocumentJson: Json = Json {
     classDiscriminator = "type"
-    encodeDefaults = true
-    prettyPrint = true
+    encodeDefaults = false
+    prettyPrint = false
 }
 
 public data class PersistenceDiagnostics(

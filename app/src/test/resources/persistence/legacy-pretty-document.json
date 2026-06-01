@@ -1,0 +1,35 @@
+{
+    "id": "legacy-pretty-document",
+    "title": "Legacy Pretty Document",
+    "pages": [
+        {
+            "id": "legacy-page",
+            "canvas": {
+                "objects": [],
+                "inkLayer": {
+                    "strokes": [
+                        {
+                            "id": "legacy-stroke",
+                            "points": [
+                                {
+                                    "x": 1.5,
+                                    "y": -2.25,
+                                    "pressure": 0.5,
+                                    "rawPressure": 0.75
+                                },
+                                {
+                                    "x": 3.0,
+                                    "y": 4.0,
+                                    "pressure": 1.0,
+                                    "rawPressure": null
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+    ],
+    "assetStoreId": "legacy-assets",
+    "revision": 12
+}
