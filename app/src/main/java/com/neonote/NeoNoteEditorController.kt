@@ -30,6 +30,7 @@ import com.neonote.engine.SelectionCommand
 import com.neonote.engine.SelectionCommandResult
 import com.neonote.engine.SelectionEngine
 import com.neonote.input.InputDiagnostics
+import com.neonote.input.mergeForThrottledDisplay
 import com.neonote.model.CanvasObject
 import com.neonote.model.CanvasObjectRef
 import com.neonote.model.CanvasPoint
@@ -51,6 +52,7 @@ private const val DefaultBoxWidth = 320f
 private const val DefaultBoxHeight = 160f
 private const val MinZoomScale = 0.25f
 private const val MaxZoomScale = 4f
+private const val DefaultInputDiagnosticsThrottleMillis = 32L
 
 /**
  * Small reducer-style controller for the first v2 interactive vertical slice.
@@ -64,6 +66,8 @@ public class NeoNoteEditorController(
     private val inkEngine: InkEngine = InkEngine(SequentialIdGenerator()),
     private val richContentEngine: RichContentEngine = RichContentEngine(),
     private val documentEngine: DocumentEngine = DocumentEngine(SequentialIdGenerator()),
+    private val inputDiagnosticsThrottleMillis: Long = DefaultInputDiagnosticsThrottleMillis,
+    private val diagnosticsClockMillis: () -> Long = { System.currentTimeMillis() },
 ) {
     public var state: EditorState by mutableStateOf(initialState)
         private set
@@ -105,6 +109,8 @@ public class NeoNoteEditorController(
         get() = currentPageIndex < pageCount - 1
 
     private var activeSelectionGesture: ActiveSelectionGesture? by mutableStateOf(null)
+    private var lastInputDiagnosticsUpdateMillis: Long? = null
+    private var pendingInputDiagnostics: InputDiagnostics? = null
 
     private val currentPage: NotePage
         get() = state.document.pages.first { it.id == state.currentPageId }
@@ -138,8 +144,36 @@ public class NeoNoteEditorController(
         return loaded
     }
 
-    public fun updateInputDiagnostics(diagnostics: InputDiagnostics) {
-        inputDiagnostics = diagnostics
+    /**
+     * Updates toolbar-only input diagnostics at a bounded cadence.
+     *
+     * The pending diagnostics are merged so the toolbar can still show the latest
+     * tool and pressure plus a pressure range/sample count for throttled events.
+     * This method is intentionally separate from [routeInputEvent], so throttling
+     * Compose state writes cannot drop ink samples or alter pressure routing.
+     */
+    public fun updateInputDiagnostics(
+        diagnostics: InputDiagnostics,
+        eventTimeMillis: Long = diagnosticsClockMillis(),
+        force: Boolean = false,
+    ): Boolean {
+        val pendingDiagnostics = pendingInputDiagnostics?.mergeForThrottledDisplay(diagnostics) ?: diagnostics
+        val lastUpdateMillis = lastInputDiagnosticsUpdateMillis
+        val shouldPublish = force ||
+            inputDiagnosticsThrottleMillis <= 0L ||
+            lastUpdateMillis == null ||
+            eventTimeMillis - lastUpdateMillis >= inputDiagnosticsThrottleMillis ||
+            diagnostics.tool != inputDiagnostics.tool
+
+        return if (shouldPublish) {
+            inputDiagnostics = pendingDiagnostics
+            pendingInputDiagnostics = null
+            lastInputDiagnosticsUpdateMillis = eventTimeMillis
+            true
+        } else {
+            pendingInputDiagnostics = pendingDiagnostics
+            false
+        }
     }
 
     public fun addPage() {
