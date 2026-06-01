@@ -541,6 +541,38 @@ class NeoNoteEditorControllerTest {
     }
 
     @Test
+    fun `rich content box height grows with measured multiline content and selection bounds`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 20f))
+        val initialBox = controller.currentCanvas.objects.single() as RichContentBox
+        val text = (1..12).joinToString("\n") { "line $it" }
+
+        controller.updateRichContentText(initialBox.id, text)
+        controller.selectCanvasObject(initialBox.id)
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        val bounds = controller.selectedBounds!!
+        assertEquals(initialBox.size.width, box.size.width)
+        assertTrue(box.size.height > initialBox.size.height)
+        assertEquals(box.position.y + box.size.height, bounds.bottom)
+    }
+
+    @Test
+    fun `zooming viewport after content measurement does not change box document size`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 20f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, (1..10).joinToString("\n") { "line $it" })
+        val sizeBeforeZoom = (controller.currentCanvas.objects.single() as RichContentBox).size
+
+        controller.zoomViewportBy(zoomChange = 2f, screenCentroid = CanvasPoint(100f, 100f))
+
+        val sizeAfterZoom = (controller.currentCanvas.objects.single() as RichContentBox).size
+        assertEquals(sizeBeforeZoom, sizeAfterZoom)
+        assertEquals(2f, controller.state.viewport.zoomScale)
+    }
+
+    @Test
     fun `activating an existing text box in text mode focuses it for editing`() {
         val controller = NeoNoteEditorController()
         controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))

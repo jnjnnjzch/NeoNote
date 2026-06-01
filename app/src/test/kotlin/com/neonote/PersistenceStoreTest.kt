@@ -163,6 +163,25 @@ class PersistenceStoreTest {
         assertEquals(document, loaded)
     }
 
+    @Test
+    fun controllerSaveAndLoadPreserveMeasuredRichContentBoxHeight() = runBlocking {
+        val directory = Files.createTempDirectory("neonote-rich-content-height").toFile()
+        val store = JsonFilePersistenceStore(directory)
+        val controller = NeoNoteEditorController(initialState = createTestEditorState())
+        controller.focusOrCreateRichContentBox(CanvasPoint(x = 40f, y = 50f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, (1..12).joinToString("\n") { "persisted line $it" })
+        val savedBox = controller.currentCanvas.objects.single() as RichContentBox
+
+        controller.saveDocument(store)
+        val reloadedController = NeoNoteEditorController(initialState = createTestEditorState())
+        reloadedController.loadDocument(store, controller.state.document.id)
+
+        val loadedBox = reloadedController.currentCanvas.objects.single() as RichContentBox
+        assertEquals(savedBox.size, loadedBox.size)
+        assertTrue(loadedBox.size.height > 160f)
+        assertEquals(savedBox.toPlainText(), loadedBox.toPlainText())
+    }
 
     @Test
     fun saveAndLoadDiagnosticsCountInkAcrossPages() = runBlocking {
