@@ -23,9 +23,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -57,6 +60,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -384,10 +388,29 @@ private fun RichContentBoxView(
             },
         )
 
+    var platformTextFieldValue by remember(box.id) { mutableStateOf(TextFieldValue(box.toPlainText())) }
+    val modelText = box.toPlainText()
+    LaunchedEffect(modelText, box.isFocused) {
+        if (!box.isFocused && platformTextFieldValue.text != modelText) {
+            platformTextFieldValue = TextFieldValue(modelText)
+        }
+    }
+
     Box(modifier = contentModifier) {
         TextField(
-            value = box.toPlainText(),
-            onValueChange = { controller.updateRichContentText(box.id, it) },
+            value = platformTextFieldValue,
+            onValueChange = { nextValue ->
+                val previousValue = platformTextFieldValue
+                platformTextFieldValue = nextValue
+                controller.updateRichContentFromPlatformInput(
+                    boxId = box.id,
+                    previousText = previousValue.text,
+                    nextText = nextValue.text,
+                    selectionStart = nextValue.selection.start,
+                    selectionEnd = nextValue.selection.end,
+                    hasActiveComposition = nextValue.composition != null,
+                )
+            },
             enabled = !selectionMode && !selected,
             singleLine = false,
             minLines = 1,
@@ -401,6 +424,8 @@ private fun RichContentBoxView(
                 .onFocusChanged { focusState ->
                     if (focusState.isFocused && !selectionMode && !selected && !box.isFocused) {
                         controller.activateRichContentBox(box.id)
+                    } else if (!focusState.isFocused && box.isFocused) {
+                        controller.commitRichContentEditing(box.id)
                     }
                 },
             placeholder = { Text("Start typing…") },
