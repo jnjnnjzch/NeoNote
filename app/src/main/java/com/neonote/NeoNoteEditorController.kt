@@ -24,13 +24,13 @@ import com.neonote.engine.InputRouter
 import com.neonote.engine.PersistenceDiagnostics
 import com.neonote.engine.PersistenceResult
 import com.neonote.engine.PersistenceStore
-import com.neonote.engine.RichContentCommand
-import com.neonote.engine.RichContentCommandResult
+import com.neonote.engine.RichContentEditorSession
 import com.neonote.engine.RichContentEngine
 import com.neonote.engine.RichContentMeasurer
 import com.neonote.engine.SelectionCommand
 import com.neonote.engine.SelectionCommandResult
 import com.neonote.engine.SelectionEngine
+import com.neonote.engine.toPlainText
 import com.neonote.input.InputDiagnostics
 import com.neonote.input.mergeForThrottledDisplay
 import com.neonote.model.CanvasObject
@@ -117,6 +117,7 @@ public class NeoNoteEditorController(
     private var activeSelectionGesture: ActiveSelectionGesture? by mutableStateOf(null)
     private var lastInputDiagnosticsUpdateMillis: Long? = null
     private var pendingInputDiagnostics: InputDiagnostics? = null
+    private val richContentSessions: MutableMap<String, RichContentEditorSession> = mutableMapOf()
 
     private val currentPage: NotePage
         get() = state.document.pages.first { it.id == state.currentPageId }
@@ -206,6 +207,7 @@ public class NeoNoteEditorController(
 
     public fun switchPage(pageId: String) {
         if (pageId == state.currentPageId) return
+        state.focusedRichContentBoxId?.let(::commitRichContentEditing)
         val documentWithClearedFocus = state.document.withCanvasForPage(
             pageId = currentPage.id,
             canvas = currentCanvas.setFocusedRichContentBox(null),
@@ -291,6 +293,7 @@ public class NeoNoteEditorController(
     }
 
     public fun setSelectionMode(enabled: Boolean) {
+        if (enabled) state.focusedRichContentBoxId?.let(::commitRichContentEditing)
         state = state.copy(
             currentTool = if (enabled) EditorTool.Selection else EditorTool.Pen,
             focusedRichContentBoxId = null,
@@ -360,6 +363,11 @@ public class NeoNoteEditorController(
 
     public fun focusRichContentBox(boxId: String) {
         if (state.currentTool == EditorTool.Selection) return
+        if (state.focusedRichContentBoxId != null && state.focusedRichContentBoxId != boxId) {
+            commitRichContentEditing(state.focusedRichContentBoxId!!)
+        }
+        val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
+        editorSessionFor(boxId, box).focus(box)
         state = state.copy(
             document = state.document.withCanvas(currentCanvas.setFocusedRichContentBox(boxId)),
             focusedRichContentBoxId = boxId,
@@ -369,17 +377,57 @@ public class NeoNoteEditorController(
     }
 
     public fun updateRichContentText(boxId: String, text: String) {
+        val previousText = richContentSessions[boxId]?.localEditableBuffer
+            ?: currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId }?.toPlainText()
+            ?: ""
+        updateRichContentFromPlatformInput(
+            boxId = boxId,
+            previousText = previousText,
+            nextText = text,
+            selectionStart = text.length,
+            selectionEnd = text.length,
+            hasActiveComposition = false,
+        )
+    }
+
+    public fun updateRichContentFromPlatformInput(
+        boxId: String,
+        previousText: String,
+        nextText: String,
+        selectionStart: Int,
+        selectionEnd: Int = selectionStart,
+        hasActiveComposition: Boolean = false,
+    ) {
         if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
 
         val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val result = richContentEngine.execute(
-                box = box,
-                command = RichContentCommand.ReplacePlainText(text),
-            ) as RichContentCommandResult.ContentReplaced
-            richContentMeasurer.resizeBoxToMeasuredContent(result.box)
+            val session = editorSessionFor(boxId, box)
+            val edit = if (hasActiveComposition) {
+                session.replaceFromPlatformCompositionFallback(
+                    nextText = nextText,
+                    selectionStartPlainOffset = selectionStart,
+                    selectionEndPlainOffset = selectionEnd,
+                )
+            } else {
+                session.replaceFromPlatformInput(
+                    previousText = previousText,
+                    nextText = nextText,
+                    selectionStartPlainOffset = selectionStart,
+                    selectionEndPlainOffset = selectionEnd,
+                )
+            }
+            richContentMeasurer.resizeBoxToMeasuredContent(edit.box)
         }
         state = state.copy(document = state.document.withCanvas(updatedCanvas))
     }
+
+    public fun commitRichContentEditing(boxId: String) {
+        val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
+        richContentSessions[boxId]?.blurCommit(box)
+    }
+
+    private fun editorSessionFor(boxId: String, box: RichContentBox): RichContentEditorSession =
+        richContentSessions.getOrPut(boxId) { RichContentEditorSession(initialBox = box, engine = richContentEngine) }.also { it.focus(box) }
 
     public fun selectCanvasObject(objectId: String) {
         val result = selectionEngine.execute(

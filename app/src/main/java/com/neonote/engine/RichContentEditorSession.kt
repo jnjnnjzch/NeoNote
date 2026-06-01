@@ -1,0 +1,270 @@
+package com.neonote.engine
+
+import com.neonote.model.InlineText
+import com.neonote.model.ParagraphNode
+import com.neonote.model.RichContentBox
+import com.neonote.model.TextCursorPosition
+import com.neonote.model.TextRange
+import com.neonote.model.TextSelection
+
+/**
+ * Editing-session state for a focused [RichContentBox].
+ *
+ * Compose TextField/BasicTextField remains only the platform input adapter: it
+ * reports text snapshots, focus, and IME composition state. This session owns the
+ * editor semantics (caret/selection, typing style, local buffer, and command
+ * queue) and translates basic input into [RichContentCommand]s for
+ * [RichContentEngine].
+ *
+ * Boundary: Android IME composition (notably Chinese pinyin conversion) is not a
+ * complete rich-text composition engine here. While the platform reports an
+ * active composing region, [replaceFromPlatformCompositionFallback] preserves
+ * platform behavior with a whole plain-text replacement. Once composition is
+ * committed, normal insert/paragraph/backspace commands resume.
+ */
+public class RichContentEditorSession(
+    initialBox: RichContentBox,
+    initialSelection: TextSelection = TextSelection.cursor(initialBox.content.endCursorPosition()),
+    private val engine: RichContentEngine = RichContentEngine(),
+) {
+    public var box: RichContentBox = initialBox
+        private set
+
+    public var selection: TextSelection = initialSelection.coerceInto(box)
+        private set
+
+    public var typingStyle: TypingStyle = TypingStyle()
+        private set
+
+    public var localEditableBuffer: String = box.toPlainText()
+        private set
+
+    private val mutablePendingCommands: MutableList<RichContentCommand> = mutableListOf()
+
+    public val pendingCommands: List<RichContentCommand>
+        get() = mutablePendingCommands.toList()
+
+    public fun focus(updatedBox: RichContentBox = box) {
+        box = updatedBox
+        localEditableBuffer = updatedBox.toPlainText()
+        selection = selection.coerceInto(updatedBox)
+    }
+
+    public fun blurCommit(updatedBox: RichContentBox = box): RichContentEditorCommit {
+        if (updatedBox != box) focus(updatedBox)
+        val commands = drainPendingCommands()
+        return RichContentEditorCommit(box = box, selection = selection, committedCommands = commands)
+    }
+
+    public fun setSelectionFromPlainOffsets(start: Int, end: Int = start) {
+        selection = TextSelection(
+            TextRange(
+                start = box.cursorPositionAtPlainOffset(start),
+                end = box.cursorPositionAtPlainOffset(end),
+            ),
+        )
+    }
+
+    public fun insertText(text: String): RichContentEditorEdit = applyCommand(
+        RichContentCommand.InsertText(text = text, selection = selection),
+    )
+
+    public fun insertParagraph(): RichContentEditorEdit = applyCommand(
+        RichContentCommand.InsertParagraph(selection = selection),
+    )
+
+    public fun deleteBackward(): RichContentEditorEdit = applyCommand(
+        RichContentCommand.DeleteBackward(selection = selection),
+    )
+
+    /**
+     * Translate a platform TextField text snapshot into semantic commands.
+     */
+    public fun replaceFromPlatformInput(
+        previousText: String,
+        nextText: String,
+        selectionStartPlainOffset: Int,
+        selectionEndPlainOffset: Int = selectionStartPlainOffset,
+    ): RichContentEditorEdit {
+        if (previousText != localEditableBuffer) {
+            localEditableBuffer = previousText
+        }
+        if (nextText == localEditableBuffer) {
+            setSelectionFromPlainOffsets(selectionStartPlainOffset, selectionEndPlainOffset)
+            return RichContentEditorEdit(box = box, selection = selection, commands = emptyList())
+        }
+
+        val diff = TextDiff.between(oldText = localEditableBuffer, newText = nextText)
+        val oldSelection = TextSelection(
+            TextRange(
+                start = box.cursorPositionAtPlainOffset(diff.deletedStart),
+                end = box.cursorPositionAtPlainOffset(diff.deletedEnd),
+            ),
+        )
+        selection = oldSelection
+
+        val appliedCommands = mutableListOf<RichContentCommand>()
+        when {
+            diff.insertedText == "\n" && diff.deletedStart == diff.deletedEnd -> {
+                appliedCommands += applyCommand(RichContentCommand.InsertParagraph(selection = selection)).commands
+            }
+            diff.insertedText.isEmpty() && diff.deletedEnd > diff.deletedStart -> {
+                selection = if (diff.deletedEnd - diff.deletedStart == 1) {
+                    TextSelection.cursor(box.cursorPositionAtPlainOffset(diff.deletedEnd))
+                } else {
+                    oldSelection
+                }
+                appliedCommands += applyCommand(RichContentCommand.DeleteBackward(selection = selection)).commands
+            }
+            else -> {
+                appliedCommands += applyCommand(
+                    RichContentCommand.InsertText(text = diff.insertedText, selection = selection),
+                ).commands
+            }
+        }
+
+        setSelectionFromPlainOffsets(selectionStartPlainOffset, selectionEndPlainOffset)
+        return RichContentEditorEdit(box = box, selection = selection, commands = appliedCommands)
+    }
+
+    /**
+     * Fallback path for active platform IME composition.
+     */
+    public fun replaceFromPlatformCompositionFallback(
+        nextText: String,
+        selectionStartPlainOffset: Int,
+        selectionEndPlainOffset: Int = selectionStartPlainOffset,
+    ): RichContentEditorEdit {
+        val command = RichContentCommand.ReplacePlainText(nextText)
+        val result = engine.execute(box, command) as RichContentCommandResult.ContentReplaced
+        box = result.box
+        localEditableBuffer = box.toPlainText()
+        setSelectionFromPlainOffsets(selectionStartPlainOffset, selectionEndPlainOffset)
+        mutablePendingCommands += command
+        return RichContentEditorEdit(box = box, selection = selection, commands = listOf(command))
+    }
+
+    public fun drainPendingCommands(): List<RichContentCommand> {
+        val commands = pendingCommands
+        mutablePendingCommands.clear()
+        return commands
+    }
+
+    private fun applyCommand(command: RichContentCommand): RichContentEditorEdit {
+        val result = engine.execute(box, command)
+        when (result) {
+            is RichContentCommandResult.ContentEdited -> {
+                box = result.box
+                selection = result.selection
+            }
+            is RichContentCommandResult.ContentReplaced -> {
+                box = result.box
+                selection = TextSelection.cursor(box.content.endCursorPosition())
+            }
+            is RichContentCommandResult.ContentInserted -> box = result.box
+        }
+        localEditableBuffer = box.toPlainText()
+        mutablePendingCommands += command
+        return RichContentEditorEdit(box = box, selection = selection, commands = listOf(command))
+    }
+}
+
+public data class TypingStyle(
+    val bold: Boolean = false,
+    val italic: Boolean = false,
+    val underline: Boolean = false,
+)
+
+public data class RichContentEditorEdit(
+    val box: RichContentBox,
+    val selection: TextSelection,
+    val commands: List<RichContentCommand>,
+)
+
+public data class RichContentEditorCommit(
+    val box: RichContentBox,
+    val selection: TextSelection,
+    val committedCommands: List<RichContentCommand>,
+)
+
+private data class TextDiff(
+    val deletedStart: Int,
+    val deletedEnd: Int,
+    val insertedText: String,
+) {
+    companion object {
+        fun between(oldText: String, newText: String): TextDiff {
+            var prefix = 0
+            val minLength = minOf(oldText.length, newText.length)
+            while (prefix < minLength && oldText[prefix] == newText[prefix]) prefix++
+
+            var suffix = 0
+            while (
+                suffix < oldText.length - prefix &&
+                suffix < newText.length - prefix &&
+                oldText[oldText.lastIndex - suffix] == newText[newText.lastIndex - suffix]
+            ) {
+                suffix++
+            }
+
+            return TextDiff(
+                deletedStart = prefix,
+                deletedEnd = oldText.length - suffix,
+                insertedText = newText.substring(prefix, newText.length - suffix),
+            )
+        }
+    }
+}
+
+private fun TextSelection.coerceInto(box: RichContentBox): TextSelection = TextSelection(
+    TextRange(
+        start = box.cursorPositionAtPlainOffset(box.plainOffsetOf(start)),
+        end = box.cursorPositionAtPlainOffset(box.plainOffsetOf(end)),
+    ),
+)
+
+private fun RichContentBox.cursorPositionAtPlainOffset(offset: Int): TextCursorPosition = content.cursorPositionAtPlainOffset(offset)
+
+private fun com.neonote.model.RichContent.cursorPositionAtPlainOffset(offset: Int): TextCursorPosition {
+    if (blocks.isEmpty()) return TextCursorPosition(blockIndex = 0, inlineOffset = 0)
+    val target = offset.coerceIn(0, toPlainText().length)
+    var consumed = 0
+    blocks.forEachIndexed { index, block ->
+        val paragraph = block as? ParagraphNode
+        val length = paragraph?.textLength() ?: 0
+        if (target <= consumed + length) {
+            return TextCursorPosition(blockIndex = index, inlineOffset = target - consumed)
+        }
+        consumed += length
+        if (index < blocks.lastIndex) {
+            if (target == consumed) return TextCursorPosition(blockIndex = index, inlineOffset = length)
+            consumed += 1
+            if (target <= consumed) return TextCursorPosition(blockIndex = (index + 1).coerceAtMost(blocks.lastIndex), inlineOffset = 0)
+        }
+    }
+    val lastIndex = blocks.lastIndex
+    val lastParagraph = blocks[lastIndex] as? ParagraphNode
+    return TextCursorPosition(blockIndex = lastIndex, inlineOffset = lastParagraph?.textLength() ?: 0)
+}
+
+private fun com.neonote.model.RichContent.endCursorPosition(): TextCursorPosition = cursorPositionAtPlainOffset(toPlainText().length)
+
+private fun RichContentBox.plainOffsetOf(position: TextCursorPosition): Int {
+    if (content.blocks.isEmpty()) return 0
+    var offset = 0
+    content.blocks.forEachIndexed { index, block ->
+        val paragraph = block as? ParagraphNode
+        if (index == position.blockIndex) return offset + position.inlineOffset.coerceIn(0, paragraph?.textLength() ?: 0)
+        offset += paragraph?.textLength() ?: 0
+        if (index < content.blocks.lastIndex) offset += 1
+    }
+    return content.toPlainText().length
+}
+
+private fun ParagraphNode.textLength(): Int = inlines.sumOf { inline ->
+    when (inline) {
+        is InlineText -> inline.text.length
+        com.neonote.model.InlineLineBreak -> 1
+        else -> 0
+    }
+}
