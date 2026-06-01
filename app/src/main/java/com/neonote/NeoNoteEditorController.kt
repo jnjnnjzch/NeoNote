@@ -21,6 +21,7 @@ import com.neonote.engine.InputInkSample
 import com.neonote.engine.InputMode
 import com.neonote.engine.InputRouteResult
 import com.neonote.engine.InputRouter
+import com.neonote.engine.PersistenceDiagnostics
 import com.neonote.engine.PersistenceResult
 import com.neonote.engine.PersistenceStore
 import com.neonote.engine.RichContentCommand
@@ -81,6 +82,9 @@ public class NeoNoteEditorController(
     public var persistenceStatus: String by mutableStateOf("Not saved")
         private set
 
+    public var persistenceDiagnostics: PersistenceDiagnostics? by mutableStateOf(null)
+        private set
+
     public val activeInkStroke: InkStroke?
         get() = inkSession.activeStroke
 
@@ -117,7 +121,8 @@ public class NeoNoteEditorController(
 
     public suspend fun saveDocument(store: PersistenceStore): PersistenceResult.Saved {
         val saved = store.save(state.document)
-        persistenceStatus = "Saved ${saved.documentId} at revision ${saved.revision}"
+        persistenceDiagnostics = saved.diagnostics
+        persistenceStatus = "Saved ${saved.documentId} at revision ${saved.revision}" + saved.diagnostics.toStatusSuffix()
         return saved
     }
 
@@ -128,6 +133,7 @@ public class NeoNoteEditorController(
         val loaded = store.load(documentId)
         val document = loaded.document
         if (document == null) {
+            persistenceDiagnostics = null
             persistenceStatus = "No local document found for $documentId"
             return loaded
         }
@@ -139,9 +145,13 @@ public class NeoNoteEditorController(
             focusedRichContentBoxId = null,
             selection = SelectionState(),
         )
-        inkSession = document.pages.firstOrNull()?.canvas?.let(InkSession::fromCanvas) ?: InkSession()
-        persistenceStatus = "Loaded ${document.id} at revision ${document.revision}"
-        return loaded
+        val cacheRebuildTimeMillis = elapsedMillis {
+            inkSession = document.pages.firstOrNull()?.canvas?.let(InkSession::fromCanvas) ?: InkSession()
+        }
+        val diagnostics = loaded.diagnostics?.copy(cacheRebuildTimeMillis = cacheRebuildTimeMillis)
+        persistenceDiagnostics = diagnostics
+        persistenceStatus = "Loaded ${document.id} at revision ${document.revision}" + diagnostics.toStatusSuffix()
+        return loaded.copy(diagnostics = diagnostics)
     }
 
     /**
@@ -557,4 +567,12 @@ private class SequentialIdGenerator : IdGenerator {
     private var nextId = 1
 
     override fun nextId(prefix: String): String = "$prefix-${nextId++}"
+}
+
+private fun PersistenceDiagnostics?.toStatusSuffix(): String = this?.let { " (${it.toDebugSummary()})" }.orEmpty()
+
+private fun elapsedMillis(block: () -> Unit): Double {
+    val startNanos = System.nanoTime()
+    block()
+    return (System.nanoTime() - startNanos) / 1_000_000.0
 }

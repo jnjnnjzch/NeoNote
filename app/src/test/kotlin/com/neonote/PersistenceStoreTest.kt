@@ -1,7 +1,6 @@
 package com.neonote
 
 import com.neonote.engine.JsonFilePersistenceStore
-import com.neonote.engine.PersistenceResult
 import com.neonote.model.BlockFormula
 import com.neonote.model.BlockImage
 import com.neonote.model.CanvasPoint
@@ -27,6 +26,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 
 class PersistenceStoreTest {
@@ -163,6 +163,78 @@ class PersistenceStoreTest {
         assertEquals(document, loaded)
     }
 
+
+    @Test
+    fun saveAndLoadDiagnosticsCountInkAcrossPages() = runBlocking {
+        val document = testDocument(
+            revision = 9L,
+            pages = listOf(
+                NotePage(
+                    id = "page-1",
+                    canvas = InfiniteCanvas(
+                        inkLayer = InkLayer(
+                            strokes = listOf(
+                                InkStroke(
+                                    id = "stroke-1",
+                                    points = listOf(
+                                        InkPoint(x = 1f, y = 1f),
+                                        InkPoint(x = 2f, y = 2f),
+                                    ),
+                                ),
+                                InkStroke(
+                                    id = "stroke-2",
+                                    points = listOf(InkPoint(x = 3f, y = 3f)),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+                NotePage(id = "page-2", canvas = InfiniteCanvas()),
+                NotePage(
+                    id = "page-3",
+                    canvas = InfiniteCanvas(
+                        inkLayer = InkLayer(
+                            strokes = listOf(
+                                InkStroke(
+                                    id = "stroke-3",
+                                    points = listOf(
+                                        InkPoint(x = 4f, y = 4f),
+                                        InkPoint(x = 5f, y = 5f),
+                                        InkPoint(x = 6f, y = 6f),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val directory = Files.createTempDirectory("neonote-persistence-diagnostics").toFile()
+        val store = JsonFilePersistenceStore(directory)
+
+        val saved = store.save(document)
+        val saveDiagnostics = assertNotNull(saved.diagnostics)
+        val loaded = store.load(document.id)
+        val loadDiagnostics = assertNotNull(loaded.diagnostics)
+
+        assertEquals(document.id, saveDiagnostics.documentId)
+        assertEquals(3, saveDiagnostics.pageCount)
+        assertEquals(3, saveDiagnostics.strokeCount)
+        assertEquals(6, saveDiagnostics.pointCount)
+        assertTrue(saveDiagnostics.fileSizeBytes > 0L)
+        assertNotNull(saveDiagnostics.encodeTimeMillis)
+        assertNotNull(saveDiagnostics.writeTimeMillis)
+
+        assertEquals(document, loaded.document)
+        assertEquals(document.id, loadDiagnostics.documentId)
+        assertEquals(3, loadDiagnostics.pageCount)
+        assertEquals(3, loadDiagnostics.strokeCount)
+        assertEquals(6, loadDiagnostics.pointCount)
+        assertEquals(saveDiagnostics.fileSizeBytes, loadDiagnostics.fileSizeBytes)
+        assertNotNull(loadDiagnostics.readTimeMillis)
+        assertNotNull(loadDiagnostics.decodeTimeMillis)
+    }
+
     @Test
     fun controllerSaveAndLoadUpdateStateAndStatusWithoutPersistingViewportAsPosition() = runBlocking {
         val directory = Files.createTempDirectory("neonote-controller-persistence").toFile()
@@ -178,11 +250,14 @@ class PersistenceStoreTest {
         val reloadedController = NeoNoteEditorController(initialState = createTestEditorState())
         val loadedResult = reloadedController.loadDocument(store, saved.documentId)
 
-        assertEquals(PersistenceResult.Saved(documentId = savedDocument.id, revision = savedDocument.revision), saved)
+        assertEquals(savedDocument.id, saved.documentId)
+        assertEquals(savedDocument.revision, saved.revision)
         val loaded = assertNotNull(loadedResult.document)
         assertEquals(savedDocument, loaded)
         assertEquals(savedDocument, reloadedController.state.document)
-        assertEquals("Loaded ${savedDocument.id} at revision ${savedDocument.revision}", reloadedController.persistenceStatus)
+        assertTrue(reloadedController.persistenceStatus.startsWith("Loaded ${savedDocument.id} at revision ${savedDocument.revision}"))
+        assertEquals(loadedResult.diagnostics, reloadedController.persistenceDiagnostics)
+        assertNotNull(loadedResult.diagnostics?.cacheRebuildTimeMillis)
         val loadedBox = assertIs<RichContentBox>(loaded.pages.single().canvas.objects.single())
         assertEquals(CanvasPoint(x = 12.5f, y = -98.25f), loadedBox.position)
     }
