@@ -27,6 +27,7 @@ import com.neonote.engine.PersistenceStore
 import com.neonote.engine.RichContentCommand
 import com.neonote.engine.RichContentCommandResult
 import com.neonote.engine.RichContentEngine
+import com.neonote.engine.RichContentMeasurer
 import com.neonote.engine.SelectionCommand
 import com.neonote.engine.SelectionCommandResult
 import com.neonote.engine.SelectionEngine
@@ -66,6 +67,7 @@ public class NeoNoteEditorController(
     private val selectionEngine: SelectionEngine = SelectionEngine(),
     private val inkEngine: InkEngine = InkEngine(SequentialIdGenerator()),
     private val richContentEngine: RichContentEngine = RichContentEngine(),
+    private val richContentMeasurer: RichContentMeasurer = RichContentMeasurer(),
     private val documentEngine: DocumentEngine = DocumentEngine(SequentialIdGenerator()),
     private val inputDiagnosticsThrottleMillis: Long = DefaultInputDiagnosticsThrottleMillis,
     private val diagnosticsClockMillis: () -> Long = { System.currentTimeMillis() },
@@ -140,7 +142,7 @@ public class NeoNoteEditorController(
 
         val nextPageId = document.pages.firstOrNull()?.id
         state = state.copy(
-            document = document,
+            document = document.withMeasuredRichContentBoxHeights(),
             currentPageId = nextPageId,
             focusedRichContentBoxId = null,
             selection = SelectionState(),
@@ -374,7 +376,7 @@ public class NeoNoteEditorController(
                 box = box,
                 command = RichContentCommand.ReplacePlainText(text),
             ) as RichContentCommandResult.ContentReplaced
-            result.box
+            richContentMeasurer.resizeBoxToMeasuredContent(result.box)
         }
         state = state.copy(document = state.document.withCanvas(updatedCanvas))
     }
@@ -516,6 +518,22 @@ public class NeoNoteEditorController(
             ?.plus(1) ?: 1
         return "rich-content-$next"
     }
+
+    private fun NeoNoteDocument.withMeasuredRichContentBoxHeights(): NeoNoteDocument = copy(
+        pages = pages.map { page ->
+            page.copy(
+                canvas = page.canvas.copy(
+                    objects = page.canvas.objects.map { canvasObject ->
+                        if (canvasObject is RichContentBox) {
+                            richContentMeasurer.resizeBoxToMeasuredContent(canvasObject)
+                        } else {
+                            canvasObject
+                        }
+                    },
+                ),
+            )
+        },
+    )
 
     private fun NeoNoteDocument.withCanvas(canvas: InfiniteCanvas): NeoNoteDocument = withCanvasForPage(
         pageId = state.currentPageId,

@@ -412,8 +412,7 @@ private fun RichContentBoxView(
             onValueChange = { controller.updateRichContentText(box.id, it) },
             enabled = !selectionMode && !selected,
             singleLine = false,
-            minLines = 3,
-            maxLines = 8,
+            minLines = 1,
             keyboardOptions = KeyboardOptions(
                 capitalization = KeyboardCapitalization.Sentences,
                 imeAction = ImeAction.Default,

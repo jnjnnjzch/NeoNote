@@ -3,7 +3,10 @@ package com.neonote
 import com.neonote.engine.RichContentCommand
 import com.neonote.engine.RichContentCommandResult
 import com.neonote.engine.RichContentEngine
+import com.neonote.engine.RichContentMeasurer
 import com.neonote.engine.toPlainText
+import com.neonote.model.CanvasSize
+import com.neonote.model.InlineLineBreak
 import com.neonote.model.InlineText
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
@@ -128,6 +131,43 @@ class RichContentEngineTest {
         assertTrue(styled.underline)
         assertEquals("o", trailing.text)
         assertFalse(trailing.underline)
+    }
+
+    @Test
+    fun `measurer wraps lines from available box width and reports content height`() {
+        val wideBox = RichContentBox(
+            id = "box-1",
+            size = CanvasSize(width = 320f, height = 1f),
+            content = RichContent(blocks = listOf(ParagraphNode(inlines = listOf(InlineText("abcdefghijklmnopqrstuvwxyz"))))),
+        )
+        val narrowBox = wideBox.copy(size = wideBox.size.copy(width = 80f))
+        val measurer = RichContentMeasurer()
+
+        val wideLayout = measurer.measure(wideBox)
+        val narrowLayout = measurer.measure(narrowBox)
+
+        assertEquals(1, wideLayout.lineRects.size)
+        assertTrue(narrowLayout.lineRects.size > wideLayout.lineRects.size)
+        assertTrue(narrowLayout.measuredSize.height > wideLayout.measuredSize.height)
+        assertEquals(80f, narrowLayout.measuredSize.width)
+        assertEquals(1, narrowLayout.blockRects.size)
+    }
+
+    @Test
+    fun `measurer keeps explicit line breaks as separate line metadata`() {
+        val box = RichContentBox(
+            id = "box-1",
+            size = CanvasSize(width = 320f, height = 1f),
+            content = RichContent(blocks = listOf(ParagraphNode(inlines = listOf(InlineText("first"), InlineLineBreak, InlineText("second"))))),
+        )
+
+        val layout = RichContentMeasurer().measure(box)
+
+        assertEquals(2, layout.lineRects.size)
+        assertEquals(0, layout.lineRects[0].inlineStart)
+        assertEquals(5, layout.lineRects[0].inlineEnd)
+        assertEquals(6, layout.lineRects[1].inlineStart)
+        assertEquals(12, layout.lineRects[1].inlineEnd)
     }
 
     @Test
