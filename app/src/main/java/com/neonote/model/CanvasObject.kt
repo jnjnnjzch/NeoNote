@@ -84,6 +84,10 @@ data class RichContentBox(
 
 /**
  * Floating image object placed directly on the canvas.
+ *
+ * This is a top-level, movable/resizable canvas object. It is deliberately
+ * separate from [InlineImage] and [BlockImage], which are placeholders inside a
+ * RichContent document flow and do not carry independent canvas geometry.
  */
 @Serializable
 @SerialName("floatingImage")

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -89,14 +90,20 @@ import com.neonote.input.InputDiagnostics
 import com.neonote.input.describeAndroidSource
 import com.neonote.input.toAndroidPointerSnapshot
 import com.neonote.input.withPressureSamples
+import com.neonote.model.BlockFormula
+import com.neonote.model.BlockImage
 import com.neonote.model.CanvasObject
 import com.neonote.model.CanvasPoint
 import com.neonote.model.CanvasRect
+import com.neonote.model.InlineFormula
+import com.neonote.model.InlineImage
 import com.neonote.model.InlineLineBreak
 import com.neonote.model.InlineText
 import com.neonote.model.ListKind
 import com.neonote.model.ParagraphNode
+import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
+import com.neonote.model.TableNode
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
@@ -536,29 +543,99 @@ private fun RichContentDisplay(
         var numberedIndex = 0
         var previousNumbered = false
         box.content.blocks.forEachIndexed { blockIndex, block ->
-            val paragraph = block as? ParagraphNode ?: return@forEachIndexed
-            val metadata = paragraph.listMetadata
-            val markerNumber = if (metadata?.kind == ListKind.Numbered) {
-                numberedIndex = if (previousNumbered) numberedIndex + 1 else 1
-                previousNumbered = true
-                numberedIndex
-            } else {
-                previousNumbered = false
-                numberedIndex = 0
-                0
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                when (metadata?.kind) {
-                    ListKind.Bullet -> Text("•", modifier = Modifier.padding(end = 8.dp), color = Color(0xFF334155))
-                    ListKind.Numbered -> Text("$markerNumber.", modifier = Modifier.padding(end = 8.dp), color = Color(0xFF334155))
-                    ListKind.Todo -> Checkbox(
-                        checked = metadata.checked,
-                        onCheckedChange = { onToggleTodoChecked(blockIndex) },
-                        enabled = !selectionMode && !selected,
-                    )
-                    null -> Unit
+            when (block) {
+                is ParagraphNode -> {
+                    val metadata = block.listMetadata
+                    val markerNumber = if (metadata?.kind == ListKind.Numbered) {
+                        numberedIndex = if (previousNumbered) numberedIndex + 1 else 1
+                        previousNumbered = true
+                        numberedIndex
+                    } else {
+                        previousNumbered = false
+                        numberedIndex = 0
+                        0
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        when (metadata?.kind) {
+                            ListKind.Bullet -> Text("•", modifier = Modifier.padding(end = 8.dp), color = Color(0xFF334155))
+                            ListKind.Numbered -> Text("$markerNumber.", modifier = Modifier.padding(end = 8.dp), color = Color(0xFF334155))
+                            ListKind.Todo -> Checkbox(
+                                checked = metadata.checked,
+                                onCheckedChange = { onToggleTodoChecked(blockIndex) },
+                                enabled = !selectionMode && !selected,
+                            )
+                            null -> Unit
+                        }
+                        Text(text = block.displayText(), color = Color(0xFF0F172A))
+                    }
                 }
-                Text(text = paragraph.displayText(), color = Color(0xFF0F172A))
+                is BlockFormula -> {
+                    previousNumbered = false
+                    numberedIndex = 0
+                    RichBlockPlaceholder(label = "Formula", text = block.expression.ifBlank { "empty expression" })
+                }
+                is BlockImage -> {
+                    previousNumbered = false
+                    numberedIndex = 0
+                    RichBlockPlaceholder(label = "Image", text = block.imagePlaceholderText())
+                }
+                is TableNode -> {
+                    previousNumbered = false
+                    numberedIndex = 0
+                    StaticTablePlaceholder(table = block)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RichBlockPlaceholder(label: String, text: String) {
+    Text(
+        text = "$label: $text",
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFFF1F5F9))
+            .border(width = 1.dp, color = Color(0xFFCBD5E1), shape = RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        color = Color(0xFF334155),
+        style = MaterialTheme.typography.bodySmall,
+    )
+}
+
+@Composable
+private fun StaticTablePlaceholder(table: TableNode) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .border(width = 1.dp, color = Color(0xFFCBD5E1)),
+    ) {
+        if (table.rows.isEmpty()) {
+            Text(
+                text = "Table: 0 × 0",
+                modifier = Modifier.padding(8.dp),
+                color = Color(0xFF64748B),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        } else {
+            table.rows.forEach { row ->
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    row.forEach { cell ->
+                        Text(
+                            text = cell.content.cellPreviewText(),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(32.dp)
+                                .border(width = 1.dp, color = Color(0xFFCBD5E1))
+                                .padding(horizontal = 6.dp, vertical = 6.dp),
+                            color = Color(0xFF334155),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
             }
         }
     }
@@ -568,9 +645,23 @@ private fun ParagraphNode.displayText(): String = inlines.joinToString("") { inl
     when (inline) {
         is InlineText -> inline.text
         InlineLineBreak -> "\n"
-        else -> ""
+        is InlineFormula -> inline.expression
+        is InlineImage -> inline.imagePlaceholderText()
     }
 }
+
+private fun InlineImage.imagePlaceholderText(): String = altText?.takeIf { it.isNotBlank() } ?: "asset:$assetId"
+
+private fun BlockImage.imagePlaceholderText(): String = altText?.takeIf { it.isNotBlank() } ?: "asset:$assetId"
+
+private fun RichContent.cellPreviewText(): String = blocks.firstOrNull()?.let { block ->
+    when (block) {
+        is ParagraphNode -> block.displayText().ifBlank { " " }
+        is BlockFormula -> block.expression.ifBlank { "formula" }
+        is BlockImage -> block.imagePlaceholderText()
+        is TableNode -> "nested table"
+    }
+} ?: " "
 
 
 private fun androidx.compose.ui.input.key.KeyEvent.richContentPlainTextPaste(

@@ -3,6 +3,8 @@ package com.neonote.engine
 import com.neonote.model.BlockFormula
 import com.neonote.model.BlockImage
 import com.neonote.model.BlockNode
+import com.neonote.model.InlineFormula
+import com.neonote.model.InlineImage
 import com.neonote.model.InlineLineBreak
 import com.neonote.model.InlineNode
 import com.neonote.model.InlineText
@@ -38,9 +40,11 @@ public class RichContentEngine {
         is RichContentCommand.ToggleNumberedList -> toggleList(box, command.selection, ListKind.Numbered)
         is RichContentCommand.ToggleTodo -> toggleList(box, command.selection, ListKind.Todo)
         is RichContentCommand.ToggleTodoCheckedState -> toggleTodoCheckedState(box, command.blockIndex)
-        is RichContentCommand.InsertTable -> insertTable(box, command.rows, command.columns, command.index)
-        is RichContentCommand.InsertBlockImage -> insertBlockImage(box, command.assetId, command.altText, command.index)
+        is RichContentCommand.InsertInlineFormula -> insertInlineFormula(box, command.expression, command.selection)
         is RichContentCommand.InsertBlockFormula -> insertBlockFormula(box, command.expression, command.index)
+        is RichContentCommand.InsertInlineImage -> insertInlineImage(box, command.assetId, command.altText, command.selection)
+        is RichContentCommand.InsertBlockImage -> insertBlockImage(box, command.assetId, command.altText, command.index)
+        is RichContentCommand.InsertTable -> insertTable(box, command.rows, command.columns, command.index)
         is RichContentCommand.ReplacePlainText -> replacePlainText(box, command.text)
     }
 
@@ -221,6 +225,19 @@ public class RichContentEngine {
         return RichContentCommandResult.ContentReplaced(box = box.copy(content = RichContent(blocks = paragraphs)))
     }
 
+    public fun insertInlineFormula(
+        box: RichContentBox,
+        expression: String,
+        selection: TextSelection,
+    ): RichContentCommandResult.ContentEdited = insertInlineNode(box, InlineFormula(expression = expression), selection)
+
+    public fun insertInlineImage(
+        box: RichContentBox,
+        assetId: String,
+        altText: String? = null,
+        selection: TextSelection,
+    ): RichContentCommandResult.ContentEdited = insertInlineNode(box, InlineImage(assetId = assetId, altText = altText), selection)
+
     public fun insertTable(box: RichContentBox, rows: Int, columns: Int, index: Int? = null): RichContentCommandResult.ContentInserted {
         require(rows >= 0) { "rows must be non-negative" }
         require(columns >= 0) { "columns must be non-negative" }
@@ -240,6 +257,24 @@ public class RichContentEngine {
 
     private fun insertParagraphBlock(box: RichContentBox, text: String, index: Int? = null): RichContentCommandResult.ContentInserted =
         insertBlock(box, ParagraphNode(inlines = listOf(InlineText(text))), index)
+
+    private fun insertInlineNode(
+        box: RichContentBox,
+        inline: InlineNode,
+        selection: TextSelection,
+    ): RichContentCommandResult.ContentEdited {
+        val prepared = box.ensureEditableSelection(selection)
+        val deleteResult = prepared.box.deleteSelection(prepared.selection)
+        val cursor = deleteResult.selection.start
+        val blocks = deleteResult.box.content.blocks
+        val paragraph = blocks[cursor.blockIndex] as ParagraphNode
+        val updatedParagraph = paragraph.insertInlineAt(cursor.inlineOffset, inline)
+        val updatedCursor = cursor.copy(inlineOffset = cursor.inlineOffset + inline.placeholderLength())
+        return RichContentCommandResult.ContentEdited(
+            box = deleteResult.box.copy(content = RichContent(blocks = blocks.replaceAt(cursor.blockIndex, updatedParagraph))),
+            selection = TextSelection.cursor(updatedCursor),
+        )
+    }
 
     private fun insertBlock(box: RichContentBox, block: BlockNode, index: Int?): RichContentCommandResult.ContentInserted {
         val blocks = box.content.blocks.insertAt(index ?: box.content.blocks.size, block)
@@ -301,9 +336,11 @@ public sealed interface RichContentCommand {
     public data class ToggleNumberedList(val selection: TextSelection) : RichContentCommand
     public data class ToggleTodo(val selection: TextSelection) : RichContentCommand
     public data class ToggleTodoCheckedState(val blockIndex: Int) : RichContentCommand
-    public data class InsertTable(val rows: Int, val columns: Int, val index: Int? = null) : RichContentCommand
-    public data class InsertBlockImage(val assetId: String, val altText: String? = null, val index: Int? = null) : RichContentCommand
+    public data class InsertInlineFormula(val expression: String, val selection: TextSelection) : RichContentCommand
     public data class InsertBlockFormula(val expression: String, val index: Int? = null) : RichContentCommand
+    public data class InsertInlineImage(val assetId: String, val altText: String? = null, val selection: TextSelection) : RichContentCommand
+    public data class InsertBlockImage(val assetId: String, val altText: String? = null, val index: Int? = null) : RichContentCommand
+    public data class InsertTable(val rows: Int, val columns: Int, val index: Int? = null) : RichContentCommand
     public data class ReplacePlainText(val text: String) : RichContentCommand
 }
 
@@ -322,17 +359,21 @@ private data class StyledChar(
     val bold: Boolean = false,
     val italic: Boolean = false,
     val underline: Boolean = false,
+    val atom: InlineNode? = null,
 ) {
-    fun hasStyle(style: InlineStyle): Boolean = when (style) {
+    fun hasStyle(style: InlineStyle): Boolean = atom == null && when (style) {
         InlineStyle.Bold -> bold
         InlineStyle.Italic -> italic
         InlineStyle.Underline -> underline
     }
 
-    fun withStyle(style: InlineStyle, enabled: Boolean): StyledChar = when (style) {
-        InlineStyle.Bold -> copy(bold = enabled)
-        InlineStyle.Italic -> copy(italic = enabled)
-        InlineStyle.Underline -> copy(underline = enabled)
+    fun withStyle(style: InlineStyle, enabled: Boolean): StyledChar {
+        if (atom != null) return this
+        return when (style) {
+            InlineStyle.Bold -> copy(bold = enabled)
+            InlineStyle.Italic -> copy(italic = enabled)
+            InlineStyle.Underline -> copy(underline = enabled)
+        }
     }
 }
 
@@ -426,12 +467,51 @@ private fun RichContentBox.insertPlainTextAt(position: TextCursorPosition, text:
     )
 }
 
-private fun ParagraphNode.textLength(): Int = inlines.sumOf { inline ->
-    when (inline) {
-        is InlineText -> inline.text.length
-        InlineLineBreak -> 1
-        else -> 0
+private fun ParagraphNode.textLength(): Int = inlines.sumOf { inline -> inline.placeholderLength() }
+
+private fun InlineNode.placeholderLength(): Int = when (this) {
+    is InlineText -> text.length
+    InlineLineBreak -> 1
+    is InlineFormula -> 1
+    is InlineImage -> 1
+}
+
+private fun ParagraphNode.insertInlineAt(offset: Int, inline: InlineNode): ParagraphNode {
+    require(offset in 0..textLength()) { "inlineOffset must be inside the paragraph text" }
+    var remaining = offset
+    val updated = mutableListOf<InlineNode>()
+    var inserted = false
+    inlines.forEach { current ->
+        if (inserted) {
+            updated += current
+            return@forEach
+        }
+        when (current) {
+            is InlineText -> {
+                if (remaining <= current.text.length) {
+                    if (remaining > 0) updated += current.copy(text = current.text.take(remaining))
+                    updated += inline
+                    if (remaining < current.text.length) updated += current.copy(text = current.text.drop(remaining))
+                    inserted = true
+                } else {
+                    updated += current
+                    remaining -= current.text.length
+                }
+            }
+            else -> {
+                if (remaining == 0) {
+                    updated += inline
+                    updated += current
+                    inserted = true
+                } else {
+                    updated += current
+                    remaining -= current.placeholderLength()
+                }
+            }
+        }
     }
+    if (!inserted) updated += inline
+    return copy(inlines = updated)
 }
 
 private fun ParagraphNode.toStyledChars(): List<StyledChar> = inlines.flatMap { inline ->
@@ -445,7 +525,8 @@ private fun ParagraphNode.toStyledChars(): List<StyledChar> = inlines.flatMap { 
             )
         }
         InlineLineBreak -> listOf(StyledChar('\n'))
-        else -> emptyList()
+        is InlineFormula -> listOf(StyledChar(value = '\uFFFC', atom = inline))
+        is InlineImage -> listOf(StyledChar(value = '\uFFFC', atom = inline))
     }
 }
 
@@ -473,17 +554,28 @@ private fun String.toStyledChars(typingStyle: TypingStyle = TypingStyle()): List
 
 private fun List<StyledChar>.toInlineTextNodes(): List<InlineNode> {
     if (isEmpty()) return emptyList()
-    val nodes = mutableListOf<InlineText>()
-    var current = first().asInlineText()
-    drop(1).forEach { char ->
-        if (current.bold == char.bold && current.italic == char.italic && current.underline == char.underline) {
-            current = current.copy(text = current.text + char.value)
+    val nodes = mutableListOf<InlineNode>()
+    var currentText: InlineText? = null
+    fun flushText() {
+        currentText?.let { nodes += it }
+        currentText = null
+    }
+    forEach { char ->
+        val atom = char.atom
+        if (atom != null) {
+            flushText()
+            nodes += atom
+            return@forEach
+        }
+        val current = currentText
+        currentText = if (current != null && current.bold == char.bold && current.italic == char.italic && current.underline == char.underline) {
+            current.copy(text = current.text + char.value)
         } else {
-            nodes += current
-            current = char.asInlineText()
+            flushText()
+            char.asInlineText()
         }
     }
-    nodes += current
+    flushText()
     return nodes
 }
 

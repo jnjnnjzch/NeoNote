@@ -7,7 +7,11 @@ import com.neonote.engine.RichContentMeasurer
 import com.neonote.engine.RichContentEditorSession
 import com.neonote.engine.toPlainText
 import com.neonote.engine.TypingStyle
+import com.neonote.model.BlockFormula
+import com.neonote.model.BlockImage
 import com.neonote.model.CanvasSize
+import com.neonote.model.InlineFormula
+import com.neonote.model.InlineImage
 import com.neonote.model.InlineLineBreak
 import com.neonote.model.InlineText
 import com.neonote.model.ListItemMetadata
@@ -16,6 +20,7 @@ import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
 import com.neonote.model.TableCell
+import com.neonote.model.TableNode
 import com.neonote.model.TextCursorPosition
 import com.neonote.model.TextRange
 import com.neonote.model.TextSelection
@@ -482,6 +487,80 @@ class RichContentEngineTest {
         assertEquals(5, layout.lineRects[0].inlineEnd)
         assertEquals(6, layout.lineRects[1].inlineStart)
         assertEquals(12, layout.lineRects[1].inlineEnd)
+    }
+
+
+    @Test
+    fun `insert inline formula splits paragraph and advances placeholder cursor`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(blocks = listOf(ParagraphNode(inlines = listOf(InlineText("ab"))))),
+        )
+
+        val result = engine.execute(
+            box = box,
+            command = RichContentCommand.InsertInlineFormula(
+                expression = "x^2 + y^2",
+                selection = TextSelection.cursor(TextCursorPosition(blockIndex = 0, inlineOffset = 1)),
+            ),
+        ) as RichContentCommandResult.ContentEdited
+
+        val paragraph = assertIs<ParagraphNode>(result.box.content.blocks.single())
+        assertEquals("a", assertIs<InlineText>(paragraph.inlines[0]).text)
+        assertEquals("x^2 + y^2", assertIs<InlineFormula>(paragraph.inlines[1]).expression)
+        assertEquals("b", assertIs<InlineText>(paragraph.inlines[2]).text)
+        assertEquals(TextCursorPosition(blockIndex = 0, inlineOffset = 2), result.selection.start)
+    }
+
+    @Test
+    fun `insert inline image keeps image inside rich content paragraph`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(blocks = listOf(ParagraphNode(inlines = listOf(InlineText("caption"))))),
+        )
+
+        val result = engine.execute(
+            box = box,
+            command = RichContentCommand.InsertInlineImage(
+                assetId = "asset-inline-1",
+                altText = "inline alt",
+                selection = TextSelection.cursor(TextCursorPosition(blockIndex = 0, inlineOffset = 7)),
+            ),
+        ) as RichContentCommandResult.ContentEdited
+
+        val paragraph = assertIs<ParagraphNode>(result.box.content.blocks.single())
+        val image = assertIs<InlineImage>(paragraph.inlines.last())
+        assertEquals("asset-inline-1", image.assetId)
+        assertEquals("inline alt", image.altText)
+        assertEquals(TextCursorPosition(blockIndex = 0, inlineOffset = 8), result.selection.start)
+    }
+
+    @Test
+    fun `insert block placeholders creates rich content block variants`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(id = "box-1")
+
+        val withFormula = engine.execute(
+            box = box,
+            command = RichContentCommand.InsertBlockFormula(expression = "E = mc^2"),
+        ) as RichContentCommandResult.ContentInserted
+        val withImage = engine.execute(
+            box = withFormula.box,
+            command = RichContentCommand.InsertBlockImage(assetId = "asset-block-1", altText = "block alt"),
+        ) as RichContentCommandResult.ContentInserted
+        val withTable = engine.execute(
+            box = withImage.box,
+            command = RichContentCommand.InsertTable(rows = 2, columns = 3),
+        ) as RichContentCommandResult.ContentInserted
+
+        assertEquals("E = mc^2", assertIs<BlockFormula>(withTable.box.content.blocks[0]).expression)
+        assertEquals("asset-block-1", assertIs<BlockImage>(withTable.box.content.blocks[1]).assetId)
+        val table = assertIs<TableNode>(withTable.box.content.blocks[2])
+        assertEquals(2, table.rows.size)
+        assertEquals(3, table.rows.first().size)
+        assertTrue(table.rows.flatten().all { it.content.blocks.isEmpty() })
     }
 
     @Test
