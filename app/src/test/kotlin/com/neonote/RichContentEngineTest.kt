@@ -305,6 +305,148 @@ class RichContentEngineTest {
         assertEquals(TextCursorPosition(blockIndex = 1, inlineOffset = 0), result.selection.start)
     }
 
+
+    @Test
+    fun `single line paste inserts plain text at cursor`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(blocks = listOf(ParagraphNode(inlines = listOf(InlineText("helo"))))),
+        )
+
+        val result = engine.execute(
+            box = box,
+            command = RichContentCommand.PastePlainText(
+                text = "l",
+                selection = TextSelection.cursor(TextCursorPosition(blockIndex = 0, inlineOffset = 2)),
+            ),
+        ) as RichContentCommandResult.ContentEdited
+
+        assertEquals("hello", result.box.toPlainText())
+        assertEquals(TextCursorPosition(blockIndex = 0, inlineOffset = 3), result.selection.start)
+    }
+
+    @Test
+    fun `multi line paste creates paragraph nodes and keeps trailing text`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(blocks = listOf(ParagraphNode(inlines = listOf(InlineText("hello"))))),
+        )
+
+        val result = engine.execute(
+            box = box,
+            command = RichContentCommand.PastePlainText(
+                text = "one\r\ntwo\nthree",
+                selection = TextSelection.cursor(TextCursorPosition(blockIndex = 0, inlineOffset = 2)),
+            ),
+        ) as RichContentCommandResult.ContentEdited
+
+        assertEquals("heone\ntwo\nthreello", result.box.toPlainText())
+        assertEquals(3, result.box.content.blocks.size)
+        assertEquals("heone", assertIs<ParagraphNode>(result.box.content.blocks[0]).inlines.joinToString("") { assertIs<InlineText>(it).text })
+        assertEquals("two", assertIs<InlineText>(assertIs<ParagraphNode>(result.box.content.blocks[1]).inlines.single()).text)
+        assertEquals("threello", assertIs<ParagraphNode>(result.box.content.blocks[2]).inlines.joinToString("") { assertIs<InlineText>(it).text })
+        assertEquals(TextCursorPosition(blockIndex = 2, inlineOffset = 5), result.selection.start)
+    }
+
+    @Test
+    fun `backspace at paragraph start merges with previous paragraph and preserves inline styles`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(
+                blocks = listOf(
+                    ParagraphNode(inlines = listOf(InlineText("hello", bold = true))),
+                    ParagraphNode(inlines = listOf(InlineText("world", italic = true))),
+                ),
+            ),
+        )
+
+        val result = engine.execute(
+            box = box,
+            command = RichContentCommand.DeleteBackward(
+                selection = TextSelection.cursor(TextCursorPosition(blockIndex = 1, inlineOffset = 0)),
+            ),
+        ) as RichContentCommandResult.ContentEdited
+
+        assertEquals("helloworld", result.box.toPlainText())
+        assertEquals(TextCursorPosition(blockIndex = 0, inlineOffset = 5), result.selection.start)
+        val paragraph = assertIs<ParagraphNode>(result.box.content.blocks.single())
+        val first = assertIs<InlineText>(paragraph.inlines[0])
+        val second = assertIs<InlineText>(paragraph.inlines[1])
+        assertEquals("hello", first.text)
+        assertTrue(first.bold)
+        assertEquals("world", second.text)
+        assertTrue(second.italic)
+    }
+
+    @Test
+    fun `delete selected range merges surrounding paragraph text`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(
+                blocks = listOf(
+                    ParagraphNode(inlines = listOf(InlineText("hello"))),
+                    ParagraphNode(inlines = listOf(InlineText("wide"))),
+                    ParagraphNode(inlines = listOf(InlineText("world"))),
+                ),
+            ),
+        )
+
+        val result = engine.execute(
+            box = box,
+            command = RichContentCommand.DeleteSelection(
+                TextSelection(
+                    TextRange(
+                        start = TextCursorPosition(blockIndex = 0, inlineOffset = 2),
+                        end = TextCursorPosition(blockIndex = 2, inlineOffset = 3),
+                    ),
+                ),
+            ),
+        ) as RichContentCommandResult.ContentEdited
+
+        assertEquals("held", result.box.toPlainText())
+        assertEquals(1, result.box.content.blocks.size)
+        assertEquals(TextCursorPosition(blockIndex = 0, inlineOffset = 2), result.selection.start)
+    }
+
+    @Test
+    fun `plain text paste inherits surrounding inline style when no typing style is active`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(
+                blocks = listOf(
+                    ParagraphNode(
+                        inlines = listOf(
+                            InlineText("he", bold = true),
+                            InlineText("lo", italic = true),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val result = engine.execute(
+            box = box,
+            command = RichContentCommand.PastePlainText(
+                text = "l",
+                selection = TextSelection.cursor(TextCursorPosition(blockIndex = 0, inlineOffset = 2)),
+            ),
+        ) as RichContentCommandResult.ContentEdited
+
+        val paragraph = assertIs<ParagraphNode>(result.box.content.blocks.single())
+        val boldRun = assertIs<InlineText>(paragraph.inlines[0])
+        val italicRun = assertIs<InlineText>(paragraph.inlines[1])
+        assertEquals("hel", boldRun.text)
+        assertTrue(boldRun.bold)
+        assertEquals("lo", italicRun.text)
+        assertTrue(italicRun.italic)
+        assertEquals("hello", result.box.toPlainText())
+    }
+
     @Test
     fun `measurer wraps lines from available box width and reports content height`() {
         val wideBox = RichContentBox(

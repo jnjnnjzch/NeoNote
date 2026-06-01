@@ -1,5 +1,7 @@
 package com.neonote
 
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.os.Bundle
 import android.view.MotionEvent
 import androidx.activity.ComponentActivity
@@ -66,6 +68,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -359,6 +362,8 @@ private fun RichContentBoxView(
     controller: NeoNoteEditorController,
 ) {
     val density = LocalDensity.current
+    val context = LocalContext.current
+    val clipboardManager = remember(context) { context.getSystemService(ClipboardManager::class.java) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     LaunchedEffect(box.isFocused, selectionMode, selected) {
@@ -450,7 +455,28 @@ private fun RichContentBoxView(
                     .onPreviewKeyEvent { keyEvent ->
                         val style = keyEvent.richContentShortcutStyle()
                         val listKind = keyEvent.richContentShortcutListKind()
+                        val pastedText = keyEvent.richContentPlainTextPaste(clipboardManager, context)
                         when {
+                            pastedText != null && box.isFocused -> {
+                                val selectionStart = minOf(platformTextFieldValue.selection.start, platformTextFieldValue.selection.end)
+                                val selectionEnd = maxOf(platformTextFieldValue.selection.start, platformTextFieldValue.selection.end)
+                                val nextText = platformTextFieldValue.text.replaceRange(selectionStart, selectionEnd, pastedText)
+                                val nextCursor = selectionStart + pastedText.length
+                                val previousValue = platformTextFieldValue
+                                platformTextFieldValue = TextFieldValue(
+                                    text = nextText,
+                                    selection = TextRange(nextCursor),
+                                )
+                                controller.updateRichContentFromPlatformInput(
+                                    boxId = box.id,
+                                    previousText = previousValue.text,
+                                    nextText = nextText,
+                                    selectionStart = nextCursor,
+                                    selectionEnd = nextCursor,
+                                    hasActiveComposition = false,
+                                )
+                                true
+                            }
                             style != null && box.isFocused -> {
                                 controller.toggleRichContentStyle(
                                     boxId = box.id,
@@ -544,6 +570,18 @@ private fun ParagraphNode.displayText(): String = inlines.joinToString("") { inl
         InlineLineBreak -> "\n"
         else -> ""
     }
+}
+
+
+private fun androidx.compose.ui.input.key.KeyEvent.richContentPlainTextPaste(
+    clipboardManager: ClipboardManager?,
+    context: android.content.Context,
+): String? {
+    if (type != KeyEventType.KeyDown || !isCtrlPressed || isShiftPressed || key != Key.V) return null
+    val clip = clipboardManager?.primaryClip ?: return null
+    val description = clip.description
+    if (!description.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) || clip.itemCount == 0) return null
+    return clip.getItemAt(0).coerceToText(context)?.toString()?.replace("\r\n", "\n")?.replace('\r', '\n')
 }
 
 private fun androidx.compose.ui.input.key.KeyEvent.richContentShortcutStyle(): InlineStyle? {

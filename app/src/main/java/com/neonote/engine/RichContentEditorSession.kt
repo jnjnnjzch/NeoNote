@@ -70,12 +70,20 @@ public class RichContentEditorSession(
         RichContentCommand.InsertText(text = text, selection = selection, typingStyle = typingStyle),
     )
 
+    public fun pastePlainText(text: String): RichContentEditorEdit = applyCommand(
+        RichContentCommand.PastePlainText(text = text, selection = selection, typingStyle = typingStyle),
+    )
+
     public fun insertParagraph(): RichContentEditorEdit = applyCommand(
         RichContentCommand.InsertParagraph(selection = selection),
     )
 
     public fun deleteBackward(): RichContentEditorEdit = applyCommand(
         RichContentCommand.DeleteBackward(selection = selection),
+    )
+
+    public fun deleteSelectedRange(): RichContentEditorEdit = applyCommand(
+        RichContentCommand.DeleteSelection(selection = selection),
     )
 
     public fun toggleStyle(style: InlineStyle): RichContentEditorEdit {
@@ -149,21 +157,27 @@ public class RichContentEditorSession(
                 appliedCommands += applyCommand(RichContentCommand.InsertParagraph(selection = selection)).commands
             }
             diff.insertedText.isEmpty() && diff.deletedEnd > diff.deletedStart -> {
-                selection = if (diff.deletedEnd - diff.deletedStart == 1) {
-                    TextSelection.cursor(box.cursorPositionAtPlainOffset(diff.deletedEnd))
+                if (diff.deletedEnd - diff.deletedStart == 1) {
+                    selection = TextSelection.cursor(box.cursorPositionAtPlainOffset(diff.deletedEnd))
+                    appliedCommands += applyCommand(RichContentCommand.DeleteBackward(selection = selection)).commands
                 } else {
-                    oldSelection
+                    appliedCommands += applyCommand(RichContentCommand.DeleteSelection(selection = selection)).commands
                 }
-                appliedCommands += applyCommand(RichContentCommand.DeleteBackward(selection = selection)).commands
             }
             else -> {
-                appliedCommands += applyCommand(
-                    RichContentCommand.InsertText(text = diff.insertedText, selection = selection, typingStyle = typingStyle),
-                ).commands
+                val command = if ('\n' in diff.insertedText || '\r' in diff.insertedText) {
+                    RichContentCommand.PastePlainText(text = diff.insertedText, selection = selection, typingStyle = typingStyle)
+                } else {
+                    RichContentCommand.InsertText(text = diff.insertedText, selection = selection, typingStyle = typingStyle)
+                }
+                appliedCommands += applyCommand(command).commands
             }
         }
 
-        setSelectionFromPlainOffsets(selectionStartPlainOffset, selectionEndPlainOffset)
+        setSelectionFromPlainOffsets(
+            nextText.modelPlainOffsetOf(selectionStartPlainOffset),
+            nextText.modelPlainOffsetOf(selectionEndPlainOffset),
+        )
         return RichContentEditorEdit(box = box, selection = selection, commands = appliedCommands)
     }
 
@@ -261,6 +275,9 @@ private data class TextDiff(
         }
     }
 }
+
+private fun String.modelPlainOffsetOf(platformOffset: Int): Int =
+    take(platformOffset.coerceIn(0, length)).replace("\r\n", "\n").replace('\r', '\n').length
 
 private fun TextSelection.coerceInto(box: RichContentBox): TextSelection = TextSelection(
     TextRange(
