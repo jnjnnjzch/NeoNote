@@ -20,6 +20,7 @@ public class InkEngine(
             strokeId = command.strokeId ?: idGenerator.nextId("stroke"),
         )
         is InkCommand.AppendPoint -> appendPoint(session, command.point)
+        is InkCommand.AppendPoints -> appendPoints(session, command.points)
         InkCommand.EndStroke -> endStroke(session)
         InkCommand.CancelStroke -> InkCommandResult.StrokeCancelled(session = session.copy(activeStroke = null))
     }
@@ -34,9 +35,18 @@ public class InkEngine(
         return InkCommandResult.StrokeBegun(session = session.copy(activeStroke = activeStroke), stroke = activeStroke)
     }
 
-    public fun appendPoint(session: InkSession, point: InkPoint): InkCommandResult.PointAppended {
+    public fun appendPoint(session: InkSession, point: InkPoint): InkCommandResult.PointAppended = appendPoints(
+        session = session,
+        points = listOf(point),
+    )
+
+    public fun appendPoints(session: InkSession, points: List<InkPoint>): InkCommandResult.PointAppended {
+        require(points.isNotEmpty()) { "No points to append" }
         val stroke = requireNotNull(session.activeStroke) { "No active stroke" }
-        val updatedStroke = stroke.copy(points = stroke.points + point.prepareForStroke(previous = stroke.points.lastOrNull()))
+        val updatedPoints = points.fold(stroke.points) { accumulatedPoints, point ->
+            accumulatedPoints + point.prepareForStroke(previous = accumulatedPoints.lastOrNull())
+        }
+        val updatedStroke = stroke.copy(points = updatedPoints)
         return InkCommandResult.PointAppended(session = session.copy(activeStroke = updatedStroke), stroke = updatedStroke)
     }
 
@@ -128,6 +138,7 @@ public data class InkSession(
 public sealed interface InkCommand {
     public data class BeginStroke(val point: InkPoint, val strokeId: String? = null) : InkCommand
     public data class AppendPoint(val point: InkPoint) : InkCommand
+    public data class AppendPoints(val points: List<InkPoint>) : InkCommand
     public data object EndStroke : InkCommand
     public data object CancelStroke : InkCommand
 }
