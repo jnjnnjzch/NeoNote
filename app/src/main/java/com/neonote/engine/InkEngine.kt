@@ -127,7 +127,9 @@ public object InkStrokeWidthMapper {
 private fun lerp(start: Float, stop: Float, amount: Float): Float = start + (stop - start) * amount
 
 public data class InkSession(
+    /** Committed vector strokes that remain the source of truth. */
     val inkLayer: InkLayer = InkLayer(),
+    /** In-progress vector stroke rendered live above any committed bitmap cache. */
     val activeStroke: InkStroke? = null,
 ) {
     public companion object {
