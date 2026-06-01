@@ -4,7 +4,9 @@ import com.neonote.engine.RichContentCommand
 import com.neonote.engine.RichContentCommandResult
 import com.neonote.engine.RichContentEngine
 import com.neonote.engine.RichContentMeasurer
+import com.neonote.engine.RichContentEditorSession
 import com.neonote.engine.toPlainText
+import com.neonote.engine.TypingStyle
 import com.neonote.model.CanvasSize
 import com.neonote.model.InlineLineBreak
 import com.neonote.model.InlineText
@@ -131,6 +133,93 @@ class RichContentEngineTest {
         assertTrue(styled.underline)
         assertEquals("o", trailing.text)
         assertFalse(trailing.underline)
+    }
+
+    @Test
+    fun `insert text uses active typing style at collapsed cursor`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(blocks = listOf(ParagraphNode(inlines = listOf(InlineText("he"))))),
+        )
+
+        val result = engine.execute(
+            box = box,
+            command = RichContentCommand.InsertText(
+                text = "llo",
+                selection = TextSelection.cursor(TextCursorPosition(blockIndex = 0, inlineOffset = 2)),
+                typingStyle = TypingStyle(bold = true, italic = true, underline = true),
+            ),
+        ) as RichContentCommandResult.ContentEdited
+
+        val paragraph = assertIs<ParagraphNode>(result.box.content.blocks.single())
+        val plain = assertIs<InlineText>(paragraph.inlines[0])
+        val styled = assertIs<InlineText>(paragraph.inlines[1])
+        assertEquals("he", plain.text)
+        assertFalse(plain.bold)
+        assertEquals("llo", styled.text)
+        assertTrue(styled.bold)
+        assertTrue(styled.italic)
+        assertTrue(styled.underline)
+        assertEquals("hello", result.box.toPlainText())
+    }
+
+    @Test
+    fun `editor session ctrl style toggle affects subsequent typing at collapsed cursor`() {
+        val session = RichContentEditorSession(
+            initialBox = RichContentBox(
+                id = "box-1",
+                content = RichContent(blocks = listOf(ParagraphNode(inlines = listOf(InlineText("he"))))),
+            ),
+        )
+        session.setSelectionFromPlainOffsets(2)
+
+        val toggle = session.toggleBold()
+        val edit = session.insertText("llo")
+
+        assertTrue(session.typingStyle.bold)
+        assertEquals(emptyList(), toggle.commands)
+        val paragraph = assertIs<ParagraphNode>(edit.box.content.blocks.single())
+        val styled = assertIs<InlineText>(paragraph.inlines[1])
+        assertEquals("llo", styled.text)
+        assertTrue(styled.bold)
+        assertEquals("hello", edit.box.toPlainText())
+    }
+
+    @Test
+    fun `range style toggle splits and merges inline text nodes`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(
+                blocks = listOf(
+                    ParagraphNode(
+                        inlines = listOf(
+                            InlineText("he"),
+                            InlineText("ll", bold = true),
+                            InlineText("o"),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val result = engine.execute(
+            box = box,
+            command = RichContentCommand.ToggleBold(
+                TextSelection(
+                    TextRange(
+                        start = TextCursorPosition(blockIndex = 0, inlineOffset = 0),
+                        end = TextCursorPosition(blockIndex = 0, inlineOffset = 5),
+                    ),
+                ),
+            ),
+        ) as RichContentCommandResult.ContentEdited
+
+        val paragraph = assertIs<ParagraphNode>(result.box.content.blocks.single())
+        val merged = assertIs<InlineText>(paragraph.inlines.single())
+        assertEquals("hello", merged.text)
+        assertTrue(merged.bold)
     }
 
     @Test

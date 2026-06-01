@@ -47,6 +47,12 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInteropFilter
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
@@ -67,6 +73,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.neonote.engine.InputMode
 import com.neonote.engine.JsonFilePersistenceStore
 import com.neonote.engine.InputRouter
+import com.neonote.engine.InlineStyle
 import com.neonote.engine.PointerEventType
 import com.neonote.engine.toPlainText
 import com.neonote.input.AndroidPointerSnapshot
@@ -421,6 +428,20 @@ private fun RichContentBoxView(
             modifier = Modifier
                 .fillMaxSize()
                 .focusRequester(focusRequester)
+                .onPreviewKeyEvent { keyEvent ->
+                    val style = keyEvent.richContentShortcutStyle()
+                    if (style != null && box.isFocused) {
+                        controller.toggleRichContentStyle(
+                            boxId = box.id,
+                            style = style,
+                            selectionStart = platformTextFieldValue.selection.start,
+                            selectionEnd = platformTextFieldValue.selection.end,
+                        )
+                        true
+                    } else {
+                        false
+                    }
+                }
                 .onFocusChanged { focusState ->
                     if (focusState.isFocused && !selectionMode && !selected && !box.isFocused) {
                         controller.activateRichContentBox(box.id)
@@ -430,6 +451,16 @@ private fun RichContentBoxView(
                 },
             placeholder = { Text("Start typing…") },
         )
+    }
+}
+
+private fun androidx.compose.ui.input.key.KeyEvent.richContentShortcutStyle(): InlineStyle? {
+    if (type != KeyEventType.KeyDown || !isCtrlPressed) return null
+    return when (key) {
+        Key.B -> InlineStyle.Bold
+        Key.I -> InlineStyle.Italic
+        Key.U -> InlineStyle.Underline
+        else -> null
     }
 }
 

@@ -66,7 +66,7 @@ public class RichContentEditorSession(
     }
 
     public fun insertText(text: String): RichContentEditorEdit = applyCommand(
-        RichContentCommand.InsertText(text = text, selection = selection),
+        RichContentCommand.InsertText(text = text, selection = selection, typingStyle = typingStyle),
     )
 
     public fun insertParagraph(): RichContentEditorEdit = applyCommand(
@@ -76,6 +76,27 @@ public class RichContentEditorSession(
     public fun deleteBackward(): RichContentEditorEdit = applyCommand(
         RichContentCommand.DeleteBackward(selection = selection),
     )
+
+    public fun toggleStyle(style: InlineStyle): RichContentEditorEdit {
+        if (selection.isCollapsed) {
+            typingStyle = typingStyle.toggled(style)
+            return RichContentEditorEdit(box = box, selection = selection, commands = emptyList())
+        }
+
+        return applyCommand(
+            when (style) {
+                InlineStyle.Bold -> RichContentCommand.ToggleBold(selection)
+                InlineStyle.Italic -> RichContentCommand.ToggleItalic(selection)
+                InlineStyle.Underline -> RichContentCommand.ToggleUnderline(selection)
+            },
+        )
+    }
+
+    public fun toggleBold(): RichContentEditorEdit = toggleStyle(InlineStyle.Bold)
+
+    public fun toggleItalic(): RichContentEditorEdit = toggleStyle(InlineStyle.Italic)
+
+    public fun toggleUnderline(): RichContentEditorEdit = toggleStyle(InlineStyle.Underline)
 
     /**
      * Translate a platform TextField text snapshot into semantic commands.
@@ -118,7 +139,7 @@ public class RichContentEditorSession(
             }
             else -> {
                 appliedCommands += applyCommand(
-                    RichContentCommand.InsertText(text = diff.insertedText, selection = selection),
+                    RichContentCommand.InsertText(text = diff.insertedText, selection = selection, typingStyle = typingStyle),
                 ).commands
             }
         }
@@ -173,7 +194,13 @@ public data class TypingStyle(
     val bold: Boolean = false,
     val italic: Boolean = false,
     val underline: Boolean = false,
-)
+) {
+    public fun toggled(style: InlineStyle): TypingStyle = when (style) {
+        InlineStyle.Bold -> copy(bold = !bold)
+        InlineStyle.Italic -> copy(italic = !italic)
+        InlineStyle.Underline -> copy(underline = !underline)
+    }
+}
 
 public data class RichContentEditorEdit(
     val box: RichContentBox,

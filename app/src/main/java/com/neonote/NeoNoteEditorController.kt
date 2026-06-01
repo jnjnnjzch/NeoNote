@@ -21,6 +21,7 @@ import com.neonote.engine.InputInkSample
 import com.neonote.engine.InputMode
 import com.neonote.engine.InputRouteResult
 import com.neonote.engine.InputRouter
+import com.neonote.engine.InlineStyle
 import com.neonote.engine.PersistenceDiagnostics
 import com.neonote.engine.PersistenceResult
 import com.neonote.engine.PersistenceStore
@@ -417,6 +418,22 @@ public class NeoNoteEditorController(
                 )
             }
             richContentMeasurer.resizeBoxToMeasuredContent(edit.box)
+        }
+        state = state.copy(document = state.document.withCanvas(updatedCanvas))
+    }
+
+    public fun toggleRichContentStyle(
+        boxId: String,
+        style: InlineStyle,
+        selectionStart: Int,
+        selectionEnd: Int = selectionStart,
+    ) {
+        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+
+        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val session = editorSessionFor(boxId, box)
+            session.setSelectionFromPlainOffsets(selectionStart, selectionEnd)
+            richContentMeasurer.resizeBoxToMeasuredContent(session.toggleStyle(style).box)
         }
         state = state.copy(document = state.document.withCanvas(updatedCanvas))
     }

@@ -44,6 +44,7 @@ data class TableCell(
     val content: RichContent = RichContent(),
 )
 
+/** Inline text carries persistable presentation marks for shortcut-driven rich text editing. */
 @Serializable
 @SerialName("text")
 data class InlineText(
