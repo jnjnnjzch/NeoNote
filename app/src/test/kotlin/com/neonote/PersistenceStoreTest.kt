@@ -1,7 +1,14 @@
 package com.neonote
 
 import com.neonote.engine.DefaultDocumentJson
+import com.neonote.engine.DocumentManifest
 import com.neonote.engine.JsonFilePersistenceStore
+import com.neonote.engine.PAGE_INK_BIN_FILE_NAME
+import com.neonote.engine.PageInkStorage
+import com.neonote.engine.PagePersistenceResult
+import com.neonote.engine.PagePersistenceStore
+import com.neonote.engine.PersistedPage
+import com.neonote.engine.toDocumentManifest
 import com.neonote.model.BlockFormula
 import com.neonote.model.BlockImage
 import com.neonote.model.CanvasPoint
@@ -33,6 +40,99 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 
 class PersistenceStoreTest {
+
+    @Test
+    fun documentManifestCapturesPageLevelRoutingMetadata() {
+        val document = testDocument(
+            id = "manifest-document",
+            revision = 17L,
+            pages = listOf(
+                NotePage(id = "manifest-page-1"),
+                NotePage(id = "manifest-page-2"),
+            ),
+        )
+
+        val manifest = document.toDocumentManifest()
+
+        assertEquals("manifest-document", manifest.documentId)
+        assertEquals(17L, manifest.revision)
+        assertEquals(listOf("manifest-page-1", "manifest-page-2"), manifest.pageIds)
+        assertEquals("test-assets", manifest.assetStoreId)
+    }
+
+    @Test
+    fun pagePersistenceStoreCanLoadManifestBeforeLoadingPages() = runBlocking {
+        val manifest = DocumentManifest(
+            documentId = "lazy-document",
+            revision = 5L,
+            pageIds = listOf("page-1", "page-2", "page-3"),
+            assetStoreId = "lazy-assets",
+        )
+        val store = FakePagePersistenceStore(
+            initialManifest = manifest,
+            initialPages = listOf(
+                NotePage(id = "page-1"),
+                NotePage(
+                    id = "page-2",
+                    canvas = InfiniteCanvas(
+                        inkLayer = InkLayer(strokes = listOf(InkStroke(id = "lazy-stroke"))),
+                    ),
+                ),
+                NotePage(id = "page-3"),
+            ),
+        )
+
+        val loadedManifest = store.loadDocumentManifest("lazy-document")
+        val loadedPage = store.loadPage("lazy-document", "page-2")
+
+        assertEquals(manifest, loadedManifest)
+        assertEquals("page-2", loadedPage?.page?.id)
+        assertEquals(listOf("page-2"), store.loadedPageIds)
+        assertEquals(emptyList(), store.savedPageIds)
+    }
+
+    @Test
+    fun pagePersistenceStoreCanSaveOnlyDirtyPageAndReserveBinaryInkBoundary() = runBlocking {
+        val manifest = DocumentManifest(
+            documentId = "dirty-document",
+            revision = 8L,
+            pageIds = listOf("clean-page", "dirty-page"),
+            assetStoreId = "dirty-assets",
+        )
+        val cleanPage = NotePage(id = "clean-page")
+        val store = FakePagePersistenceStore(
+            initialManifest = manifest,
+            initialPages = listOf(cleanPage, NotePage(id = "dirty-page")),
+        )
+        val dirtyPage = PersistedPage(
+            page = NotePage(
+                id = "dirty-page",
+                canvas = InfiniteCanvas(
+                    inkLayer = InkLayer(strokes = listOf(InkStroke(id = "dirty-stroke"))),
+                ),
+            ),
+            inkStorage = PageInkStorage.ExternalInkBinary(revision = 9L),
+        )
+
+        val pageSaved = store.saveDirtyPage("dirty-document", dirtyPage)
+        val manifestSaved = store.saveManifest(manifest.copy(revision = 9L))
+
+        assertEquals(
+            PagePersistenceResult.PageSaved(documentId = "dirty-document", pageId = "dirty-page"),
+            pageSaved,
+        )
+        assertEquals(
+            PagePersistenceResult.ManifestSaved(documentId = "dirty-document", revision = 9L, pageCount = 2),
+            manifestSaved,
+        )
+        assertEquals(listOf("dirty-page"), store.savedPageIds)
+        assertEquals(cleanPage, store.peekPage("clean-page")?.page)
+        assertEquals(
+            PageInkStorage.ExternalInkBinary(relativePath = PAGE_INK_BIN_FILE_NAME, revision = 9L),
+            store.peekPage("dirty-page")?.inkStorage,
+        )
+    }
+
     @Test
     fun roundTripsTextBoxesAndRichContentNodeVariants() = runBlocking {
         val document = NeoNoteDocument(
@@ -431,4 +531,45 @@ class PersistenceStoreTest {
             ),
         ),
     )
+}
+
+private class FakePagePersistenceStore(
+    initialManifest: DocumentManifest,
+    initialPages: List<NotePage>,
+) : PagePersistenceStore {
+    private var manifest: DocumentManifest = initialManifest
+    private val pages: MutableMap<String, PersistedPage> = initialPages
+        .associate { page -> page.id to PersistedPage(page) }
+        .toMutableMap()
+
+    val loadedPageIds: MutableList<String> = mutableListOf()
+    val savedPageIds: MutableList<String> = mutableListOf()
+
+    override suspend fun loadDocumentManifest(documentId: String): DocumentManifest? =
+        manifest.takeIf { it.documentId == documentId }
+
+    override suspend fun loadPage(documentId: String, pageId: String): PersistedPage? {
+        if (manifest.documentId != documentId) return null
+        loadedPageIds += pageId
+        return pages[pageId]
+    }
+
+    override suspend fun saveDirtyPage(documentId: String, page: PersistedPage): PagePersistenceResult.PageSaved {
+        require(manifest.documentId == documentId) { "Unknown document id: $documentId" }
+        require(page.page.id in manifest.pageIds) { "Page is not listed in the manifest: ${page.page.id}" }
+        pages[page.page.id] = page
+        savedPageIds += page.page.id
+        return PagePersistenceResult.PageSaved(documentId = documentId, pageId = page.page.id)
+    }
+
+    override suspend fun saveManifest(manifest: DocumentManifest): PagePersistenceResult.ManifestSaved {
+        this.manifest = manifest
+        return PagePersistenceResult.ManifestSaved(
+            documentId = manifest.documentId,
+            revision = manifest.revision,
+            pageCount = manifest.pageIds.size,
+        )
+    }
+
+    fun peekPage(pageId: String): PersistedPage? = pages[pageId]
 }
