@@ -39,6 +39,16 @@ public fun InputDiagnostics.withPressureSamples(samples: List<InputInkSample>): 
     )
 }
 
+public fun InputDiagnostics.mergeForThrottledDisplay(next: InputDiagnostics): InputDiagnostics {
+    val combinedSampleCount = eventSampleCount + next.eventSampleCount
+    return next.copy(
+        pressureMin = minOf(pressureMin, next.pressureMin),
+        pressureMax = maxOf(pressureMax, next.pressureMax),
+        historicalSampleCount = (combinedSampleCount - 1).coerceAtLeast(0),
+        eventSampleCount = combinedSampleCount,
+    )
+}
+
 public data class AndroidPointerSnapshot(
     val deviceId: Int,
     val source: Int,

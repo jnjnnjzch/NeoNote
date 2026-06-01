@@ -9,6 +9,8 @@ import com.neonote.engine.InputRouter
 import com.neonote.engine.PointerEventType
 import com.neonote.engine.PointerTool
 import com.neonote.engine.toPlainText
+import com.neonote.input.InputDiagnostics
+import com.neonote.input.withPressureSamples
 import com.neonote.model.CanvasPoint
 import com.neonote.model.CanvasSize
 import com.neonote.model.EditorState
@@ -195,6 +197,110 @@ class NeoNoteEditorControllerTest {
         assertEquals(16.5f, stroke.points[1].x)
         assertEquals(19.8f, stroke.points[1].y)
         assertEquals(0.66f, stroke.points[1].pressure, 0.0001f)
+    }
+
+
+    @Test
+    fun `diagnostics throttle does not reduce committed stroke points or raw pressure`() {
+        var now = 0L
+        val controller = NeoNoteEditorController(
+            inputDiagnosticsThrottleMillis = 50L,
+            diagnosticsClockMillis = { now },
+        )
+        val router = InputRouter()
+
+        val down = InputEvent(
+            type = PointerEventType.Down,
+            pointers = listOf(
+                InputPointer(
+                    id = 1,
+                    position = CanvasPoint(0f, 0f),
+                    tool = PointerTool.SPen,
+                    pressure = 0.2f,
+                    rawPressure = 0.2f,
+                ),
+            ),
+        )
+        val firstMove = InputEvent(
+            type = PointerEventType.Move,
+            pointers = listOf(
+                InputPointer(
+                    id = 1,
+                    position = CanvasPoint(30f, 0f),
+                    tool = PointerTool.SPen,
+                    pressure = 0.6f,
+                    rawPressure = 0.6f,
+                    historicalSamples = listOf(
+                        InputInkSample(position = CanvasPoint(10f, 0f), pressure = 0.4f, rawPressure = 0.4f),
+                        InputInkSample(position = CanvasPoint(20f, 0f), pressure = 0.5f, rawPressure = 0.5f),
+                    ),
+                ),
+            ),
+        )
+        val secondMove = InputEvent(
+            type = PointerEventType.Move,
+            pointers = listOf(
+                InputPointer(
+                    id = 1,
+                    position = CanvasPoint(60f, 0f),
+                    tool = PointerTool.SPen,
+                    pressure = 1.1f,
+                    rawPressure = 1.1f,
+                    historicalSamples = listOf(
+                        InputInkSample(position = CanvasPoint(40f, 0f), pressure = 0.8f, rawPressure = 0.8f),
+                        InputInkSample(position = CanvasPoint(50f, 0f), pressure = 0.9f, rawPressure = 0.9f),
+                    ),
+                ),
+            ),
+        )
+        val up = InputEvent(
+            type = PointerEventType.Up,
+            pointers = listOf(
+                InputPointer(
+                    id = 1,
+                    position = CanvasPoint(60f, 0f),
+                    tool = PointerTool.SPen,
+                    pressure = 1.1f,
+                    rawPressure = 1.1f,
+                ),
+            ),
+        )
+
+        assertTrue(controller.updateInputDiagnostics(down.toDiagnostics(), eventTimeMillis = now, force = true))
+        controller.routeInputEvent(router, down)
+
+        now = 5L
+        assertEquals(false, controller.updateInputDiagnostics(firstMove.toDiagnostics(), eventTimeMillis = now))
+        controller.routeInputEvent(router, firstMove)
+
+        now = 10L
+        assertEquals(false, controller.updateInputDiagnostics(secondMove.toDiagnostics(), eventTimeMillis = now))
+        controller.routeInputEvent(router, secondMove)
+
+        now = 12L
+        assertTrue(controller.updateInputDiagnostics(up.toDiagnostics(), eventTimeMillis = now, force = true))
+        controller.routeInputEvent(router, up)
+
+        val stroke = controller.currentCanvas.inkLayer.strokes.single()
+        val unthrottledController = NeoNoteEditorController(inputDiagnosticsThrottleMillis = 0L)
+        val unthrottledRouter = InputRouter()
+        listOf(down, firstMove, secondMove, up).forEach { event ->
+            unthrottledController.updateInputDiagnostics(event.toDiagnostics())
+            unthrottledController.routeInputEvent(unthrottledRouter, event)
+        }
+        val unthrottledStroke = unthrottledController.currentCanvas.inkLayer.strokes.single()
+
+        assertEquals(7, stroke.points.size)
+        assertEquals(unthrottledStroke.points.size, stroke.points.size)
+        assertEquals(unthrottledStroke.points.map { it.pressure }, stroke.points.map { it.pressure })
+        assertEquals(unthrottledStroke.points.map { it.rawPressure }, stroke.points.map { it.rawPressure })
+        assertEquals(listOf(0.2f, 0.4f, 0.5f, 0.6f, 0.8f, 0.9f, 1.1f), stroke.points.map { it.rawPressure })
+        assertTrue(stroke.points.last().pressure <= 1f)
+
+        val diagnosticsText = controller.inputDiagnostics.asToolbarText()
+        assertTrue("tool=SPen" in diagnosticsText)
+        assertTrue("range=0.40..1.10" in diagnosticsText)
+        assertTrue("samples=7" in diagnosticsText)
     }
 
     @Test
@@ -674,3 +780,9 @@ private fun editorStateWithMixedCanvas(): EditorState = EditorState(
     currentPageId = "test-page-mixed",
     viewport = ViewportState(),
 )
+
+private fun InputEvent.toDiagnostics(): InputDiagnostics = InputDiagnostics(
+    tool = pointers.first().tool,
+    pressure = primaryPressure,
+    pointerCount = pointers.size,
+).withPressureSamples(primaryInkSamples)
