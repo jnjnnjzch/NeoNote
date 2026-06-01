@@ -12,6 +12,7 @@ import com.neonote.engine.toPlainText
 import com.neonote.model.CanvasPoint
 import com.neonote.model.CanvasSize
 import com.neonote.model.EditorState
+import com.neonote.model.EditorTool
 import com.neonote.model.InfiniteCanvas
 import com.neonote.model.InkLayer
 import com.neonote.model.InkPoint
@@ -441,6 +442,7 @@ class NeoNoteEditorControllerTest {
         controller.updateRichContentText(boxId, "editable")
         controller.setSelectionMode(true)
         controller.setSelectionMode(false)
+        assertEquals(EditorTool.Pen, controller.state.currentTool)
 
         controller.activateRichContentBox(boxId)
         controller.updateRichContentText(boxId, "edited again")
@@ -501,6 +503,41 @@ class NeoNoteEditorControllerTest {
         assertTrue(controller.state.selection.isObjectSelected(boxId))
         assertNull(controller.state.focusedRichContentBoxId)
         assertEquals(false, box.isFocused)
+        assertEquals("select me", box.toPlainText())
+    }
+
+    @Test
+    fun `routed selection mode stylus tap selects without inking`() {
+        val controller = NeoNoteEditorController()
+        val router = InputRouter()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "select me")
+        controller.setSelectionMode(true)
+        val screenTap = controller.documentToScreen(CanvasPoint(30f, 35f))
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = screenTap, tool = PointerTool.SPen)),
+            ),
+            mode = InputMode.Selection,
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = screenTap, tool = PointerTool.SPen)),
+            ),
+            mode = InputMode.Selection,
+        )
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertTrue(controller.state.selection.isObjectSelected(boxId))
+        assertNull(controller.state.focusedRichContentBoxId)
+        assertEquals(false, box.isFocused)
+        assertTrue(controller.currentCanvas.inkLayer.strokes.isEmpty())
         assertEquals("select me", box.toPlainText())
     }
 

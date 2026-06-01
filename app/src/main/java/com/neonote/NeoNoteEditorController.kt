@@ -208,13 +208,12 @@ public class NeoNoteEditorController(
 
     private fun continueInk(samples: List<InputInkSample>) {
         if (inkSession.activeStroke == null) return
-        samples.forEach { sample ->
-            val result = inkEngine.execute(
-                session = inkSession,
-                command = InkCommand.AppendPoint(sample.position.toInkPoint(sample.pressure, sample.rawPressure)),
-            ) as InkCommandResult.PointAppended
-            inkSession = result.session
-        }
+        val points = samples.map { sample -> sample.position.toInkPoint(sample.pressure, sample.rawPressure) }
+        val result = inkEngine.execute(
+            session = inkSession,
+            command = InkCommand.AppendPoints(points),
+        ) as InkCommandResult.PointAppended
+        inkSession = result.session
     }
 
     private fun endInkIfActive() {
@@ -247,7 +246,7 @@ public class NeoNoteEditorController(
 
     public fun setSelectionMode(enabled: Boolean) {
         state = state.copy(
-            currentTool = if (enabled) EditorTool.Selection else EditorTool.Text,
+            currentTool = if (enabled) EditorTool.Selection else EditorTool.Pen,
             focusedRichContentBoxId = null,
             selection = if (enabled) state.selection else SelectionState(),
             document = state.document.withCanvas(currentCanvas.setFocusedRichContentBox(null)),

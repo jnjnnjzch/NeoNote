@@ -214,7 +214,7 @@ private fun InfiniteCanvasViewport(
                         controller.routeInputEvent(
                             router = router,
                             event = inputEvent,
-                            mode = InputMode.Write,
+                            mode = if (selectionMode) InputMode.Selection else InputMode.Write,
                         )
                     }
 
