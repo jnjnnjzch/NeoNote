@@ -20,7 +20,7 @@ import com.neonote.model.TextSelection
  */
 public class RichContentEngine {
     public fun execute(box: RichContentBox, command: RichContentCommand): RichContentCommandResult = when (command) {
-        is RichContentCommand.InsertText -> insertText(box, command.text, command.selection)
+        is RichContentCommand.InsertText -> insertText(box, command.text, command.selection, command.typingStyle)
         is RichContentCommand.DeleteBackward -> deleteBackward(box, command.selection)
         is RichContentCommand.InsertParagraph -> if (command.selection == null) {
             insertParagraphBlock(box, command.text, command.index)
@@ -40,10 +40,15 @@ public class RichContentEngine {
     public fun insertParagraph(box: RichContentBox, text: String, index: Int? = null): RichContentCommandResult.ContentInserted =
         insertParagraphBlock(box, text, index)
 
-    public fun insertText(box: RichContentBox, text: String, selection: TextSelection): RichContentCommandResult.ContentEdited {
+    public fun insertText(
+        box: RichContentBox,
+        text: String,
+        selection: TextSelection,
+        typingStyle: TypingStyle = TypingStyle(),
+    ): RichContentCommandResult.ContentEdited {
         val prepared = box.ensureEditableSelection(selection)
         val deleteResult = prepared.box.deleteSelection(prepared.selection)
-        val insertResult = deleteResult.box.insertPlainTextAt(deleteResult.selection.start, text)
+        val insertResult = deleteResult.box.insertPlainTextAt(deleteResult.selection.start, text, typingStyle)
         return RichContentCommandResult.ContentEdited(box = insertResult.box, selection = insertResult.selection)
     }
 
@@ -193,7 +198,11 @@ public fun RichContent.toPlainText(): String = blocks.joinToString("\n") { block
 public enum class InlineStyle { Bold, Italic, Underline }
 
 public sealed interface RichContentCommand {
-    public data class InsertText(val text: String, val selection: TextSelection) : RichContentCommand
+    public data class InsertText(
+        val text: String,
+        val selection: TextSelection,
+        val typingStyle: TypingStyle = TypingStyle(),
+    ) : RichContentCommand
     public data class DeleteBackward(val selection: TextSelection) : RichContentCommand
 
     /**
@@ -294,7 +303,7 @@ private fun RichContentBox.deleteSelection(selection: TextSelection): EditOperat
     )
 }
 
-private fun RichContentBox.insertPlainTextAt(position: TextCursorPosition, text: String): EditOperationResult {
+private fun RichContentBox.insertPlainTextAt(position: TextCursorPosition, text: String, typingStyle: TypingStyle): EditOperationResult {
     if (text.isEmpty()) return EditOperationResult(box = this, selection = TextSelection.cursor(position))
 
     val blocks = content.blocks
@@ -305,7 +314,7 @@ private fun RichContentBox.insertPlainTextAt(position: TextCursorPosition, text:
     val lines = text.split("\n")
 
     if (lines.size == 1) {
-        val inserted = lines.single().toStyledChars()
+        val inserted = lines.single().toStyledChars(typingStyle)
         val updatedParagraph = paragraph.copy(inlines = (before + inserted + after).toInlineTextNodes())
         val cursor = position.copy(inlineOffset = position.inlineOffset + inserted.size)
         return EditOperationResult(
@@ -315,11 +324,11 @@ private fun RichContentBox.insertPlainTextAt(position: TextCursorPosition, text:
     }
 
     val insertedParagraphs = buildList {
-        add(paragraph.copy(inlines = (before + lines.first().toStyledChars()).toInlineTextNodes()))
+        add(paragraph.copy(inlines = (before + lines.first().toStyledChars(typingStyle)).toInlineTextNodes()))
         lines.drop(1).dropLast(1).forEach { line ->
-            add(ParagraphNode(inlines = line.toStyledChars().toInlineTextNodes()))
+            add(ParagraphNode(inlines = line.toStyledChars(typingStyle).toInlineTextNodes()))
         }
-        add(paragraph.copy(inlines = (lines.last().toStyledChars() + after).toInlineTextNodes()))
+        add(paragraph.copy(inlines = (lines.last().toStyledChars(typingStyle) + after).toInlineTextNodes()))
     }
     val updatedBlocks = blocks.take(position.blockIndex) + insertedParagraphs + blocks.drop(position.blockIndex + 1)
     val cursor = TextCursorPosition(
@@ -355,7 +364,14 @@ private fun ParagraphNode.toStyledChars(): List<StyledChar> = inlines.flatMap { 
     }
 }
 
-private fun String.toStyledChars(): List<StyledChar> = map { StyledChar(it) }
+private fun String.toStyledChars(typingStyle: TypingStyle = TypingStyle()): List<StyledChar> = map {
+    StyledChar(
+        value = it,
+        bold = typingStyle.bold,
+        italic = typingStyle.italic,
+        underline = typingStyle.underline,
+    )
+}
 
 private fun List<StyledChar>.toInlineTextNodes(): List<InlineNode> {
     if (isEmpty()) return emptyList()

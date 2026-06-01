@@ -156,7 +156,7 @@ class PersistenceStoreTest {
                                         ParagraphNode(
                                             id = "paragraph-1",
                                             inlines = listOf(
-                                                InlineText("Exact coordinates stay on the document"),
+                                                InlineText("Exact coordinates stay on the document", bold = true, italic = true, underline = true),
                                                 InlineLineBreak,
                                                 InlineFormula("x^2 + y^2"),
                                                 InlineImage(assetId = "inline-image-1", altText = "inline alt"),
@@ -204,6 +204,11 @@ class PersistenceStoreTest {
         val loadedBox = loaded.pages.single().canvas.objects.first() as RichContentBox
         assertEquals(CanvasPoint(x = -123.5f, y = 456.25f), loadedBox.position)
         assertEquals(CanvasSize(width = 320.75f, height = 160.5f), loadedBox.size)
+        val loadedParagraph = assertIs<ParagraphNode>(loadedBox.content.blocks.first())
+        val loadedStyledText = assertIs<InlineText>(loadedParagraph.inlines.first())
+        assertTrue(loadedStyledText.bold)
+        assertTrue(loadedStyledText.italic)
+        assertTrue(loadedStyledText.underline)
     }
 
     @Test
