@@ -161,6 +161,14 @@ public class RichContentEditorSession(
         RichContentCommand.ToggleTodoCheckedState(blockIndex = blockIndex),
     )
 
+    public fun insertTablePlaceholder(rows: Int = 2, columns: Int = 2): RichContentEditorEdit = applyCommand(
+        RichContentCommand.InsertTable(rows = rows, columns = columns),
+    )
+
+    public fun insertBlockFormulaPlaceholder(expression: String = ""): RichContentEditorEdit = applyCommand(
+        RichContentCommand.InsertBlockFormula(expression = expression),
+    )
+
     /**
      * Translate a paragraph-local BasicTextField snapshot into semantic rich
      * content commands. The field owns only one paragraph, so offsets are local

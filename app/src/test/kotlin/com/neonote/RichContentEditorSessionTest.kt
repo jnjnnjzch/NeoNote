@@ -4,10 +4,13 @@ import com.neonote.engine.InlineStyle
 import com.neonote.engine.RichContentCommand
 import com.neonote.engine.RichContentEditorSession
 import com.neonote.engine.toPlainText
+import com.neonote.model.BlockFormula
 import com.neonote.model.InlineText
+import com.neonote.model.ListKind
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
+import com.neonote.model.TableNode
 import com.neonote.model.TextCursorPosition
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -161,6 +164,50 @@ class RichContentEditorSessionTest {
         assertFalse(typed.bold)
         assertTrue(typed.italic)
         assertTrue(typed.underline)
+    }
+
+    @Test
+    fun `toolbar style action matches shortcut style semantics`() {
+        val shortcutSession = RichContentEditorSession(boxWithText("hello"))
+        val toolbarSession = RichContentEditorSession(boxWithText("hello"))
+        shortcutSession.setSelectionFromPlainOffsets(0, 5)
+        toolbarSession.setSelectionFromPlainOffsets(0, 5)
+
+        val shortcutEdit = shortcutSession.toggleStyle(InlineStyle.Bold)
+        val toolbarEdit = toolbarSession.toggleStyle(InlineStyle.Bold)
+
+        assertEquals(shortcutEdit.box, toolbarEdit.box)
+        assertEquals(shortcutEdit.selection, toolbarEdit.selection)
+        assertIs<RichContentCommand.ToggleBold>(toolbarEdit.commands.single())
+    }
+
+    @Test
+    fun `toolbar list action matches shortcut list semantics`() {
+        val shortcutSession = RichContentEditorSession(boxWithText("item"))
+        val toolbarSession = RichContentEditorSession(boxWithText("item"))
+        shortcutSession.setSelectionFromPlainOffsets(0, 4)
+        toolbarSession.setSelectionFromPlainOffsets(0, 4)
+
+        val shortcutEdit = shortcutSession.toggleList(ListKind.Todo)
+        val toolbarEdit = toolbarSession.toggleList(ListKind.Todo)
+
+        assertEquals(shortcutEdit.box, toolbarEdit.box)
+        assertEquals(shortcutEdit.selection, toolbarEdit.selection)
+        assertIs<RichContentCommand.ToggleTodo>(toolbarEdit.commands.single())
+    }
+
+    @Test
+    fun `toolbar insert placeholders use rich content commands`() {
+        val session = RichContentEditorSession(boxWithText("body"))
+        session.setSelectionFromPlainOffsets(4)
+
+        val tableEdit = session.insertTablePlaceholder()
+        val formulaEdit = session.insertBlockFormulaPlaceholder()
+
+        assertIs<RichContentCommand.InsertTable>(tableEdit.commands.single())
+        assertIs<TableNode>(tableEdit.box.content.blocks[1])
+        assertIs<RichContentCommand.InsertBlockFormula>(formulaEdit.commands.single())
+        assertIs<BlockFormula>(formulaEdit.box.content.blocks[2])
     }
 
     @Test
