@@ -73,6 +73,24 @@ class InkQualityTest {
 
         assertTrue(smoothed.x in previous.x..current.x)
         assertTrue(smoothed.y in current.y..previous.y)
-        assertTrue(smoothed.pressure in previous.pressure..current.pressure)
+        assertEquals(current.pressure, smoothed.pressure)
+    }
+
+    @Test
+    fun `smoothing diagnostics compare raw and smoothed samples without changing pressure`() {
+        val smoother = InkStrokeSmoother(smoothing = 0.5f)
+        val previous = InkPoint(x = 0f, y = 0f, pressure = 0.2f)
+        val current = InkPoint(x = 10f, y = 0f, pressure = 0.8f)
+
+        val result = smoother.smoothWithDiagnostics(previous = previous, current = current)
+
+        assertEquals(5f, result.point.x)
+        assertEquals(0f, result.point.y)
+        assertEquals(current.pressure, result.point.pressure)
+        assertTrue(result.diagnostics.didSmooth)
+        assertEquals(current.x, result.diagnostics.rawX)
+        assertEquals(result.point.x, result.diagnostics.smoothedX)
+        assertEquals(-5f, result.diagnostics.deltaX)
+        assertEquals(5f, result.diagnostics.deltaDistance)
     }
 }

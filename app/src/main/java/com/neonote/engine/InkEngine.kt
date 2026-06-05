@@ -4,6 +4,7 @@ import com.neonote.model.InfiniteCanvas
 import com.neonote.model.InkLayer
 import com.neonote.model.InkPoint
 import com.neonote.model.InkStroke
+import kotlin.math.sqrt
 
 /**
  * Builds pressure-aware ink strokes before committing them to an InkLayer.
@@ -87,24 +88,97 @@ public class InkPressureNormalizer(
 /**
  * Small, pure stabilizer for ink points. It nudges subsequent samples toward a
  * weighted average of the previous stabilized sample and the current sample.
+ *
+ * The stabilizer only adjusts x/y coordinates. Pressure is already normalized
+ * before smoothing and intentionally remains the current sample's pressure so
+ * brush width continues to reflect hardware pressure changes without extra lag.
  */
 public class InkStrokeSmoother(
     smoothing: Float = DefaultSmoothing,
 ) {
     private val smoothing: Float = smoothing.coerceIn(0f, 1f)
 
-    public fun smooth(previous: InkPoint?, current: InkPoint): InkPoint {
-        if (previous == null || smoothing == 0f) return current
+    public fun smooth(previous: InkPoint?, current: InkPoint): InkPoint = smoothWithDiagnostics(
+        previous = previous,
+        current = current,
+    ).point
+
+    /**
+     * Returns the smoothed point plus transient metrics that can be logged or
+     * surfaced in debug UI for raw-vs-smoothed comparisons on real devices.
+     * Diagnostics are not persisted and do not alter the vector stroke model.
+     */
+    public fun smoothWithDiagnostics(previous: InkPoint?, current: InkPoint): InkSmoothingResult {
+        if (previous == null || smoothing == 0f) {
+            return InkSmoothingResult(
+                point = current,
+                diagnostics = InkSmoothingDiagnostics.from(
+                    raw = current,
+                    smoothed = current,
+                    smoothing = smoothing,
+                    didSmooth = false,
+                ),
+            )
+        }
+
         val currentWeight = 1f - smoothing
-        return current.copy(
+        val smoothed = current.copy(
             x = lerp(previous.x, current.x, currentWeight),
             y = lerp(previous.y, current.y, currentWeight),
-            pressure = lerp(previous.pressure, current.pressure, currentWeight).coerceIn(0f, 1f),
+        )
+        return InkSmoothingResult(
+            point = smoothed,
+            diagnostics = InkSmoothingDiagnostics.from(
+                raw = current,
+                smoothed = smoothed,
+                smoothing = smoothing,
+                didSmooth = true,
+            ),
         )
     }
 
     public companion object {
         public const val DefaultSmoothing: Float = 0.35f
+    }
+}
+
+public data class InkSmoothingResult(
+    val point: InkPoint,
+    val diagnostics: InkSmoothingDiagnostics,
+)
+
+public data class InkSmoothingDiagnostics(
+    val rawX: Float,
+    val rawY: Float,
+    val smoothedX: Float,
+    val smoothedY: Float,
+    val deltaX: Float,
+    val deltaY: Float,
+    val deltaDistance: Float,
+    val smoothing: Float,
+    val didSmooth: Boolean,
+) {
+    public companion object {
+        public fun from(
+            raw: InkPoint,
+            smoothed: InkPoint,
+            smoothing: Float,
+            didSmooth: Boolean,
+        ): InkSmoothingDiagnostics {
+            val deltaX = smoothed.x - raw.x
+            val deltaY = smoothed.y - raw.y
+            return InkSmoothingDiagnostics(
+                rawX = raw.x,
+                rawY = raw.y,
+                smoothedX = smoothed.x,
+                smoothedY = smoothed.y,
+                deltaX = deltaX,
+                deltaY = deltaY,
+                deltaDistance = sqrt(deltaX * deltaX + deltaY * deltaY),
+                smoothing = smoothing,
+                didSmooth = didSmooth,
+            )
+        }
     }
 }
 
