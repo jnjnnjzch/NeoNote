@@ -1,5 +1,6 @@
 package com.neonote
 
+import com.neonote.engine.InlineStyle
 import com.neonote.engine.RichContentCommand
 import com.neonote.engine.RichContentEditorSession
 import com.neonote.engine.toPlainText
@@ -10,6 +11,7 @@ import com.neonote.model.RichContentBox
 import com.neonote.model.TextCursorPosition
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -110,6 +112,55 @@ class RichContentEditorSessionTest {
         assertEquals(TextCursorPosition(blockIndex = 0, inlineOffset = 2), edit.selection.end)
         assertIs<RichContentCommand.ReplacePlainText>(edit.commands.single())
         assertTrue(session.localEditableBuffer == "你好")
+    }
+
+    @Test
+    fun `collapsed style shortcut updates typing style and applies to following input`() {
+        val session = RichContentEditorSession(boxWithText("hello "))
+        session.setSelectionFromPlainOffsets(6)
+
+        val styleEdit = session.toggleStyle(InlineStyle.Bold)
+
+        assertTrue(styleEdit.commands.isEmpty())
+        assertTrue(session.typingStyle.bold)
+        assertTrue(session.pendingCommands.isEmpty())
+
+        val edit = session.replaceFromPlatformInput(
+            previousText = "hello ",
+            nextText = "hello world",
+            selectionStartPlainOffset = 11,
+        )
+
+        val paragraph = assertIs<ParagraphNode>(edit.box.content.blocks.single())
+        val plain = assertIs<InlineText>(paragraph.inlines[0])
+        val typed = assertIs<InlineText>(paragraph.inlines[1])
+        assertEquals("hello ", plain.text)
+        assertFalse(plain.bold)
+        assertEquals("world", typed.text)
+        assertTrue(typed.bold)
+        assertIs<RichContentCommand.InsertText>(edit.commands.single())
+    }
+
+    @Test
+    fun `collapsed italic and underline shortcuts apply to following input`() {
+        val session = RichContentEditorSession(boxWithText("hello "))
+        session.setSelectionFromPlainOffsets(6)
+
+        assertTrue(session.toggleStyle(InlineStyle.Italic).commands.isEmpty())
+        assertTrue(session.toggleStyle(InlineStyle.Underline).commands.isEmpty())
+
+        val edit = session.replaceFromPlatformInput(
+            previousText = "hello ",
+            nextText = "hello world",
+            selectionStartPlainOffset = 11,
+        )
+
+        val paragraph = assertIs<ParagraphNode>(edit.box.content.blocks.single())
+        val typed = assertIs<InlineText>(paragraph.inlines[1])
+        assertEquals("world", typed.text)
+        assertFalse(typed.bold)
+        assertTrue(typed.italic)
+        assertTrue(typed.underline)
     }
 
     @Test

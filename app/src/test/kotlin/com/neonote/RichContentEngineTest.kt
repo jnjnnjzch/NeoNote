@@ -143,6 +143,37 @@ class RichContentEngineTest {
     }
 
     @Test
+    fun `toggle style on selected word stores marks on only selected inline text`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(blocks = listOf(ParagraphNode(inlines = listOf(InlineText("hello world"))))),
+        )
+        val worldSelection = TextSelection(
+            TextRange(
+                start = TextCursorPosition(blockIndex = 0, inlineOffset = 6),
+                end = TextCursorPosition(blockIndex = 0, inlineOffset = 11),
+            ),
+        )
+
+        val bold = engine.execute(box, RichContentCommand.ToggleBold(worldSelection)) as RichContentCommandResult.ContentEdited
+        val italic = engine.execute(bold.box, RichContentCommand.ToggleItalic(worldSelection)) as RichContentCommandResult.ContentEdited
+        val underline = engine.execute(italic.box, RichContentCommand.ToggleUnderline(worldSelection)) as RichContentCommandResult.ContentEdited
+
+        val paragraph = assertIs<ParagraphNode>(underline.box.content.blocks.single())
+        val plain = assertIs<InlineText>(paragraph.inlines[0])
+        val styled = assertIs<InlineText>(paragraph.inlines[1])
+        assertEquals("hello ", plain.text)
+        assertFalse(plain.bold)
+        assertFalse(plain.italic)
+        assertFalse(plain.underline)
+        assertEquals("world", styled.text)
+        assertTrue(styled.bold)
+        assertTrue(styled.italic)
+        assertTrue(styled.underline)
+    }
+
+    @Test
     fun `insert text uses active typing style at collapsed cursor`() {
         val engine = RichContentEngine()
         val box = RichContentBox(
