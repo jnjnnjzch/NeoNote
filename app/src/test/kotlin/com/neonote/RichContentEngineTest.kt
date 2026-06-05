@@ -3,6 +3,7 @@ package com.neonote
 import com.neonote.engine.RichContentCommand
 import com.neonote.engine.RichContentCommandResult
 import com.neonote.engine.RichContentEngine
+import com.neonote.engine.RichContentLayoutDefaults
 import com.neonote.engine.RichContentMeasurer
 import com.neonote.engine.RichContentEditorSession
 import com.neonote.engine.toPlainText
@@ -632,4 +633,46 @@ class RichContentEngineTest {
         assertEquals("cell", inline.text)
         assertTrue(inline.bold)
     }
+
+    @Test
+    fun `measurer includes conservative placeholder heights for formula image and table blocks`() {
+        val content = RichContent(
+            blocks = listOf(
+                BlockFormula(expression = "E = mc^2"),
+                BlockImage(assetId = "asset-1", altText = "diagram"),
+                TableNode(rows = List(3) { listOf(TableCell()) }),
+            ),
+        )
+        val layout = RichContentMeasurer().measure(content, availableWidth = 240f)
+
+        val expectedTableHeight = RichContentLayoutDefaults.TableHeaderPreviewHeight +
+            3 * maxOf(RichContentLayoutDefaults.TableRowPreviewHeight, RichContentLayoutDefaults.TableCellPreviewHeight)
+        val expectedHeight = RichContentLayoutDefaults.VerticalPadding * 2 +
+            RichContentLayoutDefaults.FormulaCardHeight +
+            RichContentLayoutDefaults.ImageCardHeight +
+            expectedTableHeight +
+            RichContentLayoutDefaults.BlockSpacing * 2
+
+        assertEquals(3, layout.blockRects.size)
+        assertEquals(expectedHeight, layout.measuredSize.height)
+        assertEquals(RichContentLayoutDefaults.FormulaCardHeight, layout.lineRects[0].rect.bottom - layout.lineRects[0].rect.top)
+        assertEquals(RichContentLayoutDefaults.ImageCardHeight, layout.lineRects[1].rect.bottom - layout.lineRects[1].rect.top)
+        assertEquals(expectedTableHeight, layout.lineRects[2].rect.bottom - layout.lineRects[2].rect.top)
+    }
+
+    @Test
+    fun `resizeBoxToMeasuredContent keeps wrapped multiline text above minimum box height`() {
+        val box = RichContentBox(
+            id = "box-1",
+            size = CanvasSize(width = 88f, height = 1f),
+            content = RichContent(blocks = listOf(ParagraphNode(inlines = listOf(InlineText("one two three four five six"))))),
+        )
+
+        val resized = RichContentMeasurer().resizeBoxToMeasuredContent(box)
+
+        assertEquals(box.size.width, resized.size.width)
+        assertTrue(resized.size.height >= RichContentLayoutDefaults.MinimumBoxHeight)
+        assertTrue(resized.size.height > RichContentLayoutDefaults.VerticalPadding * 2 + RichContentLayoutDefaults.LineHeight)
+    }
+
 }

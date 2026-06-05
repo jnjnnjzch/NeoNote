@@ -4,7 +4,6 @@ import android.content.ClipDescription
 import android.content.ClipboardManager
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.LocalTextStyle
@@ -33,8 +32,9 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.neonote.engine.InlineStyle
+import com.neonote.engine.RichContentLayoutDefaults
 import com.neonote.model.InlineLineBreak
 import com.neonote.model.InlineText
 import com.neonote.model.ListKind
@@ -61,6 +61,7 @@ internal fun RichParagraphEditor(
             onFocus = { controller.focusRichContentParagraph(box.id, blockIndex, paragraph.plainTextForEditor().length) },
             onToggleTodoChecked = { controller.toggleRichContentTodoCheckedState(box.id, blockIndex) },
             modifier = modifier,
+            applyContentPadding = false,
         )
         return
     }
@@ -102,11 +103,10 @@ internal fun RichParagraphEditor(
             capitalization = KeyboardCapitalization.Sentences,
             imeAction = ImeAction.Default,
         ),
-        textStyle = LocalTextStyle.current.copy(color = Color(0xFF0F172A)),
+        textStyle = LocalTextStyle.current.copy(color = Color(0xFF0F172A), lineHeight = RichContentLayoutDefaults.LineHeight.sp),
         cursorBrush = SolidColor(Color(0xFF7C3AED)),
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp)
             .focusRequester(focusRequester)
             .onFocusChanged { focusState ->
                 if (focusState.isFocused && !selectionMode && !selected && !box.isFocused) {
@@ -164,7 +164,7 @@ internal fun RichParagraphEditor(
         decorationBox = { innerTextField ->
             Box(modifier = Modifier.fillMaxWidth()) {
                 if (platformTextFieldValue.text.isEmpty()) {
-                    Text(text = "Start typing…", color = Color(0xFF94A3B8))
+                    Text(text = "Start typing…", color = Color(0xFF94A3B8), style = LocalTextStyle.current.copy(lineHeight = RichContentLayoutDefaults.LineHeight.sp))
                 }
                 innerTextField()
             }

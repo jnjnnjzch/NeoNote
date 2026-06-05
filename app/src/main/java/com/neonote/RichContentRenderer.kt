@@ -3,6 +3,7 @@ package com.neonote
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,6 +27,8 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.neonote.engine.RichContentLayoutDefaults
 import com.neonote.model.BlockFormula
 import com.neonote.model.BlockImage
 import com.neonote.model.InlineFormula
@@ -46,19 +49,29 @@ internal fun RichContentRenderer(
     onFocus: () -> Unit,
     onToggleTodoChecked: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    applyContentPadding: Boolean = true,
 ) {
     val focusModifier = if (!selectionMode && !selected) {
         Modifier.clickable(onClick = onFocus)
     } else {
         Modifier
     }
+    val paddingModifier = if (applyContentPadding) {
+        Modifier.padding(
+            horizontal = RichContentLayoutDefaults.RendererHorizontalPadding.dp,
+            vertical = RichContentLayoutDefaults.RendererVerticalPadding.dp,
+        )
+    } else {
+        Modifier
+    }
     Column(
         modifier = modifier
             .then(focusModifier)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .then(paddingModifier),
+        verticalArrangement = Arrangement.spacedBy(RichContentLayoutDefaults.BlockSpacing.dp),
     ) {
         if (content.blocks.isEmpty()) {
-            Text("Start typing…", color = Color(0xFF94A3B8))
+            Text("Start typing…", color = Color(0xFF94A3B8), style = richContentBodyTextStyle())
         }
         var numberedIndex = 0
         var previousNumbered = false
@@ -87,12 +100,12 @@ internal fun RichContentRenderer(
                 is BlockFormula -> {
                     previousNumbered = false
                     numberedIndex = 0
-                    RichBlockCard(label = "Formula", accent = "ƒ", text = block.expression.ifBlank { "empty expression" })
+                    RichBlockCard(label = "Formula", accent = "ƒ", text = block.expression.ifBlank { "empty expression" }, height = RichContentLayoutDefaults.FormulaCardHeight)
                 }
                 is BlockImage -> {
                     previousNumbered = false
                     numberedIndex = 0
-                    RichBlockCard(label = "Image", accent = "▧", text = block.imagePlaceholderText())
+                    RichBlockCard(label = "Image", accent = "▧", text = block.imagePlaceholderText(), height = RichContentLayoutDefaults.ImageCardHeight)
                 }
                 is TableNode -> {
                     previousNumbered = false
@@ -115,9 +128,7 @@ private fun RichParagraphRenderer(
 ) {
     val metadata = paragraph.listMetadata
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Top,
     ) {
         when (metadata?.kind) {
@@ -145,17 +156,17 @@ private fun RichParagraphRenderer(
         Text(
             text = paragraph.toDisplayAnnotatedString(),
             color = Color(0xFF0F172A),
-            style = MaterialTheme.typography.bodyMedium,
+            style = richContentBodyTextStyle(),
         )
     }
 }
 
 @Composable
-private fun RichBlockCard(label: String, accent: String, text: String) {
+private fun RichBlockCard(label: String, accent: String, text: String, height: Float) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp)
+            .height(height.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFFF8FAFC))
             .border(width = 1.dp, color = Color(0xFFCBD5E1), shape = RoundedCornerShape(10.dp))
@@ -181,10 +192,13 @@ private fun RichBlockCard(label: String, accent: String, text: String) {
 
 @Composable
 private fun StaticTablePreview(table: TableNode) {
+    val rowCount = table.rows.size.coerceAtLeast(RichContentLayoutDefaults.TableMinimumPreviewRows)
+    val tableHeight = RichContentLayoutDefaults.TableHeaderPreviewHeight +
+        rowCount * maxOf(RichContentLayoutDefaults.TableRowPreviewHeight, RichContentLayoutDefaults.TableCellPreviewHeight)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp)
+            .height(tableHeight.dp)
             .clip(RoundedCornerShape(10.dp))
             .border(width = 1.dp, color = Color(0xFFCBD5E1), shape = RoundedCornerShape(10.dp)),
     ) {
@@ -192,6 +206,7 @@ private fun StaticTablePreview(table: TableNode) {
             text = "Table preview",
             modifier = Modifier
                 .fillMaxWidth()
+                .height(RichContentLayoutDefaults.TableHeaderPreviewHeight.dp)
                 .background(Color(0xFFF1F5F9))
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             color = Color(0xFF475569),
@@ -200,7 +215,7 @@ private fun StaticTablePreview(table: TableNode) {
         if (table.rows.isEmpty()) {
             Text(
                 text = "0 × 0",
-                modifier = Modifier.padding(8.dp),
+                modifier = Modifier.height(RichContentLayoutDefaults.TableRowPreviewHeight.dp).padding(8.dp),
                 color = Color(0xFF64748B),
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -213,7 +228,7 @@ private fun StaticTablePreview(table: TableNode) {
                             text = cell?.content?.previewText().orEmpty().ifBlank { " " },
                             modifier = Modifier
                                 .weight(1f)
-                                .height(32.dp)
+                                .height(RichContentLayoutDefaults.TableCellPreviewHeight.dp)
                                 .border(width = 1.dp, color = Color(0xFFE2E8F0))
                                 .padding(horizontal = 6.dp, vertical = 6.dp),
                             color = Color(0xFF334155),
@@ -225,6 +240,12 @@ private fun StaticTablePreview(table: TableNode) {
         }
     }
 }
+
+
+@Composable
+private fun richContentBodyTextStyle() = MaterialTheme.typography.bodyMedium.copy(
+    lineHeight = RichContentLayoutDefaults.LineHeight.sp,
+)
 
 internal fun ParagraphNode.toDisplayAnnotatedString(): AnnotatedString = buildAnnotatedString {
     inlines.forEach { inline -> appendInlineNode(inline) }

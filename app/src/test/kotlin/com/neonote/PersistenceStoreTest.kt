@@ -513,8 +513,11 @@ class PersistenceStoreTest {
         assertTrue(reloadedController.persistenceStatus.startsWith("Loaded ${savedDocument.id} at revision ${savedDocument.revision}"))
         assertEquals(loadedResult.diagnostics, reloadedController.persistenceDiagnostics)
         assertNotNull(loadedResult.diagnostics?.cacheRebuildTimeMillis)
+        val savedBox = assertIs<RichContentBox>(savedDocument.pages.single().canvas.objects.single())
         val loadedBox = assertIs<RichContentBox>(loaded.pages.single().canvas.objects.single())
         assertEquals(CanvasPoint(x = 12.5f, y = -98.25f), loadedBox.position)
+        assertEquals(savedBox.size.height, loadedBox.size.height)
+        assertEquals(savedBox.size.height, (reloadedController.currentCanvas.objects.single() as RichContentBox).size.height)
     }
 
     private suspend fun NeoNoteDocument.saveThenLoad(): NeoNoteDocument {
