@@ -1,5 +1,7 @@
 package com.neonote.engine
 
+import com.neonote.model.InlineFormula
+import com.neonote.model.InlineImage
 import com.neonote.model.InlineText
 import com.neonote.model.ListKind
 import com.neonote.model.ParagraphNode
@@ -162,11 +164,11 @@ public class RichContentEditorSession(
     )
 
     public fun insertTablePlaceholder(rows: Int = 2, columns: Int = 2): RichContentEditorEdit = applyCommand(
-        RichContentCommand.InsertTable(rows = rows, columns = columns),
+        RichContentCommand.InsertTable(rows = rows, columns = columns, index = activeBlockInsertionIndex()),
     )
 
     public fun insertBlockFormulaPlaceholder(expression: String = ""): RichContentEditorEdit = applyCommand(
-        RichContentCommand.InsertBlockFormula(expression = expression),
+        RichContentCommand.InsertBlockFormula(expression = expression, index = activeBlockInsertionIndex()),
     )
 
     /**
@@ -239,6 +241,14 @@ public class RichContentEditorSession(
         selectionEndOffset: Int = selectionStartOffset,
     ): RichContentEditorEdit {
         activeBlockIndex = box.coerceParagraphBlockIndex(blockIndex)
+        if (box.paragraphHasInlineAtom(activeBlockIndex)) {
+            // Interim protection: BasicTextField cannot edit inline atoms yet.
+            // Avoid converting formula/image atoms into literal placeholder text
+            // during IME composition; ordinary text-only paragraphs still use the
+            // replacement fallback below.
+            setActiveParagraphSelection(selectionStartOffset, selectionEndOffset)
+            return RichContentEditorEdit(box = box, selection = selection, commands = emptyList())
+        }
         val command = RichContentCommand.ReplaceParagraphText(activeBlockIndex, nextText)
         val result = engine.execute(box, command) as RichContentCommandResult.ContentEdited
         box = result.box
@@ -250,7 +260,9 @@ public class RichContentEditorSession(
     }
 
     /**
-     * Translate a platform TextField text snapshot into semantic commands.
+     * Legacy whole-box platform bridge retained for older controller helpers and
+     * tests. The Compose RichContent editor should prefer the paragraph-local
+     * bridge so platform snapshots do not rebuild unrelated rich blocks.
      */
     public fun replaceFromPlatformInput(
         previousText: String,
@@ -347,6 +359,8 @@ public class RichContentEditorSession(
         mutablePendingCommands += command
         return RichContentEditorEdit(box = box, selection = selection, commands = listOf(command))
     }
+
+    private fun activeBlockInsertionIndex(): Int = (activeBlockIndex + 1).coerceIn(0, box.content.blocks.size)
 
     private fun syncActiveParagraphFromSelection() {
         val paragraphLength = box.paragraphTextLength(activeBlockIndex)
@@ -484,14 +498,21 @@ private fun ParagraphNode.plainText(): String = inlines.joinToString("") { inlin
     when (inline) {
         is InlineText -> inline.text
         com.neonote.model.InlineLineBreak -> "\n"
-        else -> ""
+        is InlineFormula, is InlineImage -> InlineAtomPlaceholder
     }
 }
+
+private fun RichContentBox.paragraphHasInlineAtom(blockIndex: Int): Boolean =
+    (content.blocks.getOrNull(blockIndex) as? ParagraphNode)?.inlines?.any { inline ->
+        inline is InlineFormula || inline is InlineImage
+    } ?: false
+
+private const val InlineAtomPlaceholder: String = "\uFFFC"
 
 private fun ParagraphNode.textLength(): Int = inlines.sumOf { inline ->
     when (inline) {
         is InlineText -> inline.text.length
         com.neonote.model.InlineLineBreak -> 1
-        else -> 0
+        is InlineFormula, is InlineImage -> 1
     }
 }

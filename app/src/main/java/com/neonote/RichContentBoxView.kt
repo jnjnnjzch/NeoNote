@@ -6,8 +6,10 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -48,15 +50,20 @@ internal fun RichContentBoxView(
         else -> 1.dp
     }
     val chromeShape = RoundedCornerShape(14.dp)
+    val toolbarHeight = 44.dp
+    val showsToolbar = box.isFocused && !selectionMode && !selected
+    val toolbarHeightPx = if (showsToolbar) with(density) { toolbarHeight.toPx() }.roundToInt() else 0
+    val boxWidth = with(density) { box.size.width.toDp() }
+    val boxHeight = with(density) { box.size.height.toDp() }
     val boxSizeModifier = Modifier
-        .offset { IntOffset(box.position.x.roundToInt(), box.position.y.roundToInt()) }
-        .size(
-            width = with(density) { box.size.width.toDp() },
-            height = with(density) { box.size.height.toDp() },
-        )
+        // Keep the persisted content rectangle at box.position, but include the
+        // toolbar in this composable's hit-test bounds when it is visually above
+        // the RichContentBox. Drawing above parent bounds can be visible yet
+        // untappable on device; reserving space here keeps actions clickable.
+        .offset { IntOffset(box.position.x.roundToInt(), box.position.y.roundToInt() - toolbarHeightPx) }
+        .size(width = boxWidth, height = boxHeight + if (showsToolbar) toolbarHeight else 0.dp)
 
     val contentModifier = Modifier
-        .fillMaxSize()
         .clip(chromeShape)
         .background(Color.White)
         .border(width = borderWidth, color = borderColor, shape = chromeShape)
@@ -75,7 +82,19 @@ internal fun RichContentBoxView(
         )
 
     Box(modifier = boxSizeModifier) {
-        Box(modifier = contentModifier) {
+        if (showsToolbar) {
+            RichContentToolbar(
+                boxId = box.id,
+                controller = controller,
+            )
+        }
+
+        Box(
+            modifier = contentModifier
+                .width(boxWidth)
+                .height(boxHeight)
+                .then(if (showsToolbar) Modifier.offset(y = toolbarHeight) else Modifier),
+        ) {
             if (!box.isFocused) {
                 RichContentRenderer(
                     content = box.content,
@@ -98,12 +117,5 @@ internal fun RichContentBoxView(
             }
         }
 
-        if (box.isFocused && !selectionMode && !selected) {
-            RichContentToolbar(
-                boxId = box.id,
-                controller = controller,
-                modifier = Modifier.offset(y = (-44).dp),
-            )
-        }
     }
 }

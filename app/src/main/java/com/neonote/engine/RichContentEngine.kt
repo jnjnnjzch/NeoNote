@@ -335,7 +335,7 @@ public fun RichContent.toPlainText(): String = blocks.joinToString("\n") { block
             when (inline) {
                 is InlineText -> inline.text
                 InlineLineBreak -> "\n"
-                else -> ""
+                is InlineFormula, is InlineImage -> "\uFFFC"
             }
         }
         else -> ""

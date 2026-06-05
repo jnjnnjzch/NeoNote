@@ -35,6 +35,8 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.sp
 import com.neonote.engine.InlineStyle
 import com.neonote.engine.RichContentLayoutDefaults
+import com.neonote.model.InlineFormula
+import com.neonote.model.InlineImage
 import com.neonote.model.InlineLineBreak
 import com.neonote.model.InlineText
 import com.neonote.model.ListKind
@@ -176,9 +178,11 @@ private fun ParagraphNode.plainTextForEditor(): String = inlines.joinToString(""
     when (inline) {
         is InlineText -> inline.text
         InlineLineBreak -> "\n"
-        else -> ""
+        is InlineFormula, is InlineImage -> InlineAtomPlaceholder
     }
 }
+
+private const val InlineAtomPlaceholder: String = "\uFFFC"
 
 private fun androidx.compose.ui.input.key.KeyEvent.richContentPlainTextPaste(
     clipboardManager: ClipboardManager?,

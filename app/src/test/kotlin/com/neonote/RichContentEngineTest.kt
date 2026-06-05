@@ -620,6 +620,59 @@ class RichContentEngineTest {
         assertTrue(table.rows.flatten().all { it.content.blocks.isEmpty() })
     }
 
+
+    @Test
+    fun `insert block placeholders respects explicit index`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(
+                blocks = listOf(
+                    ParagraphNode(inlines = listOf(InlineText("alpha"))),
+                    ParagraphNode(inlines = listOf(InlineText("bravo"))),
+                ),
+            ),
+        )
+
+        val withTable = engine.execute(
+            box = box,
+            command = RichContentCommand.InsertTable(rows = 1, columns = 1, index = 1),
+        ) as RichContentCommandResult.ContentInserted
+        val withFormula = engine.execute(
+            box = withTable.box,
+            command = RichContentCommand.InsertBlockFormula(expression = "x", index = 2),
+        ) as RichContentCommandResult.ContentInserted
+
+        assertEquals("alpha", assertIs<ParagraphNode>(withFormula.box.content.blocks[0]).toPlainTextForTest())
+        assertIs<TableNode>(withFormula.box.content.blocks[1])
+        assertIs<BlockFormula>(withFormula.box.content.blocks[2])
+        assertEquals("bravo", assertIs<ParagraphNode>(withFormula.box.content.blocks[3]).toPlainTextForTest())
+    }
+
+    @Test
+    fun `replace paragraph text does not affect sibling blocks`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(
+                blocks = listOf(
+                    ParagraphNode(inlines = listOf(InlineText("alpha"))),
+                    ParagraphNode(inlines = listOf(InlineText("bravo"))),
+                    ParagraphNode(inlines = listOf(InlineText("charlie"))),
+                ),
+            ),
+        )
+
+        val result = engine.execute(
+            box = box,
+            command = RichContentCommand.ReplaceParagraphText(blockIndex = 1, text = "beta"),
+        ) as RichContentCommandResult.ContentEdited
+
+        assertEquals("alpha", assertIs<ParagraphNode>(result.box.content.blocks[0]).toPlainTextForTest())
+        assertEquals("beta", assertIs<ParagraphNode>(result.box.content.blocks[1]).toPlainTextForTest())
+        assertEquals("charlie", assertIs<ParagraphNode>(result.box.content.blocks[2]).toPlainTextForTest())
+    }
+
     @Test
     fun `table cells still contain rich content`() {
         val cell = TableCell(
@@ -675,4 +728,12 @@ class RichContentEngineTest {
         assertTrue(resized.size.height > RichContentLayoutDefaults.VerticalPadding * 2 + RichContentLayoutDefaults.LineHeight)
     }
 
+}
+
+
+private fun ParagraphNode.toPlainTextForTest(): String = inlines.joinToString("") { inline ->
+    when (inline) {
+        is InlineText -> inline.text
+        else -> ""
+    }
 }
