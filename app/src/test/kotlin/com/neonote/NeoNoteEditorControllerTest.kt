@@ -129,10 +129,32 @@ class NeoNoteEditorControllerTest {
         assertTrue(text.bold)
         assertEquals(ListKind.Todo, paragraph.listMetadata?.kind)
         assertFalse(paragraph.listMetadata?.checked ?: true)
-        assertIs<TableNode>(box.content.blocks[1])
-        assertIs<BlockFormula>(box.content.blocks[2])
+        assertIs<BlockFormula>(box.content.blocks[1])
+        assertIs<TableNode>(box.content.blocks[2])
         assertEquals(boxId, controller.state.focusedRichContentBoxId)
         assertTrue(box.isFocused)
+    }
+
+
+    @Test
+    fun `toolbar placeholder commands insert after active paragraph and keep focus`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "alpha\nbravo\ncharlie")
+        controller.focusRichContentParagraph(boxId = boxId, blockIndex = 1, selectionStart = 2)
+
+        controller.insertRichContentFormulaPlaceholder(boxId = boxId, expression = "x")
+        controller.insertRichContentTablePlaceholder(boxId = boxId)
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertIs<ParagraphNode>(box.content.blocks[1])
+        assertIs<TableNode>(box.content.blocks[2])
+        assertIs<BlockFormula>(box.content.blocks[3])
+        assertIs<ParagraphNode>(box.content.blocks[4])
+        assertEquals(boxId, controller.state.focusedRichContentBoxId)
+        assertTrue(box.isFocused)
+        assertEquals(1, controller.activeRichContentBlockIndex(boxId))
     }
 
     @Test
@@ -230,7 +252,7 @@ class NeoNoteEditorControllerTest {
         assertEquals(0.4f, stroke.points[0].pressure)
         assertEquals(16.5f, stroke.points[1].x)
         assertEquals(19.8f, stroke.points[1].y)
-        assertEquals(0.66f, stroke.points[1].pressure, 0.0001f)
+        assertEquals(0.8f, stroke.points[1].pressure, 0.0001f)
     }
 
 

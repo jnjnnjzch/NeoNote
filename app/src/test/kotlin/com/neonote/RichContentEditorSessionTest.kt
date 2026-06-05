@@ -5,6 +5,8 @@ import com.neonote.engine.RichContentCommand
 import com.neonote.engine.RichContentEditorSession
 import com.neonote.engine.toPlainText
 import com.neonote.model.BlockFormula
+import com.neonote.model.InlineFormula
+import com.neonote.model.InlineImage
 import com.neonote.model.InlineText
 import com.neonote.model.ListKind
 import com.neonote.model.ParagraphNode
@@ -207,7 +209,8 @@ class RichContentEditorSessionTest {
         assertIs<RichContentCommand.InsertTable>(tableEdit.commands.single())
         assertIs<TableNode>(tableEdit.box.content.blocks[1])
         assertIs<RichContentCommand.InsertBlockFormula>(formulaEdit.commands.single())
-        assertIs<BlockFormula>(formulaEdit.box.content.blocks[2])
+        assertIs<BlockFormula>(formulaEdit.box.content.blocks[1])
+        assertIs<TableNode>(formulaEdit.box.content.blocks[2])
     }
 
     @Test
@@ -237,6 +240,77 @@ class RichContentEditorSessionTest {
         assertEquals("second", session.localParagraphEditableBuffer)
         assertEquals(TextCursorPosition(blockIndex = 1, inlineOffset = 2), session.selection.start)
         assertEquals(TextCursorPosition(blockIndex = 1, inlineOffset = 5), session.selection.end)
+    }
+
+
+    @Test
+    fun `paragraph local no-op preserves inline formula and image atoms`() {
+        val session = RichContentEditorSession(boxWithInlineAtoms())
+        session.focusParagraph(blockIndex = 0, selectionStart = 1)
+
+        val edit = session.replaceFromPlatformParagraphInput(
+            blockIndex = 0,
+            previousText = "a\uFFFCb\uFFFCc",
+            nextText = "a\uFFFCb\uFFFCc",
+            selectionStartOffset = 5,
+        )
+
+        val paragraph = assertIs<ParagraphNode>(edit.box.content.blocks.single())
+        assertIs<InlineFormula>(paragraph.inlines[1])
+        assertIs<InlineImage>(paragraph.inlines[3])
+        assertTrue(edit.commands.isEmpty())
+        assertEquals(5, session.activeParagraphCaret)
+    }
+
+    @Test
+    fun `paragraph local edit around inline atoms preserves atom nodes`() {
+        val session = RichContentEditorSession(boxWithInlineAtoms())
+        session.focusParagraph(blockIndex = 0, selectionStart = 1)
+
+        val edit = session.replaceFromPlatformParagraphInput(
+            blockIndex = 0,
+            previousText = "a\uFFFCb\uFFFCc",
+            nextText = "az\uFFFCb\uFFFCc",
+            selectionStartOffset = 2,
+        )
+
+        val paragraph = assertIs<ParagraphNode>(edit.box.content.blocks.single())
+        assertEquals("az", assertIs<InlineText>(paragraph.inlines[0]).text)
+        assertIs<InlineFormula>(paragraph.inlines[1])
+        assertIs<InlineImage>(paragraph.inlines[3])
+        assertIs<RichContentCommand.InsertText>(edit.commands.single())
+    }
+
+    @Test
+    fun `paragraph local composition fallback guards inline atoms from destructive replace`() {
+        val session = RichContentEditorSession(boxWithInlineAtoms())
+        session.focusParagraph(blockIndex = 0, selectionStart = 1)
+
+        val edit = session.replaceParagraphFromPlatformCompositionFallback(
+            blockIndex = 0,
+            nextText = "abc",
+            selectionStartOffset = 1,
+        )
+
+        val paragraph = assertIs<ParagraphNode>(edit.box.content.blocks.single())
+        assertIs<InlineFormula>(paragraph.inlines[1])
+        assertIs<InlineImage>(paragraph.inlines[3])
+        assertTrue(edit.commands.isEmpty())
+        assertEquals(1, session.activeParagraphCaret)
+    }
+
+    @Test
+    fun `table and formula placeholders insert after active paragraph`() {
+        val session = RichContentEditorSession(boxWithParagraphs("alpha", "bravo", "charlie"))
+        session.focusParagraph(blockIndex = 1, selectionStart = 2)
+
+        val tableEdit = session.insertTablePlaceholder(rows = 2, columns = 2)
+        val formulaEdit = session.insertBlockFormulaPlaceholder(expression = "x")
+
+        assertIs<TableNode>(tableEdit.box.content.blocks[2])
+        assertIs<BlockFormula>(formulaEdit.box.content.blocks[2])
+        assertIs<TableNode>(formulaEdit.box.content.blocks[3])
+        assertEquals(1, session.activeBlockIndex)
     }
 
     @Test
@@ -305,5 +379,22 @@ class RichContentEditorSessionTest {
     private fun boxWithParagraphs(vararg texts: String): RichContentBox = RichContentBox(
         id = "box-1",
         content = RichContent(blocks = texts.map { text -> ParagraphNode(inlines = listOf(InlineText(text))) }),
+    )
+
+    private fun boxWithInlineAtoms(): RichContentBox = RichContentBox(
+        id = "box-1",
+        content = RichContent(
+            blocks = listOf(
+                ParagraphNode(
+                    inlines = listOf(
+                        InlineText("a"),
+                        InlineFormula("x^2"),
+                        InlineText("b"),
+                        InlineImage(assetId = "asset-1", altText = "diagram"),
+                        InlineText("c"),
+                    ),
+                ),
+            ),
+        ),
     )
 }
