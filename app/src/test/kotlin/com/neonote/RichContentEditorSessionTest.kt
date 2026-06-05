@@ -176,10 +176,87 @@ class RichContentEditorSessionTest {
         assertTrue(session.pendingCommands.isEmpty())
     }
 
+
+    @Test
+    fun `paragraph focus tracks active paragraph selection and local buffer`() {
+        val session = RichContentEditorSession(boxWithParagraphs("first", "second"))
+
+        session.focusParagraph(blockIndex = 1, selectionStart = 2, selectionEnd = 5)
+
+        assertEquals(1, session.activeBlockIndex)
+        assertEquals(2, session.activeParagraphSelection.start)
+        assertEquals(5, session.activeParagraphSelection.end)
+        assertEquals(null, session.activeParagraphCaret)
+        assertEquals("second", session.localParagraphEditableBuffer)
+        assertEquals(TextCursorPosition(blockIndex = 1, inlineOffset = 2), session.selection.start)
+        assertEquals(TextCursorPosition(blockIndex = 1, inlineOffset = 5), session.selection.end)
+    }
+
+    @Test
+    fun `paragraph local enter splits only the active paragraph`() {
+        val session = RichContentEditorSession(boxWithParagraphs("alpha", "bravo"))
+        session.focusParagraph(blockIndex = 1, selectionStart = 2)
+
+        val edit = session.replaceFromPlatformParagraphInput(
+            blockIndex = 1,
+            previousText = "bravo",
+            nextText = "br\navo",
+            selectionStartOffset = 0,
+        )
+
+        assertEquals("alpha\nbr\navo", edit.box.toPlainText())
+        assertEquals(3, edit.box.content.blocks.size)
+        assertEquals(2, session.activeBlockIndex)
+        assertEquals(TextCursorPosition(blockIndex = 2, inlineOffset = 0), edit.selection.start)
+        assertIs<RichContentCommand.InsertParagraph>(edit.commands.single())
+    }
+
+    @Test
+    fun `paragraph local backspace deletes within paragraph before merging blocks`() {
+        val session = RichContentEditorSession(boxWithParagraphs("alpha", "bravo"))
+        session.focusParagraph(blockIndex = 1, selectionStart = 3)
+
+        val edit = session.replaceFromPlatformParagraphInput(
+            blockIndex = 1,
+            previousText = "bravo",
+            nextText = "bavo",
+            selectionStartOffset = 1,
+        )
+
+        assertEquals("alpha\nbavo", edit.box.toPlainText())
+        assertEquals(2, edit.box.content.blocks.size)
+        assertEquals(1, session.activeBlockIndex)
+        assertEquals(TextCursorPosition(blockIndex = 1, inlineOffset = 1), edit.selection.start)
+        assertIs<RichContentCommand.DeleteBackward>(edit.commands.single())
+    }
+
+    @Test
+    fun `paragraph local composition fallback preserves sibling blocks`() {
+        val session = RichContentEditorSession(boxWithParagraphs("title", "ni"))
+        session.focusParagraph(blockIndex = 1, selectionStart = 2)
+
+        val edit = session.replaceParagraphFromPlatformCompositionFallback(
+            blockIndex = 1,
+            nextText = "你",
+            selectionStartOffset = 1,
+        )
+
+        assertEquals("title\n你", edit.box.toPlainText())
+        assertEquals(2, edit.box.content.blocks.size)
+        assertEquals(1, session.activeBlockIndex)
+        assertEquals(1, session.activeParagraphCaret)
+        assertIs<RichContentCommand.ReplaceParagraphText>(edit.commands.single())
+    }
+
     private fun emptyBox(): RichContentBox = RichContentBox(id = "box-1", content = RichContent())
 
     private fun boxWithText(text: String): RichContentBox = RichContentBox(
         id = "box-1",
         content = RichContent(blocks = listOf(ParagraphNode(inlines = listOf(InlineText(text))))),
+    )
+
+    private fun boxWithParagraphs(vararg texts: String): RichContentBox = RichContentBox(
+        id = "box-1",
+        content = RichContent(blocks = texts.map { text -> ParagraphNode(inlines = listOf(InlineText(text))) }),
     )
 }

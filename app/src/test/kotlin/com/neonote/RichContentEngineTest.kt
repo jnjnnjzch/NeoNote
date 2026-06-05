@@ -31,6 +31,31 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class RichContentEngineTest {
+
+    @Test
+    fun `paragraph text replacement preserves non active sibling blocks`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(
+                blocks = listOf(
+                    ParagraphNode(inlines = listOf(InlineText("title"))),
+                    ParagraphNode(inlines = listOf(InlineText("ni"))),
+                    BlockFormula(expression = "E = mc^2"),
+                ),
+            ),
+        )
+
+        val result = engine.execute(
+            box = box,
+            command = RichContentCommand.ReplaceParagraphText(blockIndex = 1, text = "你"),
+        ) as RichContentCommandResult.ContentEdited
+
+        assertEquals("title\n你\n", result.box.toPlainText())
+        assertEquals(3, result.box.content.blocks.size)
+        assertIs<BlockFormula>(result.box.content.blocks[2])
+        assertEquals(TextCursorPosition(blockIndex = 1, inlineOffset = 1), result.selection.start)
+    }
     @Test
     fun `plain text replacement splits newline characters into paragraphs`() {
         val engine = RichContentEngine()
