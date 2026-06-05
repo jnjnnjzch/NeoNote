@@ -47,17 +47,19 @@ internal fun RichContentBoxView(
         selected || box.isFocused -> 2.dp
         else -> 1.dp
     }
-    val modifier = Modifier
+    val chromeShape = RoundedCornerShape(14.dp)
+    val boxSizeModifier = Modifier
         .offset { IntOffset(box.position.x.roundToInt(), box.position.y.roundToInt()) }
         .size(
             width = with(density) { box.size.width.toDp() },
             height = with(density) { box.size.height.toDp() },
         )
-        .clip(RoundedCornerShape(14.dp))
-        .background(Color.White)
-        .border(width = borderWidth, color = borderColor, shape = RoundedCornerShape(14.dp))
 
-    val contentModifier = modifier
+    val contentModifier = Modifier
+        .fillMaxSize()
+        .clip(chromeShape)
+        .background(Color.White)
+        .border(width = borderWidth, color = borderColor, shape = chromeShape)
         .padding(RichContentLayoutDefaults.BoxChromePadding.dp)
         .then(
             if (selectionMode) {
@@ -72,25 +74,35 @@ internal fun RichContentBoxView(
             },
         )
 
-    Box(modifier = contentModifier) {
-        if (!box.isFocused) {
-            RichContentRenderer(
-                content = box.content,
-                selectionMode = selectionMode,
-                selected = selected,
-                onFocus = { controller.activateRichContentBox(box.id) },
-                onToggleTodoChecked = { blockIndex ->
-                    controller.toggleRichContentTodoCheckedState(boxId = box.id, blockIndex = blockIndex)
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            RichContentEditor(
-                box = box,
-                selectionMode = selectionMode,
-                selected = selected,
+    Box(modifier = boxSizeModifier) {
+        Box(modifier = contentModifier) {
+            if (!box.isFocused) {
+                RichContentRenderer(
+                    content = box.content,
+                    selectionMode = selectionMode,
+                    selected = selected,
+                    onFocus = { controller.activateRichContentBox(box.id) },
+                    onToggleTodoChecked = { blockIndex ->
+                        controller.toggleRichContentTodoCheckedState(boxId = box.id, blockIndex = blockIndex)
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                RichContentEditor(
+                    box = box,
+                    selectionMode = selectionMode,
+                    selected = selected,
+                    controller = controller,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+
+        if (box.isFocused && !selectionMode && !selected) {
+            RichContentToolbar(
+                boxId = box.id,
                 controller = controller,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.offset(y = (-44).dp),
             )
         }
     }

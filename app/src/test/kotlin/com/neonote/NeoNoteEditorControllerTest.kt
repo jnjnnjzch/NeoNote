@@ -13,6 +13,7 @@ import com.neonote.engine.PointerTool
 import com.neonote.engine.toPlainText
 import com.neonote.input.InputDiagnostics
 import com.neonote.input.withPressureSamples
+import com.neonote.model.BlockFormula
 import com.neonote.model.CanvasPoint
 import com.neonote.model.CanvasSize
 import com.neonote.model.EditorState
@@ -26,10 +27,13 @@ import com.neonote.model.ListKind
 import com.neonote.model.NeoNoteDocument
 import com.neonote.model.NotePage
 import com.neonote.model.ParagraphNode
+import com.neonote.model.TableNode
 import com.neonote.model.ViewportState
 import com.neonote.model.RichContentBox
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -106,6 +110,31 @@ class NeoNoteEditorControllerTest {
         assertEquals(false, box.isFocused)
         assertTrue(controller.currentCanvas.inkLayer.strokes.isEmpty())
     }
+    @Test
+    fun `toolbar equivalent commands update focused rich content`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "hello")
+        controller.focusRichContentParagraph(boxId = boxId, blockIndex = 0, selectionStart = 0, selectionEnd = 5)
+
+        controller.toggleActiveRichContentStyle(boxId = boxId, style = InlineStyle.Bold)
+        controller.toggleActiveRichContentList(boxId = boxId, kind = ListKind.Todo)
+        controller.insertRichContentTablePlaceholder(boxId = boxId)
+        controller.insertRichContentFormulaPlaceholder(boxId = boxId)
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        val paragraph = assertIs<ParagraphNode>(box.content.blocks[0])
+        val text = assertIs<InlineText>(paragraph.inlines.single())
+        assertTrue(text.bold)
+        assertEquals(ListKind.Todo, paragraph.listMetadata?.kind)
+        assertFalse(paragraph.listMetadata?.checked ?: true)
+        assertIs<TableNode>(box.content.blocks[1])
+        assertIs<BlockFormula>(box.content.blocks[2])
+        assertEquals(boxId, controller.state.focusedRichContentBoxId)
+        assertTrue(box.isFocused)
+    }
+
     @Test
     fun `panning viewport does not move document objects`() {
         val controller = NeoNoteEditorController()

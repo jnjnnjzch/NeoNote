@@ -546,6 +546,62 @@ public class NeoNoteEditorController(
         state = state.copy(document = state.document.withCanvas(updatedCanvas))
     }
 
+    public fun toggleActiveRichContentStyle(boxId: String, style: InlineStyle) {
+        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+
+        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val session = editorSessionFor(boxId, box)
+            richContentMeasurer.resizeBoxToMeasuredContent(session.toggleStyle(style).box)
+        }
+        state = state.copy(
+            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)),
+            focusedRichContentBoxId = boxId,
+            currentTool = EditorTool.Text,
+        )
+    }
+
+    public fun toggleActiveRichContentList(boxId: String, kind: ListKind) {
+        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+
+        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val session = editorSessionFor(boxId, box)
+            richContentMeasurer.resizeBoxToMeasuredContent(session.toggleList(kind).box)
+        }
+        state = state.copy(
+            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)),
+            focusedRichContentBoxId = boxId,
+            currentTool = EditorTool.Text,
+        )
+    }
+
+    public fun insertRichContentTablePlaceholder(boxId: String, rows: Int = 2, columns: Int = 2) {
+        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+
+        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val session = editorSessionFor(boxId, box)
+            richContentMeasurer.resizeBoxToMeasuredContent(session.insertTablePlaceholder(rows = rows, columns = columns).box)
+        }
+        state = state.copy(
+            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)),
+            focusedRichContentBoxId = boxId,
+            currentTool = EditorTool.Text,
+        )
+    }
+
+    public fun insertRichContentFormulaPlaceholder(boxId: String, expression: String = "") {
+        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+
+        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val session = editorSessionFor(boxId, box)
+            richContentMeasurer.resizeBoxToMeasuredContent(session.insertBlockFormulaPlaceholder(expression = expression).box)
+        }
+        state = state.copy(
+            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)),
+            focusedRichContentBoxId = boxId,
+            currentTool = EditorTool.Text,
+        )
+    }
+
     public fun commitRichContentEditing(boxId: String) {
         val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
         richContentSessions[richContentSessionKey(boxId)]?.blurCommit(box)
