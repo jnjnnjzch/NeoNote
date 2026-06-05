@@ -79,6 +79,40 @@ class RichContentEditorSessionTest {
     }
 
     @Test
+    fun `platform input bridge keeps selection range on ordinary snapshots`() {
+        val session = RichContentEditorSession(boxWithText("hello world"))
+
+        val edit = session.replaceFromPlatformInput(
+            previousText = "hello world",
+            nextText = "hello brave world",
+            selectionStartPlainOffset = 6,
+            selectionEndPlainOffset = 11,
+        )
+
+        assertEquals("hello brave world", edit.box.toPlainText())
+        assertEquals(TextCursorPosition(blockIndex = 0, inlineOffset = 6), edit.selection.start)
+        assertEquals(TextCursorPosition(blockIndex = 0, inlineOffset = 11), edit.selection.end)
+        assertIs<RichContentCommand.InsertText>(edit.commands.single())
+    }
+
+    @Test
+    fun `platform input bridge uses composition fallback while preserving selection range`() {
+        val session = RichContentEditorSession(boxWithText("ni hao"))
+
+        val edit = session.replaceFromPlatformCompositionFallback(
+            nextText = "你好",
+            selectionStartPlainOffset = 0,
+            selectionEndPlainOffset = 2,
+        )
+
+        assertEquals("你好", edit.box.toPlainText())
+        assertEquals(TextCursorPosition(blockIndex = 0, inlineOffset = 0), edit.selection.start)
+        assertEquals(TextCursorPosition(blockIndex = 0, inlineOffset = 2), edit.selection.end)
+        assertIs<RichContentCommand.ReplacePlainText>(edit.commands.single())
+        assertTrue(session.localEditableBuffer == "你好")
+    }
+
+    @Test
     fun `blur commit drains pending commands without losing local buffer`() {
         val session = RichContentEditorSession(emptyBox())
         session.replaceFromPlatformInput(previousText = "", nextText = "a", selectionStartPlainOffset = 1)
