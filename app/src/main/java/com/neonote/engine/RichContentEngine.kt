@@ -46,6 +46,7 @@ public class RichContentEngine {
         is RichContentCommand.InsertBlockImage -> insertBlockImage(box, command.assetId, command.altText, command.index)
         is RichContentCommand.InsertTable -> insertTable(box, command.rows, command.columns, command.index)
         is RichContentCommand.ReplacePlainText -> replacePlainText(box, command.text)
+        is RichContentCommand.ReplaceParagraphText -> replaceParagraphText(box, command.blockIndex, command.text)
     }
 
     /** Backward-compatible block insertion path used by canvas-level actions. */
@@ -225,6 +226,44 @@ public class RichContentEngine {
         return RichContentCommandResult.ContentReplaced(box = box.copy(content = RichContent(blocks = paragraphs)))
     }
 
+    /**
+     * Replace only one paragraph from a platform input bridge snapshot. This is
+     * intentionally conservative for IME composition: active composing text can
+     * be accepted without rebuilding unrelated rich blocks in the same box.
+     */
+    public fun replaceParagraphText(
+        box: RichContentBox,
+        blockIndex: Int,
+        text: String,
+    ): RichContentCommandResult.ContentEdited {
+        if (box.content.blocks.isEmpty()) {
+            return insertText(
+                box = box,
+                text = text,
+                selection = TextSelection.cursor(TextCursorPosition(blockIndex = 0, inlineOffset = 0)),
+            )
+        }
+        require(blockIndex in box.content.blocks.indices) { "blockIndex must address an existing block" }
+        val paragraph = box.content.blocks[blockIndex] as? ParagraphNode
+            ?: return RichContentCommandResult.ContentEdited(
+                box = box,
+                selection = TextSelection.cursor(TextCursorPosition(blockIndex = blockIndex, inlineOffset = 0)),
+            )
+        val fullParagraphSelection = TextSelection(
+            TextRange(
+                start = TextCursorPosition(blockIndex = blockIndex, inlineOffset = 0),
+                end = TextCursorPosition(blockIndex = blockIndex, inlineOffset = paragraph.textLength()),
+            ),
+        )
+        val deleteResult = box.deleteSelection(fullParagraphSelection)
+        val insertResult = deleteResult.box.insertPlainTextAt(
+            position = deleteResult.selection.start,
+            text = text,
+            typingStyle = TypingStyle(),
+        )
+        return RichContentCommandResult.ContentEdited(box = insertResult.box, selection = insertResult.selection)
+    }
+
     public fun insertInlineFormula(
         box: RichContentBox,
         expression: String,
@@ -342,6 +381,7 @@ public sealed interface RichContentCommand {
     public data class InsertBlockImage(val assetId: String, val altText: String? = null, val index: Int? = null) : RichContentCommand
     public data class InsertTable(val rows: Int, val columns: Int, val index: Int? = null) : RichContentCommand
     public data class ReplacePlainText(val text: String) : RichContentCommand
+    public data class ReplaceParagraphText(val blockIndex: Int, val text: String) : RichContentCommand
 }
 
 public sealed interface RichContentCommandResult {

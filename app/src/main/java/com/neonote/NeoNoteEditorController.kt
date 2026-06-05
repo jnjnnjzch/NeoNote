@@ -423,6 +423,89 @@ public class NeoNoteEditorController(
         state = state.copy(document = state.document.withCanvas(updatedCanvas))
     }
 
+    public fun activeRichContentBlockIndex(boxId: String): Int? =
+        richContentSessions[richContentSessionKey(boxId)]?.activeBlockIndex
+
+    public fun focusRichContentParagraph(
+        boxId: String,
+        blockIndex: Int,
+        selectionStart: Int = 0,
+        selectionEnd: Int = selectionStart,
+    ) {
+        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        focusRichContentBox(boxId)
+        val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
+        editorSessionFor(boxId, box).focusParagraph(blockIndex, selectionStart, selectionEnd)
+    }
+
+    public fun updateRichContentParagraphFromPlatformInput(
+        boxId: String,
+        blockIndex: Int,
+        previousText: String,
+        nextText: String,
+        selectionStart: Int,
+        selectionEnd: Int = selectionStart,
+        hasActiveComposition: Boolean = false,
+    ) {
+        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+
+        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val session = editorSessionFor(boxId, box)
+            val edit = if (hasActiveComposition) {
+                session.replaceParagraphFromPlatformCompositionFallback(
+                    blockIndex = blockIndex,
+                    nextText = nextText,
+                    selectionStartOffset = selectionStart,
+                    selectionEndOffset = selectionEnd,
+                )
+            } else {
+                session.replaceFromPlatformParagraphInput(
+                    blockIndex = blockIndex,
+                    previousText = previousText,
+                    nextText = nextText,
+                    selectionStartOffset = selectionStart,
+                    selectionEndOffset = selectionEnd,
+                )
+            }
+            richContentMeasurer.resizeBoxToMeasuredContent(edit.box)
+        }
+        state = state.copy(document = state.document.withCanvas(updatedCanvas))
+    }
+
+    public fun toggleRichContentParagraphStyle(
+        boxId: String,
+        blockIndex: Int,
+        style: InlineStyle,
+        selectionStart: Int,
+        selectionEnd: Int = selectionStart,
+    ) {
+        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+
+        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val session = editorSessionFor(boxId, box)
+            session.focusParagraph(blockIndex, selectionStart, selectionEnd)
+            richContentMeasurer.resizeBoxToMeasuredContent(session.toggleStyle(style).box)
+        }
+        state = state.copy(document = state.document.withCanvas(updatedCanvas))
+    }
+
+    public fun toggleRichContentParagraphList(
+        boxId: String,
+        blockIndex: Int,
+        kind: ListKind,
+        selectionStart: Int,
+        selectionEnd: Int = selectionStart,
+    ) {
+        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+
+        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val session = editorSessionFor(boxId, box)
+            session.focusParagraph(blockIndex, selectionStart, selectionEnd)
+            richContentMeasurer.resizeBoxToMeasuredContent(session.toggleList(kind).box)
+        }
+        state = state.copy(document = state.document.withCanvas(updatedCanvas))
+    }
+
     public fun toggleRichContentStyle(
         boxId: String,
         style: InlineStyle,

@@ -674,6 +674,31 @@ class NeoNoteEditorControllerTest {
         assertEquals(ListKind.Bullet, paragraph.listMetadata?.kind)
     }
 
+
+    @Test
+    fun `one rich content box can edit multiple paragraph nodes independently`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "first\nsecond")
+
+        controller.focusRichContentParagraph(boxId = boxId, blockIndex = 1, selectionStart = 6)
+        controller.updateRichContentParagraphFromPlatformInput(
+            boxId = boxId,
+            blockIndex = 1,
+            previousText = "second",
+            nextText = "second!",
+            selectionStart = 7,
+        )
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals("first\nsecond!", box.toPlainText())
+        assertEquals(2, box.content.blocks.size)
+        assertEquals(1, controller.activeRichContentBlockIndex(boxId))
+        assertEquals("first", ((box.content.blocks[0] as ParagraphNode).inlines.single() as InlineText).text)
+        assertEquals("second!", ((box.content.blocks[1] as ParagraphNode).inlines.single() as InlineText).text)
+    }
+
     @Test
     fun `activating an existing text box in selection mode selects without focusing`() {
         val controller = NeoNoteEditorController()
