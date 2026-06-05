@@ -46,7 +46,10 @@ class ComposeInputAdapterTest {
         val diagnostics = InputDiagnostics(
             tool = PointerTool.SPen,
             pressure = 0.625f,
+            rawPressure = 0.725f,
             pointerCount = 2,
+            androidToolType = AndroidToolTypes.Stylus,
+            buttonState = 0,
             deviceId = 7,
             source = AndroidInputSources.Stylus,
             sourceDescription = describeAndroidSource(AndroidInputSources.Stylus),
@@ -55,10 +58,14 @@ class ComposeInputAdapterTest {
         val text = diagnostics.asToolbarText()
 
         assertTrue("tool=SPen" in text)
+        assertTrue("toolType=stylus" in text)
         assertTrue("pressure=0.63" in text)
+        assertTrue("rawPressure=0.73" in text)
         assertTrue("range=0.63..0.63" in text)
         assertTrue("samples=1" in text)
         assertTrue("hist=0" in text)
+        assertTrue("eraser=false" in text)
+        assertTrue("buttons=none" in text)
         assertTrue("pointers=2" in text)
         assertTrue("device=7" in text)
         assertTrue("source=stylus" in text)
@@ -85,5 +92,25 @@ class ComposeInputAdapterTest {
         assertTrue("range=0.25..0.80" in text)
         assertTrue("samples=3" in text)
         assertTrue("hist=2" in text)
+    }
+
+    @Test
+    fun `diagnostic text includes eraser tool type and button state`() {
+        val diagnostics = InputDiagnostics(
+            tool = PointerTool.SPen,
+            pressure = 0.4f,
+            rawPressure = 0.4f,
+            pointerCount = 1,
+            androidToolType = AndroidToolTypes.Eraser,
+            buttonState = 0x20,
+            sourceDescription = describeAndroidSource(AndroidInputSources.Stylus),
+        )
+
+        val text = diagnostics.asToolbarText()
+
+        assertTrue("toolType=eraser" in text)
+        assertTrue("eraser=true" in text)
+        assertTrue("buttons=0x20" in text)
+        assertTrue("rawPressure=0.40" in text)
     }
 }

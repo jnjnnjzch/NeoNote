@@ -61,6 +61,35 @@ class InputRouterTest {
     }
 
     @Test
+    fun `diagnostics sampling does not change historical ink routing`() {
+        val router = InputRouter()
+        val canvas = InfiniteCanvas()
+        val event = InputEvent(
+            type = PointerEventType.Move,
+            pointers = listOf(
+                InputPointer(
+                    id = 1,
+                    position = CanvasPoint(30f, 30f),
+                    tool = PointerTool.SPen,
+                    pressure = 0.9f,
+                    rawPressure = 0.95f,
+                    historicalSamples = listOf(
+                        InputInkSample(position = CanvasPoint(10f, 10f), pressure = 0.2f, rawPressure = 0.25f),
+                        InputInkSample(position = CanvasPoint(20f, 20f), pressure = 0.6f, rawPressure = 0.65f),
+                    ),
+                ),
+            ),
+        )
+
+        val samplesObservedByDiagnostics = event.primaryInkSamples
+        val action = assertIs<InputAction.ContinueInk>(router.route(canvas, event).action)
+
+        assertEquals(samplesObservedByDiagnostics, action.samples)
+        assertEquals(3, action.samples.size)
+        assertEquals(listOf(0.25f, 0.65f, 0.95f), action.samples.map { it.rawPressure })
+    }
+
+    @Test
     fun `finger tap blank routes create rich content box intent without mutating canvas`() {
         val router = InputRouter()
         val canvas = InfiniteCanvas()

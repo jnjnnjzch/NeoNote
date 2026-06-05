@@ -35,6 +35,7 @@ import com.neonote.engine.InputRouter
 import com.neonote.engine.PointerEventType
 import com.neonote.input.AndroidPointerSnapshot
 import com.neonote.input.AndroidStylusInputAdapter
+import com.neonote.input.AndroidToolTypes
 import com.neonote.input.ComposeInputAdapter
 import com.neonote.input.InputDiagnostics
 import com.neonote.input.describeAndroidSource
@@ -248,7 +249,11 @@ private fun routePointerEvent(
         InputDiagnostics(
             tool = inputEvent.pointers.first().tool,
             pressure = inputEvent.primaryPressure,
+            rawPressure = inputEvent.primaryRawPressure,
             pointerCount = inputEvent.pointers.size,
+            androidToolType = platformSnapshot?.pointerAt(0)?.toolType,
+            isEraser = platformSnapshot?.pointerAt(0)?.toolType == AndroidToolTypes.Eraser,
+            buttonState = platformSnapshot?.buttonState,
             deviceId = platformSnapshot?.deviceId,
             source = platformSnapshot?.source,
             sourceDescription = describeAndroidSource(platformSnapshot?.source),
