@@ -6,6 +6,7 @@ import com.neonote.engine.InputMode
 import com.neonote.engine.InputInkSample
 import com.neonote.engine.InputPointer
 import com.neonote.engine.InputRouter
+import com.neonote.engine.InlineStyle
 import com.neonote.engine.PointerEventType
 import com.neonote.engine.PointerTool
 import com.neonote.engine.toPlainText
@@ -19,8 +20,11 @@ import com.neonote.model.InfiniteCanvas
 import com.neonote.model.InkLayer
 import com.neonote.model.InkPoint
 import com.neonote.model.InkStroke
+import com.neonote.model.InlineText
+import com.neonote.model.ListKind
 import com.neonote.model.NeoNoteDocument
 import com.neonote.model.NotePage
+import com.neonote.model.ParagraphNode
 import com.neonote.model.ViewportState
 import com.neonote.model.RichContentBox
 import kotlin.test.Test
@@ -590,6 +594,84 @@ class NeoNoteEditorControllerTest {
         assertEquals(true, box.isFocused)
         assertTrue(controller.state.selection.selectedRefs.isEmpty())
         assertEquals("edited again", box.toPlainText())
+    }
+
+    @Test
+    fun `platform input bridge keeps focused rich content input and multiline paste usable`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+
+        controller.updateRichContentFromPlatformInput(
+            boxId = boxId,
+            previousText = "",
+            nextText = "first line",
+            selectionStart = 10,
+            selectionEnd = 10,
+            hasActiveComposition = false,
+        )
+        controller.updateRichContentFromPlatformInput(
+            boxId = boxId,
+            previousText = "first line",
+            nextText = "first line\nsecond line",
+            selectionStart = 22,
+            selectionEnd = 22,
+            hasActiveComposition = false,
+        )
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals(boxId, controller.state.focusedRichContentBoxId)
+        assertEquals(true, box.isFocused)
+        assertEquals("first line\nsecond line", box.toPlainText())
+        assertEquals(2, box.content.blocks.size)
+    }
+
+    @Test
+    fun `platform input bridge preserves ime composition fallback`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+
+        controller.updateRichContentFromPlatformInput(
+            boxId = boxId,
+            previousText = "ni",
+            nextText = "你",
+            selectionStart = 1,
+            selectionEnd = 1,
+            hasActiveComposition = true,
+        )
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals("你", box.toPlainText())
+        assertEquals(boxId, controller.state.focusedRichContentBoxId)
+        assertEquals(true, box.isFocused)
+    }
+
+    @Test
+    fun `rich content shortcut controller paths remain usable for style and list commands`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "shortcut")
+
+        controller.toggleRichContentStyle(
+            boxId = boxId,
+            style = InlineStyle.Bold,
+            selectionStart = 0,
+            selectionEnd = 8,
+        )
+        controller.toggleRichContentList(
+            boxId = boxId,
+            kind = ListKind.Bullet,
+            selectionStart = 0,
+            selectionEnd = 8,
+        )
+
+        val paragraph = (controller.currentCanvas.objects.single() as RichContentBox).content.blocks.single() as ParagraphNode
+        val inline = paragraph.inlines.single() as InlineText
+        assertEquals("shortcut", inline.text)
+        assertEquals(true, inline.bold)
+        assertEquals(ListKind.Bullet, paragraph.listMetadata?.kind)
     }
 
     @Test

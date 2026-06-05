@@ -12,9 +12,10 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -27,6 +28,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -124,7 +126,7 @@ internal fun RichContentBoxView(
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
-            TextField(
+            BasicTextField(
                 value = platformTextFieldValue,
                 onValueChange = { nextValue ->
                     val previousValue = platformTextFieldValue
@@ -145,6 +147,8 @@ internal fun RichContentBoxView(
                     capitalization = KeyboardCapitalization.Sentences,
                     imeAction = ImeAction.Default,
                 ),
+                textStyle = LocalTextStyle.current.copy(color = Color(0xFF0F172A)),
+                cursorBrush = SolidColor(Color(0xFF7C3AED)),
                 modifier = Modifier
                     .fillMaxSize()
                     .focusRequester(focusRequester)
@@ -201,7 +205,17 @@ internal fun RichContentBoxView(
                             controller.commitRichContentEditing(box.id)
                         }
                     },
-                placeholder = { Text("Start typing…") },
+                decorationBox = { innerTextField ->
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        if (platformTextFieldValue.text.isEmpty()) {
+                            Text(
+                                text = "Start typing…",
+                                color = Color(0xFF94A3B8),
+                            )
+                        }
+                        innerTextField()
+                    }
+                },
             )
         }
     }
