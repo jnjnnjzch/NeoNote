@@ -51,7 +51,7 @@ public fun InkLayerView(
         if (committedBitmap != null) {
             drawImage(image = committedBitmap, topLeft = Offset.Zero)
         }
-        activeStroke?.drawInkStroke()
+        activeStroke?.let { stroke -> drawInkStroke(stroke) }
     }
 }
 
