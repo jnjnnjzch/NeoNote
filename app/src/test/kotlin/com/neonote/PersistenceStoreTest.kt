@@ -9,6 +9,7 @@ import com.neonote.engine.PagePersistenceResult
 import com.neonote.engine.PagePersistenceStore
 import com.neonote.engine.PersistedPage
 import com.neonote.engine.toDocumentManifest
+import com.neonote.engine.toPlainText
 import com.neonote.model.BlockFormula
 import com.neonote.model.BlockImage
 import com.neonote.model.CanvasPoint

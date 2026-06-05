@@ -465,11 +465,15 @@ public class NeoNoteEditorController(
 
     public fun commitRichContentEditing(boxId: String) {
         val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
-        richContentSessions[boxId]?.blurCommit(box)
+        richContentSessions[richContentSessionKey(boxId)]?.blurCommit(box)
     }
 
     private fun editorSessionFor(boxId: String, box: RichContentBox): RichContentEditorSession =
-        richContentSessions.getOrPut(boxId) { RichContentEditorSession(initialBox = box, engine = richContentEngine) }.also { it.focus(box) }
+        richContentSessions.getOrPut(richContentSessionKey(boxId)) {
+            RichContentEditorSession(initialBox = box, engine = richContentEngine)
+        }.also { it.focus(box) }
+
+    private fun richContentSessionKey(boxId: String): String = "${state.currentPageId}:$boxId"
 
     public fun selectCanvasObject(objectId: String) {
         val result = selectionEngine.execute(
