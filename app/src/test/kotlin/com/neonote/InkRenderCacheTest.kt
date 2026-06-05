@@ -1,19 +1,29 @@
 package com.neonote
 
 import com.neonote.ink.InkRenderCache
+import com.neonote.engine.DefaultDocumentJson
 import com.neonote.ink.InkRenderCacheUpdate
 import com.neonote.ink.TileKey
+import com.neonote.ink.bounds
 import com.neonote.ink.intersectingTileKeys
 import com.neonote.ink.originX
 import com.neonote.ink.originY
 import com.neonote.ink.planInkRenderCacheUpdate
 import com.neonote.ink.tileKeyForPoint
 import com.neonote.ink.toTileLocal
+import com.neonote.model.InfiniteCanvas
+import com.neonote.model.InkLayer
 import com.neonote.model.InkPoint
 import com.neonote.model.InkStroke
+import com.neonote.model.NeoNoteDocument
+import com.neonote.model.NotePage
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
+import kotlinx.serialization.encodeToString
 
 class InkRenderCacheTest {
     @Test
@@ -29,16 +39,24 @@ class InkRenderCacheTest {
     }
 
     @Test
-    fun `far away stroke maps to document space tile instead of layer size bounds`() {
+    fun `stroke bounds map to document space tile keys`() {
         val farStroke = stroke(
             id = "far-stroke",
-            startX = 10_500f,
-            startY = 7_300f,
-            endX = 10_700f,
-            endY = 7_500f,
+            startX = 5_000f,
+            startY = 3_000f,
+            endX = 5_050f,
+            endY = 3_050f,
         )
 
-        assertEquals(setOf(TileKey(10, 7)), intersectingTileKeys(farStroke, tileSize = TILE_SIZE))
+        val bounds = assertNotNull(farStroke.bounds())
+        assertTrue(bounds.left > 0f)
+        assertTrue(bounds.top > 0f)
+
+        val tileKeys = intersectingTileKeys(farStroke, tileSize = TILE_SIZE)
+
+        assertEquals(setOf(TileKey(4, 2)), tileKeys)
+        assertTrue(tileKeys.all { it.tileX != 0 || it.tileY != 0 })
+        assertFalse(tileKeys.isEmpty(), "Far-away strokes must not be discarded by layer-size clipping.")
     }
 
     @Test
@@ -55,7 +73,8 @@ class InkRenderCacheTest {
     }
 
     @Test
-    fun `tile local coordinate conversion subtracts tile origin`() {
+    fun `document points convert to tile local points by subtracting tile origin`() {
+        val tileKey = TileKey(2, 3)
         val documentStroke = stroke(
             id = "local-stroke",
             startX = 2_100f,
@@ -64,8 +83,10 @@ class InkRenderCacheTest {
             endY = 3_125f,
         )
 
-        val localStroke = documentStroke.toTileLocal(TileKey(2, 3), tileSize = TILE_SIZE)
+        val localStroke = documentStroke.toTileLocal(tileKey, tileSize = TILE_SIZE)
 
+        assertEquals(2_048f, tileKey.originX(TILE_SIZE))
+        assertEquals(3_072f, tileKey.originY(TILE_SIZE))
         assertEquals(
             listOf(
                 InkPoint(x = 52f, y = 28f, pressure = 0.5f),
@@ -128,6 +149,44 @@ class InkRenderCacheTest {
         assertEquals(
             InkRenderCacheUpdate.Cleared,
             planInkRenderCacheUpdate(cachedStrokes = listOf(firstStroke), nextStrokes = emptyList()),
+        )
+    }
+
+
+    @Test
+    fun `loaded vector strokes rebuild tile cache because cache is not persisted source of truth`() {
+        val farStroke = stroke(
+            id = "persisted-far-stroke",
+            startX = 5_000f,
+            startY = 3_000f,
+            endX = 5_050f,
+            endY = 3_050f,
+        )
+        val document = NeoNoteDocument(
+            id = "doc-ink-render",
+            title = "Ink persistence",
+            assetStoreId = "asset-store",
+            pages = listOf(
+                NotePage(
+                    id = "page-1",
+                    canvas = InfiniteCanvas(inkLayer = InkLayer(strokes = listOf(farStroke))),
+                ),
+            ),
+        )
+
+        val encodedDocument = DefaultDocumentJson.encodeToString(document)
+
+        assertFalse(encodedDocument.contains("cache", ignoreCase = true))
+        assertFalse(encodedDocument.contains("tile", ignoreCase = true))
+
+        val loadedDocument = DefaultDocumentJson.decodeFromString(NeoNoteDocument.serializer(), encodedDocument)
+        val loadedStrokes = loadedDocument.pages.single().canvas.inkLayer.strokes
+
+        assertEquals(listOf(farStroke), loadedStrokes)
+        assertEquals(setOf(TileKey(4, 2)), intersectingTileKeys(loadedStrokes.single(), tileSize = TILE_SIZE))
+        assertEquals(
+            InkRenderCacheUpdate.Rebuilt,
+            planInkRenderCacheUpdate(cachedStrokes = emptyList(), nextStrokes = loadedStrokes),
         )
     }
 
