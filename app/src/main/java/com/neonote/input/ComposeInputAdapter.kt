@@ -61,7 +61,11 @@ public class ComposeInputAdapter {
         return InputDiagnostics(
             tool = tool,
             pressure = currentPressure,
+            rawPressure = primaryPlatformPointer?.pressure,
             pointerCount = pointerCount,
+            androidToolType = primaryPlatformPointer?.toolType,
+            isEraser = primaryPlatformPointer?.toolType == AndroidToolTypes.Eraser,
+            buttonState = platformSnapshot?.buttonState,
             deviceId = platformSnapshot?.deviceId,
             source = platformSnapshot?.source,
             sourceDescription = describeAndroidSource(platformSnapshot?.source),
@@ -87,6 +91,7 @@ public fun MotionEvent.toAndroidPointerSnapshot(): AndroidPointerSnapshot {
     return AndroidPointerSnapshot(
         deviceId = deviceId,
         source = eventSource,
+        buttonState = buttonState,
         pointers = List(pointerCount) { index ->
             AndroidPointer(
                 pointerId = getPointerId(index),

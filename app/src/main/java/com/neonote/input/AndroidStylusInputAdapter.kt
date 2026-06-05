@@ -16,6 +16,7 @@ public object AndroidStylusInputAdapter {
         val pointerIndex = event.primaryStylusPointerIndex() ?: return null
         val eventType = event.toPointerEventType() ?: return null
         val currentPressure = event.getPressure(pointerIndex)
+        val toolType = event.getToolType(pointerIndex)
 
         val historicalSamples = if (eventType == PointerEventType.Move) {
             event.historicalInkSamples(pointerIndex)
@@ -32,7 +33,11 @@ public object AndroidStylusInputAdapter {
                         x = event.getX(pointerIndex),
                         y = event.getY(pointerIndex),
                     ),
-                    tool = PointerTool.SPen,
+                    tool = classifyPointerTool(
+                        composeType = PlatformPointerType.Unknown,
+                        androidToolType = toolType,
+                        androidSource = event.source,
+                    ),
                     pressure = currentPressure,
                     rawPressure = currentPressure,
                     historicalSamples = historicalSamples,
@@ -46,13 +51,16 @@ public object AndroidStylusInputAdapter {
             ?: return InputDiagnostics(
                 tool = PointerTool.Finger,
                 pressure = 1f,
+                rawPressure = null,
                 pointerCount = event.pointerCount,
+                buttonState = event.buttonState,
                 deviceId = event.deviceId,
                 source = event.source,
                 sourceDescription = describeAndroidSource(event.source),
             )
 
         val currentPressure = event.getPressure(pointerIndex)
+        val toolType = event.getToolType(pointerIndex)
         val currentSample = InputInkSample(
             position = CanvasPoint(
                 x = event.getX(pointerIndex),
@@ -63,9 +71,17 @@ public object AndroidStylusInputAdapter {
         )
 
         return InputDiagnostics(
-            tool = PointerTool.SPen,
+            tool = classifyPointerTool(
+                composeType = PlatformPointerType.Unknown,
+                androidToolType = toolType,
+                androidSource = event.source,
+            ),
             pressure = currentPressure,
+            rawPressure = currentPressure,
             pointerCount = event.pointerCount,
+            androidToolType = toolType,
+            isEraser = toolType == MotionEvent.TOOL_TYPE_ERASER,
+            buttonState = event.buttonState,
             deviceId = event.deviceId,
             source = event.source,
             sourceDescription = describeAndroidSource(event.source),
