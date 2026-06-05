@@ -6,6 +6,7 @@ import com.neonote.engine.InputMode
 import com.neonote.engine.InputInkSample
 import com.neonote.engine.InputPointer
 import com.neonote.engine.InputRouter
+import com.neonote.engine.RichContentLayoutDefaults
 import com.neonote.engine.InlineStyle
 import com.neonote.engine.PointerEventType
 import com.neonote.engine.PointerTool
@@ -886,6 +887,43 @@ class NeoNoteEditorControllerTest {
         assertEquals(CanvasPoint(20f, 15f), movedBox.position)
         assertEquals(listOf(InkPoint(15f, 25f), InkPoint(70f, 25f)), movedStroke.points)
     }
+
+    @Test
+    fun `multiline rich content input expands height conservatively and delete keeps minimum height`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+
+        controller.updateRichContentText(boxId, "first line\nsecond line\nthird line")
+        val multilineBox = controller.currentCanvas.objects.single() as RichContentBox
+
+        assertTrue(multilineBox.size.height > RichContentLayoutDefaults.MinimumBoxHeight)
+        assertEquals(320f, multilineBox.size.width)
+
+        controller.updateRichContentText(boxId, "")
+        val emptiedBox = controller.currentCanvas.objects.single() as RichContentBox
+
+        assertEquals(320f, emptiedBox.size.width)
+        assertTrue(emptiedBox.size.height >= RichContentLayoutDefaults.MinimumBoxHeight)
+        assertTrue(emptiedBox.size.height <= multilineBox.size.height)
+    }
+
+    @Test
+    fun `zooming viewport does not mutate content driven rich content height`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "first line\nsecond line\nthird line\nfourth line")
+        val heightBeforeZoom = (controller.currentCanvas.objects.single() as RichContentBox).size.height
+
+        controller.zoomViewportBy(zoomChange = 1.75f, screenCentroid = CanvasPoint(100f, 100f))
+        controller.zoomViewportBy(zoomChange = 0.5f, screenCentroid = CanvasPoint(100f, 100f))
+
+        val boxAfterZoom = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals(heightBeforeZoom, boxAfterZoom.size.height)
+        assertTrue(boxAfterZoom.size.height >= RichContentLayoutDefaults.MinimumBoxHeight)
+    }
+
 }
 
 private fun editorStateWithMixedCanvas(): EditorState = EditorState(

@@ -80,7 +80,7 @@ public class RichContentLayoutEngine(
         is ParagraphNode -> measureParagraphLines(block, blockIndex, contentLeft, contentWidth, lineCapacity, lineTop)
         is BlockFormula -> listOf(blockLine(blockIndex, 0, contentLeft, contentWidth, lineTop, metrics.blockFormulaHeight, 0, block.expression.length))
         is BlockImage -> listOf(blockLine(blockIndex, 0, contentLeft, contentWidth, lineTop, metrics.blockImageHeight, 0, 0))
-        is TableNode -> listOf(blockLine(blockIndex, 0, contentLeft, contentWidth, lineTop, metrics.tablePlaceholderHeight, 0, 0))
+        is TableNode -> listOf(blockLine(blockIndex, 0, contentLeft, contentWidth, lineTop, metrics.tablePreviewHeight(block), 0, 0))
     }
 
     private fun measureParagraphLines(
@@ -157,18 +157,47 @@ public class RichContentLayoutEngine(
 }
 
 public data class RichContentLayoutMetrics(
-    val characterWidth: Float = 8f,
-    val lineHeight: Float = 24f,
-    val horizontalPadding: Float = 16f,
-    val verticalPadding: Float = 16f,
-    val blockSpacing: Float = 4f,
-    val blockFormulaHeight: Float = 32f,
-    val blockImageHeight: Float = 96f,
-    val tablePlaceholderHeight: Float = 64f,
-    val minimumMeasuredWidth: Float = 1f,
-    val minimumContentWidth: Float = 1f,
-    val minimumMeasuredHeight: Float = 56f,
-)
+    val characterWidth: Float = RichContentLayoutDefaults.CharacterWidth,
+    val lineHeight: Float = RichContentLayoutDefaults.LineHeight,
+    val horizontalPadding: Float = RichContentLayoutDefaults.HorizontalPadding,
+    val verticalPadding: Float = RichContentLayoutDefaults.VerticalPadding,
+    val blockSpacing: Float = RichContentLayoutDefaults.BlockSpacing,
+    val blockFormulaHeight: Float = RichContentLayoutDefaults.FormulaCardHeight,
+    val blockImageHeight: Float = RichContentLayoutDefaults.ImageCardHeight,
+    val tableHeaderPreviewHeight: Float = RichContentLayoutDefaults.TableHeaderPreviewHeight,
+    val tableRowPreviewHeight: Float = RichContentLayoutDefaults.TableRowPreviewHeight,
+    val tableCellPreviewHeight: Float = RichContentLayoutDefaults.TableCellPreviewHeight,
+    val tableMinimumPreviewRows: Int = RichContentLayoutDefaults.TableMinimumPreviewRows,
+    val minimumMeasuredWidth: Float = RichContentLayoutDefaults.MinimumMeasuredWidth,
+    val minimumContentWidth: Float = RichContentLayoutDefaults.MinimumContentWidth,
+    val minimumMeasuredHeight: Float = RichContentLayoutDefaults.MinimumBoxHeight,
+) {
+    public fun tablePreviewHeight(table: TableNode): Float {
+        val rowCount = table.rows.size.coerceAtLeast(tableMinimumPreviewRows)
+        val rowHeight = max(tableRowPreviewHeight, tableCellPreviewHeight)
+        return tableHeaderPreviewHeight + rowCount * rowHeight
+    }
+}
+
+public object RichContentLayoutDefaults {
+    public const val CharacterWidth: Float = 8f
+    public const val LineHeight: Float = 24f
+    public const val HorizontalPadding: Float = 16f
+    public const val VerticalPadding: Float = 16f
+    public const val BlockSpacing: Float = 4f
+    public const val FormulaCardHeight: Float = 56f
+    public const val ImageCardHeight: Float = 96f
+    public const val TableHeaderPreviewHeight: Float = 32f
+    public const val TableRowPreviewHeight: Float = 32f
+    public const val TableCellPreviewHeight: Float = 32f
+    public const val TableMinimumPreviewRows: Int = 1
+    public const val MinimumMeasuredWidth: Float = 1f
+    public const val MinimumContentWidth: Float = 1f
+    public const val MinimumBoxHeight: Float = 56f
+    public const val BoxChromePadding: Float = 8f
+    public const val RendererHorizontalPadding: Float = 8f
+    public const val RendererVerticalPadding: Float = 6f
+}
 
 public data class RichContentLayoutResult(
     val measuredSize: CanvasSize,

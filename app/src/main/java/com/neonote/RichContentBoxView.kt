@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.neonote.engine.RichContentLayoutDefaults
 import com.neonote.model.RichContentBox
 import kotlin.math.roundToInt
 
@@ -57,7 +58,7 @@ internal fun RichContentBoxView(
         .border(width = borderWidth, color = borderColor, shape = RoundedCornerShape(14.dp))
 
     val contentModifier = modifier
-        .padding(8.dp)
+        .padding(RichContentLayoutDefaults.BoxChromePadding.dp)
         .then(
             if (selectionMode) {
                 Modifier.pointerInput(box.id, selectionMode) {

@@ -1,5 +1,6 @@
 package com.neonote
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.neonote.engine.RichContentLayoutDefaults
 import com.neonote.model.BlockNode
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
@@ -26,7 +28,11 @@ internal fun RichContentEditor(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(
+                horizontal = RichContentLayoutDefaults.RendererHorizontalPadding.dp,
+                vertical = RichContentLayoutDefaults.RendererVerticalPadding.dp,
+            ),
+        verticalArrangement = Arrangement.spacedBy(RichContentLayoutDefaults.BlockSpacing.dp),
     ) {
         if (box.content.blocks.isEmpty()) {
             RichParagraphEditor(
@@ -89,6 +95,7 @@ private fun RichStaticEditorBlock(
             controller.toggleRichContentTodoCheckedState(boxId = boxId, blockIndex = blockIndex + localBlockIndex)
         },
         modifier = Modifier.fillMaxWidth(),
+        applyContentPadding = false,
     )
 }
 
