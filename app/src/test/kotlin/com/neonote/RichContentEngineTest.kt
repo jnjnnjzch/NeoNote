@@ -714,6 +714,19 @@ class RichContentEngineTest {
     }
 
     @Test
+    fun `block image alone participates in measured rich content height`() {
+        val layout = RichContentMeasurer().measure(
+            content = RichContent(blocks = listOf(BlockImage(assetId = "asset-block", altText = "diagram", id = "image-block-1"))),
+            availableWidth = 240f,
+        )
+
+        val expectedHeight = RichContentLayoutDefaults.VerticalPadding * 2 + RichContentLayoutDefaults.ImageCardHeight
+        assertEquals(expectedHeight, layout.measuredSize.height)
+        val imageRect = layout.blockRects.single().rect
+        assertEquals(RichContentLayoutDefaults.ImageCardHeight, imageRect.bottom - imageRect.top)
+    }
+
+    @Test
     fun `resizeBoxToMeasuredContent keeps wrapped multiline text above minimum box height`() {
         val box = RichContentBox(
             id = "box-1",

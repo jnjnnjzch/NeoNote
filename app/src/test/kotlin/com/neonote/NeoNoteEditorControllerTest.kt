@@ -14,6 +14,7 @@ import com.neonote.engine.toPlainText
 import com.neonote.input.InputDiagnostics
 import com.neonote.input.withPressureSamples
 import com.neonote.model.BlockFormula
+import com.neonote.model.BlockImage
 import com.neonote.model.CanvasPoint
 import com.neonote.model.CanvasSize
 import com.neonote.model.EditorState
@@ -146,15 +147,20 @@ class NeoNoteEditorControllerTest {
 
         controller.insertRichContentFormulaPlaceholder(boxId = boxId, expression = "x")
         controller.insertRichContentTablePlaceholder(boxId = boxId)
+        controller.insertRichContentImagePlaceholder(boxId = boxId, assetId = "asset-toolbar-1", altText = "Toolbar image")
 
         val box = controller.currentCanvas.objects.single() as RichContentBox
         assertIs<ParagraphNode>(box.content.blocks[1])
-        assertIs<TableNode>(box.content.blocks[2])
-        assertIs<BlockFormula>(box.content.blocks[3])
-        assertIs<ParagraphNode>(box.content.blocks[4])
+        val image = assertIs<BlockImage>(box.content.blocks[2])
+        assertEquals("asset-toolbar-1", image.assetId)
+        assertEquals("Toolbar image", image.altText)
+        assertIs<TableNode>(box.content.blocks[3])
+        assertIs<BlockFormula>(box.content.blocks[4])
+        assertIs<ParagraphNode>(box.content.blocks[5])
         assertEquals(boxId, controller.state.focusedRichContentBoxId)
         assertTrue(box.isFocused)
         assertEquals(1, controller.activeRichContentBlockIndex(boxId))
+        assertEquals(2, controller.selectedRichContentObjectBlockIndex(boxId))
     }
 
     @Test

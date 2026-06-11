@@ -50,6 +50,8 @@ internal fun RichContentRenderer(
     onToggleTodoChecked: (Int) -> Unit,
     modifier: Modifier = Modifier,
     applyContentPadding: Boolean = true,
+    selectedObjectBlockIndex: Int? = null,
+    onObjectBlockFocus: (Int) -> Unit = { onFocus() },
 ) {
     val focusModifier = if (!selectionMode && !selected) {
         Modifier.clickable(onClick = onFocus)
@@ -105,7 +107,12 @@ internal fun RichContentRenderer(
                 is BlockImage -> {
                     previousNumbered = false
                     numberedIndex = 0
-                    RichBlockCard(label = "Image", accent = "▧", text = block.imagePlaceholderText(), height = RichContentLayoutDefaults.ImageCardHeight)
+                    ImageBlockView(
+                        block = block,
+                        selected = selectedObjectBlockIndex == blockIndex,
+                        enabled = !selectionMode && !selected,
+                        onClick = { onObjectBlockFocus(blockIndex) },
+                    )
                 }
                 is TableNode -> {
                     previousNumbered = false

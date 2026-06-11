@@ -171,6 +171,10 @@ public class RichContentEditorSession(
         RichContentCommand.InsertBlockFormula(expression = expression, index = activeBlockInsertionIndex()),
     )
 
+    public fun insertBlockImagePlaceholder(assetId: String, altText: String? = null): RichContentEditorEdit = applyCommand(
+        RichContentCommand.InsertBlockImage(assetId = assetId, altText = altText, index = activeBlockInsertionIndex()),
+    )
+
     /**
      * Translate a paragraph-local BasicTextField snapshot into semantic rich
      * content commands. The field owns only one paragraph, so offsets are local
@@ -360,7 +364,7 @@ public class RichContentEditorSession(
         return RichContentEditorEdit(box = box, selection = selection, commands = listOf(command))
     }
 
-    private fun activeBlockInsertionIndex(): Int = (activeBlockIndex + 1).coerceIn(0, box.content.blocks.size)
+    public fun activeBlockInsertionIndex(): Int = (activeBlockIndex + 1).coerceIn(0, box.content.blocks.size)
 
     private fun syncActiveParagraphFromSelection() {
         val paragraphLength = box.paragraphTextLength(activeBlockIndex)

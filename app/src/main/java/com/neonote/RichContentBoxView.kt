@@ -105,6 +105,10 @@ internal fun RichContentBoxView(
                         controller.toggleRichContentTodoCheckedState(boxId = box.id, blockIndex = blockIndex)
                     },
                     modifier = Modifier.fillMaxSize(),
+                    selectedObjectBlockIndex = controller.selectedRichContentObjectBlockIndex(box.id),
+                    onObjectBlockFocus = { blockIndex ->
+                        controller.selectRichContentObjectBlock(boxId = box.id, blockIndex = blockIndex)
+                    },
                 )
             } else {
                 RichContentEditor(

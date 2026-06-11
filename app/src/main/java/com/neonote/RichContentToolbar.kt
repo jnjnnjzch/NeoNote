@@ -64,6 +64,9 @@ internal fun RichContentToolbar(
             ToolbarAction(label = "ƒ", contentDescription = "Insert formula placeholder") {
                 controller.insertRichContentFormulaPlaceholder(boxId = boxId)
             }
+            ToolbarAction(label = "▧", contentDescription = "Insert image placeholder") {
+                controller.insertRichContentImagePlaceholder(boxId = boxId)
+            }
         }
     }
 }
