@@ -698,19 +698,20 @@ class RichContentEngineTest {
         )
         val layout = RichContentMeasurer().measure(content, availableWidth = 240f)
 
-        val expectedTableHeight = RichContentLayoutDefaults.TableHeaderPreviewHeight +
-            3 * maxOf(RichContentLayoutDefaults.TableRowPreviewHeight, RichContentLayoutDefaults.TableCellPreviewHeight)
+        val tableLayout = layout.tableLayouts.single()
         val expectedHeight = RichContentLayoutDefaults.VerticalPadding * 2 +
             RichContentLayoutDefaults.FormulaCardHeight +
             RichContentLayoutDefaults.ImageCardHeight +
-            expectedTableHeight +
+            tableLayout.tableHeight +
             RichContentLayoutDefaults.BlockSpacing * 2
 
         assertEquals(3, layout.blockRects.size)
         assertEquals(expectedHeight, layout.measuredSize.height)
         assertEquals(RichContentLayoutDefaults.FormulaCardHeight, layout.lineRects[0].rect.bottom - layout.lineRects[0].rect.top)
         assertEquals(RichContentLayoutDefaults.ImageCardHeight, layout.lineRects[1].rect.bottom - layout.lineRects[1].rect.top)
-        assertEquals(expectedTableHeight, layout.lineRects[2].rect.bottom - layout.lineRects[2].rect.top)
+        assertEquals(tableLayout.tableHeight, layout.lineRects[2].rect.bottom - layout.lineRects[2].rect.top)
+        assertEquals(3, tableLayout.rowHeights.size)
+        assertTrue(tableLayout.cellRects.flatten().all { rect -> rect.bottom - rect.top >= RichContentLayoutDefaults.TableMinCellHeight })
     }
 
     @Test

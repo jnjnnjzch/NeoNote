@@ -12,8 +12,12 @@ import com.neonote.model.InlineText
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
+import com.neonote.model.TableCell
+import com.neonote.model.TableColumnWidthMode
 import com.neonote.model.TableNode
+import kotlin.math.ceil
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Deterministic document-space layout for rich content boxes.
@@ -32,11 +36,22 @@ public class RichContentLayoutEngine(
         val lineCapacity = max(1, (contentWidth / metrics.characterWidth).toInt())
         val blockRects = mutableListOf<RichContentBlockRect>()
         val lineRects = mutableListOf<RichContentLineRect>()
+        val tableLayouts = mutableListOf<RichContentTableLayout>()
         var top = metrics.verticalPadding
 
         val blocks = if (content.blocks.isEmpty()) listOf(ParagraphNode()) else content.blocks
         blocks.forEachIndexed { index, block ->
             val blockTop = top
+            val tableLayout = (block as? TableNode)?.let { table ->
+                measureTableLayout(
+                    table = table,
+                    blockIndex = index,
+                    contentLeft = metrics.horizontalPadding,
+                    contentWidth = contentWidth,
+                    tableTop = top,
+                )
+            }
+            if (tableLayout != null) tableLayouts += tableLayout
             val blockLines = measureBlockLines(
                 block = block,
                 blockIndex = index,
@@ -44,9 +59,11 @@ public class RichContentLayoutEngine(
                 contentWidth = contentWidth,
                 lineCapacity = lineCapacity,
                 lineTop = top,
+                tableLayout = tableLayout,
             )
             lineRects += blockLines
-            val blockHeight = if (blockLines.isEmpty()) metrics.lineHeight else blockLines.sumOfFloat { it.rect.bottom - it.rect.top }
+            val blockHeight = tableLayout?.tableHeight
+                ?: if (blockLines.isEmpty()) metrics.lineHeight else blockLines.sumOfFloat { it.rect.bottom - it.rect.top }
             val blockBottom = blockTop + blockHeight
             blockRects += RichContentBlockRect(
                 blockIndex = index,
@@ -66,6 +83,7 @@ public class RichContentLayoutEngine(
             measuredSize = CanvasSize(width = safeWidth, height = measuredHeight),
             blockRects = blockRects,
             lineRects = lineRects,
+            tableLayouts = tableLayouts,
         )
     }
 
@@ -76,11 +94,152 @@ public class RichContentLayoutEngine(
         contentWidth: Float,
         lineCapacity: Int,
         lineTop: Float,
+        tableLayout: RichContentTableLayout? = null,
     ): List<RichContentLineRect> = when (block) {
         is ParagraphNode -> measureParagraphLines(block, blockIndex, contentLeft, contentWidth, lineCapacity, lineTop)
         is BlockFormula -> listOf(blockLine(blockIndex, 0, contentLeft, contentWidth, lineTop, metrics.blockFormulaHeight, 0, block.expression.length))
         is BlockImage -> listOf(blockLine(blockIndex, 0, contentLeft, contentWidth, lineTop, metrics.blockImageHeight, 0, 0))
-        is TableNode -> listOf(blockLine(blockIndex, 0, contentLeft, contentWidth, lineTop, metrics.tablePreviewHeight(block), 0, 0))
+        is TableNode -> listOf(blockLine(blockIndex, 0, contentLeft, contentWidth, lineTop, tableLayout?.tableHeight ?: metrics.tablePreviewHeight(block), 0, 0))
+    }
+
+
+    private fun measureTableLayout(
+        table: TableNode,
+        blockIndex: Int,
+        contentLeft: Float,
+        contentWidth: Float,
+        tableTop: Float,
+    ): RichContentTableLayout {
+        val rowCount = table.rows.size.coerceAtLeast(metrics.tableMinimumLayoutRows)
+        val columnCount = table.columnCount().coerceAtLeast(metrics.tableMinimumLayoutColumns)
+        val preferredWidths = (0 until columnCount).map { columnIndex ->
+            val policy = table.columnPolicies.getOrNull(columnIndex)
+            val measuredPreferredWidth = table.rows.maxOfOrNull { row ->
+                row.getOrNull(columnIndex)?.preferredCellWidth() ?: metrics.tableMinCellWidth
+            } ?: metrics.tableMinCellWidth
+
+            val policyMin = policy?.minWidth?.takeIf { it > 0f } ?: metrics.tableMinCellWidth
+            val policyMax = policy?.maxWidth?.takeIf { it > 0f } ?: metrics.tableMaxColumnWidth
+            val autoPreferred = policy?.preferredWidth?.takeIf { it > 0f } ?: measuredPreferredWidth
+            val preferred = if (policy?.mode == TableColumnWidthMode.Manual) {
+                policy.manualWidth?.takeIf { it > 0f } ?: autoPreferred
+            } else {
+                autoPreferred
+            }
+            preferred.coerceIn(policyMin, policyMax)
+        }
+        val minWidths = (0 until columnCount).map { columnIndex ->
+            val policy = table.columnPolicies.getOrNull(columnIndex)
+            policy?.minWidth?.takeIf { it > 0f } ?: metrics.tableMinCellWidth
+        }
+        val columnWidths = fitColumnWidthsToContentWidth(
+            preferredWidths = preferredWidths,
+            minWidths = minWidths,
+            contentWidth = contentWidth,
+        )
+
+        val rowHeights = (0 until rowCount).map { rowIndex ->
+            (0 until columnCount).maxOfOrNull { columnIndex ->
+                val cell = table.rows.getOrNull(rowIndex)?.getOrNull(columnIndex) ?: TableCell()
+                cell.measuredCellHeight(columnWidths[columnIndex])
+            } ?: metrics.tableMinCellHeight
+        }
+
+        val cellRects = mutableListOf<List<CanvasRect>>()
+        var rowTop = tableTop
+        rowHeights.forEachIndexed { rowIndex, rowHeight ->
+            var columnLeft = contentLeft
+            val rowRects = columnWidths.mapIndexed { columnIndex, columnWidth ->
+                val rect = CanvasRect(
+                    left = columnLeft,
+                    top = rowTop,
+                    right = columnLeft + columnWidth,
+                    bottom = rowTop + rowHeight,
+                )
+                columnLeft += columnWidth
+                rect
+            }
+            cellRects += rowRects
+            rowTop += rowHeight
+        }
+
+        val tableHeight = rowHeights.sum()
+        return RichContentTableLayout(
+            blockIndex = blockIndex,
+            columnWidths = columnWidths,
+            rowHeights = rowHeights,
+            tableWidth = columnWidths.sum(),
+            tableHeight = tableHeight,
+            cellRects = cellRects,
+        )
+    }
+
+    private fun fitColumnWidthsToContentWidth(
+        preferredWidths: List<Float>,
+        minWidths: List<Float>,
+        contentWidth: Float,
+    ): List<Float> {
+        if (preferredWidths.isEmpty()) return emptyList()
+        val preferredTotal = preferredWidths.sum()
+        if (preferredTotal <= contentWidth) {
+            val extra = (contentWidth - preferredTotal) / preferredWidths.size
+            return preferredWidths.map { it + extra }
+        }
+
+        val minTotal = minWidths.sum()
+        if (minTotal >= contentWidth) {
+            val fallbackWidth = contentWidth / preferredWidths.size
+            return minWidths.map { minWidth -> min(minWidth, fallbackWidth) }
+        }
+
+        val shrinkableTotal = preferredWidths.zip(minWidths).sumOfFloat { (preferred, minWidth) ->
+            (preferred - minWidth).coerceAtLeast(0f)
+        }
+        val shrinkNeeded = preferredTotal - contentWidth
+        return preferredWidths.zip(minWidths).map { (preferred, minWidth) ->
+            val shrinkable = (preferred - minWidth).coerceAtLeast(0f)
+            preferred - shrinkNeeded * (shrinkable / shrinkableTotal)
+        }
+    }
+
+    private fun TableNode.columnCount(): Int = max(
+        rows.maxOfOrNull { it.size } ?: 0,
+        columnPolicies.size,
+    )
+
+    private fun TableCell.preferredCellWidth(): Float {
+        val maxLineLength = content.plainTextForTableMeasurement()
+            .split('\n')
+            .maxOfOrNull { it.length }
+            ?: 0
+        return (maxLineLength * metrics.characterWidth + metrics.tableCellHorizontalPadding * 2f)
+            .coerceAtLeast(metrics.tableMinCellWidth)
+    }
+
+    private fun TableCell.measuredCellHeight(columnWidth: Float): Float {
+        val textWidth = (columnWidth - metrics.tableCellHorizontalPadding * 2f).coerceAtLeast(metrics.characterWidth)
+        val lineCapacity = max(1, (textWidth / metrics.characterWidth).toInt())
+        val visualLineCount = content.plainTextForTableMeasurement()
+            .split('\n')
+            .sumOf { hardLine ->
+                if (hardLine.isEmpty()) {
+                    1
+                } else {
+                    ceil(hardLine.length / lineCapacity.toFloat()).toInt().coerceAtLeast(1)
+                }
+            }
+            .coerceAtLeast(1)
+        return (visualLineCount * metrics.lineHeight + metrics.tableCellVerticalPadding * 2f)
+            .coerceAtLeast(metrics.tableMinCellHeight)
+    }
+
+    private fun RichContent.plainTextForTableMeasurement(): String = blocks.joinToString("\n") { block ->
+        when (block) {
+            is ParagraphNode -> block.inlineTextForMeasurement()
+            is BlockFormula -> block.expression.ifBlank { "□" }
+            is BlockImage -> block.altText?.takeIf { it.isNotBlank() } ?: "□"
+            is TableNode -> "□"
+        }
     }
 
     private fun measureParagraphLines(
@@ -168,6 +327,13 @@ public data class RichContentLayoutMetrics(
     val tableRowPreviewHeight: Float = RichContentLayoutDefaults.TableRowPreviewHeight,
     val tableCellPreviewHeight: Float = RichContentLayoutDefaults.TableCellPreviewHeight,
     val tableMinimumPreviewRows: Int = RichContentLayoutDefaults.TableMinimumPreviewRows,
+    val tableMinimumLayoutRows: Int = RichContentLayoutDefaults.TableMinimumLayoutRows,
+    val tableMinimumLayoutColumns: Int = RichContentLayoutDefaults.TableMinimumLayoutColumns,
+    val tableMinCellWidth: Float = RichContentLayoutDefaults.TableMinCellWidth,
+    val tableMinCellHeight: Float = RichContentLayoutDefaults.TableMinCellHeight,
+    val tableMaxColumnWidth: Float = RichContentLayoutDefaults.TableMaxColumnWidth,
+    val tableCellHorizontalPadding: Float = RichContentLayoutDefaults.TableCellHorizontalPadding,
+    val tableCellVerticalPadding: Float = RichContentLayoutDefaults.TableCellVerticalPadding,
     val minimumMeasuredWidth: Float = RichContentLayoutDefaults.MinimumMeasuredWidth,
     val minimumContentWidth: Float = RichContentLayoutDefaults.MinimumContentWidth,
     val minimumMeasuredHeight: Float = RichContentLayoutDefaults.MinimumBoxHeight,
@@ -191,6 +357,13 @@ public object RichContentLayoutDefaults {
     public const val TableRowPreviewHeight: Float = 32f
     public const val TableCellPreviewHeight: Float = 32f
     public const val TableMinimumPreviewRows: Int = 1
+    public const val TableMinimumLayoutRows: Int = 1
+    public const val TableMinimumLayoutColumns: Int = 1
+    public const val TableMinCellWidth: Float = 48f
+    public const val TableMinCellHeight: Float = 32f
+    public const val TableMaxColumnWidth: Float = 240f
+    public const val TableCellHorizontalPadding: Float = 8f
+    public const val TableCellVerticalPadding: Float = 4f
     public const val MinimumMeasuredWidth: Float = 1f
     public const val MinimumContentWidth: Float = 1f
     public const val MinimumBoxHeight: Float = 56f
@@ -203,11 +376,21 @@ public data class RichContentLayoutResult(
     val measuredSize: CanvasSize,
     val blockRects: List<RichContentBlockRect>,
     val lineRects: List<RichContentLineRect>,
+    val tableLayouts: List<RichContentTableLayout> = emptyList(),
 )
 
 public data class RichContentBlockRect(
     val blockIndex: Int,
     val rect: CanvasRect,
+)
+
+public data class RichContentTableLayout(
+    val blockIndex: Int,
+    val columnWidths: List<Float>,
+    val rowHeights: List<Float>,
+    val tableWidth: Float,
+    val tableHeight: Float,
+    val cellRects: List<List<CanvasRect>>,
 )
 
 public data class RichContentLineRect(
