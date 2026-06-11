@@ -232,6 +232,7 @@ class PersistenceStoreTest {
         val loadedBlockImage = assertIs<BlockImage>(loadedBox.content.blocks[4])
         assertEquals("block-image-1", loadedBlockImage.assetId)
         assertEquals("block alt", loadedBlockImage.altText)
+        assertEquals("image-1", loadedBlockImage.id)
         val loadedFloatingImage = assertIs<FloatingImage>(loaded.pages.single().canvas.objects[1])
         assertEquals("image-asset", loadedFloatingImage.assetId)
         assertEquals(CanvasPoint(x = 10.125f, y = -20.875f), loadedFloatingImage.position)

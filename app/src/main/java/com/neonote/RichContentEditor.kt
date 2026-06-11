@@ -96,6 +96,8 @@ private fun RichStaticEditorBlock(
         },
         modifier = Modifier.fillMaxWidth(),
         applyContentPadding = false,
+        selectedObjectBlockIndex = if (controller.selectedRichContentObjectBlockIndex(boxId) == blockIndex) 0 else null,
+        onObjectBlockFocus = { controller.selectRichContentObjectBlock(boxId = boxId, blockIndex = blockIndex) },
     )
 }
 
