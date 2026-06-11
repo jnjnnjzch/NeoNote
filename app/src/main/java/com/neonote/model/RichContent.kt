@@ -56,13 +56,36 @@ enum class ListKind {
     Todo,
 }
 
-/** Static block-level table placeholder. Cells keep nested [RichContent], but UI renders only a simple grid preview. */
+/**
+ * Block-level table content. Cells keep nested [RichContent]. [columnPolicies]
+ * reserves deterministic sizing inputs for future manual-width table editing while
+ * the current editor still renders a simple static grid preview.
+ */
 @Serializable
 @SerialName("table")
 data class TableNode(
     val rows: List<List<TableCell>> = emptyList(),
     val id: String = "",
+    val columnPolicies: List<TableColumnPolicy> = emptyList(),
 ) : BlockNode
+
+@Serializable
+data class TableColumnPolicy(
+    val minWidth: Float = 0f,
+    val preferredWidth: Float? = null,
+    val maxWidth: Float? = null,
+    val manualWidth: Float? = null,
+    val mode: TableColumnWidthMode = TableColumnWidthMode.Auto,
+)
+
+@Serializable
+enum class TableColumnWidthMode {
+    @SerialName("auto")
+    Auto,
+
+    @SerialName("manual")
+    Manual,
+}
 
 /** A table cell owns RichContent so serialization can preserve rich nested cell content. */
 @Serializable
