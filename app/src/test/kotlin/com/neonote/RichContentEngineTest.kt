@@ -713,6 +713,34 @@ class RichContentEngineTest {
         assertEquals(expectedTableHeight, layout.lineRects[2].rect.bottom - layout.lineRects[2].rect.top)
     }
 
+
+    @Test
+    fun `measurer counts consecutive empty paragraphs as visible lines`() {
+        val content = RichContent(
+            blocks = listOf(
+                ParagraphNode(inlines = listOf(InlineText("hello"))),
+                ParagraphNode(),
+                ParagraphNode(),
+                ParagraphNode(inlines = listOf(InlineText("world"))),
+            ),
+        )
+
+        val layout = RichContentMeasurer().measure(content, availableWidth = 240f)
+
+        val expectedHeight = RichContentLayoutDefaults.VerticalPadding * 2 +
+            RichContentLayoutDefaults.LineHeight * 4 +
+            RichContentLayoutDefaults.BlockSpacing * 3
+        assertEquals(4, layout.blockRects.size)
+        assertEquals(4, layout.lineRects.size)
+        assertEquals(expectedHeight, layout.measuredSize.height)
+        assertEquals(
+            RichContentLayoutDefaults.LineHeight,
+            layout.blockRects[1].rect.bottom - layout.blockRects[1].rect.top,
+        )
+        assertEquals(layout.lineRects[1].inlineStart, layout.lineRects[1].inlineEnd)
+        assertEquals(layout.lineRects[2].inlineStart, layout.lineRects[2].inlineEnd)
+    }
+
     @Test
     fun `resizeBoxToMeasuredContent keeps wrapped multiline text above minimum box height`() {
         val box = RichContentBox(

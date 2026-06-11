@@ -86,7 +86,7 @@ class RichContentEditorSessionTest {
     }
 
     @Test
-    fun `platform input bridge keeps selection range on ordinary snapshots`() {
+    fun `platform input adapter keeps selection range on ordinary snapshots`() {
         val session = RichContentEditorSession(boxWithText("hello world"))
 
         val edit = session.replaceFromPlatformInput(
@@ -103,7 +103,7 @@ class RichContentEditorSessionTest {
     }
 
     @Test
-    fun `platform input bridge uses composition fallback while preserving selection range`() {
+    fun `platform input adapter uses composition fallback while preserving selection range`() {
         val session = RichContentEditorSession(boxWithText("ni hao"))
 
         val edit = session.replaceFromPlatformCompositionFallback(
@@ -332,6 +332,48 @@ class RichContentEditorSessionTest {
         assertIs<RichContentCommand.InsertParagraph>(edit.commands.single())
     }
 
+
+    @Test
+    fun `paragraph local consecutive enter preserves visible empty paragraphs before typing`() {
+        val session = RichContentEditorSession(boxWithText("hello"))
+        session.focusParagraph(blockIndex = 0, selectionStart = 5)
+
+        val firstEnter = session.replaceFromPlatformParagraphInput(
+            blockIndex = 0,
+            previousText = "hello",
+            nextText = "hello\n",
+            selectionStartOffset = 6,
+        )
+        val secondEnter = session.replaceFromPlatformParagraphInput(
+            blockIndex = 1,
+            previousText = "",
+            nextText = "\n",
+            selectionStartOffset = 1,
+        )
+        val thirdEnter = session.replaceFromPlatformParagraphInput(
+            blockIndex = 2,
+            previousText = "",
+            nextText = "\n",
+            selectionStartOffset = 1,
+        )
+        val typedWorld = session.replaceFromPlatformParagraphInput(
+            blockIndex = 3,
+            previousText = "",
+            nextText = "world",
+            selectionStartOffset = 5,
+        )
+
+        assertIs<RichContentCommand.InsertParagraph>(firstEnter.commands.single())
+        assertIs<RichContentCommand.InsertParagraph>(secondEnter.commands.single())
+        assertIs<RichContentCommand.InsertParagraph>(thirdEnter.commands.single())
+        assertEquals("hello\n\n\nworld", typedWorld.box.toPlainText())
+        assertEquals(4, typedWorld.box.content.blocks.size)
+        assertEquals("", assertIs<ParagraphNode>(typedWorld.box.content.blocks[1]).toPlainTextForSessionTest())
+        assertEquals("", assertIs<ParagraphNode>(typedWorld.box.content.blocks[2]).toPlainTextForSessionTest())
+        assertEquals(3, session.activeBlockIndex)
+        assertEquals(5, session.activeParagraphCaret)
+    }
+
     @Test
     fun `paragraph local backspace deletes within paragraph before merging blocks`() {
         val session = RichContentEditorSession(boxWithParagraphs("alpha", "bravo"))
@@ -397,4 +439,11 @@ class RichContentEditorSessionTest {
             ),
         ),
     )
+}
+
+private fun ParagraphNode.toPlainTextForSessionTest(): String = inlines.joinToString("") { inline ->
+    when (inline) {
+        is InlineText -> inline.text
+        else -> ""
+    }
 }
