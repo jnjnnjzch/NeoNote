@@ -4,6 +4,7 @@ import android.content.ClipDescription
 import android.content.ClipboardManager
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.LocalTextStyle
@@ -32,6 +33,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neonote.engine.InlineStyle
 import com.neonote.engine.RichContentLayoutDefaults
@@ -109,13 +111,18 @@ internal fun RichParagraphEditor(
         cursorBrush = SolidColor(Color(0xFF7C3AED)),
         modifier = modifier
             .fillMaxWidth()
+            .heightIn(min = RichContentLayoutDefaults.LineHeight.dp)
             .focusRequester(focusRequester)
             .onFocusChanged { focusState ->
                 if (focusState.isFocused && !selectionMode && !selected && !box.isFocused) {
                     controller.activateRichContentBox(box.id)
-                } else if (!focusState.isFocused && box.isFocused) {
-                    controller.commitRichContentEditing(box.id)
                 }
+                // Do not commit or clear the rich-content session on plain platform
+                // focus loss. Toolbar taps can transiently move Android focus away
+                // from BasicTextField; the editor session remains the source of
+                // truth for the active paragraph selection until an explicit editor
+                // transition (selection mode, page switch, or focusing another box)
+                // commits it.
             }
             .onPreviewKeyEvent { keyEvent ->
                 val style = keyEvent.richContentShortcutStyle()

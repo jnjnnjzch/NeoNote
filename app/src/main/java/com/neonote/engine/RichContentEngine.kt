@@ -227,7 +227,7 @@ public class RichContentEngine {
     }
 
     /**
-     * Replace only one paragraph from a platform input bridge snapshot. This is
+     * Replace only one paragraph from a platform paragraph input adapter snapshot. This is
      * intentionally conservative for IME composition: active composing text can
      * be accepted without rebuilding unrelated rich blocks in the same box.
      */

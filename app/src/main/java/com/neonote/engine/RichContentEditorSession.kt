@@ -260,9 +260,9 @@ public class RichContentEditorSession(
     }
 
     /**
-     * Legacy whole-box platform bridge retained for older controller helpers and
+     * Legacy whole-box platform input adapter retained for older controller helpers and
      * tests. The Compose RichContent editor should prefer the paragraph-local
-     * bridge so platform snapshots do not rebuild unrelated rich blocks.
+     * adapter so platform snapshots do not rebuild unrelated rich blocks.
      */
     public fun replaceFromPlatformInput(
         previousText: String,

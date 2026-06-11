@@ -649,7 +649,7 @@ class NeoNoteEditorControllerTest {
     }
 
     @Test
-    fun `platform input bridge keeps focused rich content input and multiline paste usable`() {
+    fun `platform input adapter keeps focused rich content input and multiline paste usable`() {
         val controller = NeoNoteEditorController()
         controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
         val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
@@ -679,7 +679,7 @@ class NeoNoteEditorControllerTest {
     }
 
     @Test
-    fun `platform input bridge preserves ime composition fallback`() {
+    fun `platform input adapter preserves ime composition fallback`() {
         val controller = NeoNoteEditorController()
         controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
         val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
@@ -939,6 +939,83 @@ class NeoNoteEditorControllerTest {
         assertEquals(listOf(InkPoint(15f, 25f), InkPoint(70f, 25f)), movedStroke.points)
     }
 
+
+    @Test
+    fun `paragraph local input keeps consecutive empty paragraphs visible and resizes box`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+
+        controller.updateRichContentParagraphFromPlatformInput(
+            boxId = boxId,
+            blockIndex = 0,
+            previousText = "",
+            nextText = "hello",
+            selectionStart = 5,
+        )
+        val heightAfterHello = (controller.currentCanvas.objects.single() as RichContentBox).size.height
+
+        controller.updateRichContentParagraphFromPlatformInput(
+            boxId = boxId,
+            blockIndex = 0,
+            previousText = "hello",
+            nextText = "hello\n",
+            selectionStart = 6,
+        )
+        controller.updateRichContentParagraphFromPlatformInput(
+            boxId = boxId,
+            blockIndex = 1,
+            previousText = "",
+            nextText = "\n",
+            selectionStart = 1,
+        )
+        controller.updateRichContentParagraphFromPlatformInput(
+            boxId = boxId,
+            blockIndex = 2,
+            previousText = "",
+            nextText = "\n",
+            selectionStart = 1,
+        )
+        controller.updateRichContentParagraphFromPlatformInput(
+            boxId = boxId,
+            blockIndex = 3,
+            previousText = "",
+            nextText = "world",
+            selectionStart = 5,
+        )
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals("hello\n\n\nworld", box.toPlainText())
+        assertEquals(4, box.content.blocks.size)
+        assertEquals("", assertIs<ParagraphNode>(box.content.blocks[1]).toPlainTextForControllerTest())
+        assertEquals("", assertIs<ParagraphNode>(box.content.blocks[2]).toPlainTextForControllerTest())
+        assertEquals(3, controller.activeRichContentBlockIndex(boxId))
+        assertTrue(box.size.height > heightAfterHello)
+        assertEquals(boxId, controller.state.focusedRichContentBoxId)
+        assertTrue(box.isFocused)
+    }
+
+    @Test
+    fun `toolbar actions reuse active paragraph selection after platform focus loss commit`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "hello")
+        controller.focusRichContentParagraph(boxId = boxId, blockIndex = 0, selectionStart = 0, selectionEnd = 5)
+
+        controller.commitRichContentEditing(boxId)
+        controller.toggleActiveRichContentStyle(boxId = boxId, style = InlineStyle.Bold)
+        controller.toggleActiveRichContentList(boxId = boxId, kind = ListKind.Bullet)
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        val paragraph = assertIs<ParagraphNode>(box.content.blocks.single())
+        val text = assertIs<InlineText>(paragraph.inlines.single())
+        assertTrue(text.bold)
+        assertEquals(ListKind.Bullet, paragraph.listMetadata?.kind)
+        assertEquals(boxId, controller.state.focusedRichContentBoxId)
+        assertTrue(box.isFocused)
+    }
+
     @Test
     fun `multiline rich content input expands height conservatively and delete keeps minimum height`() {
         val controller = NeoNoteEditorController()
@@ -1008,6 +1085,13 @@ private fun editorStateWithMixedCanvas(): EditorState = EditorState(
     currentPageId = "test-page-mixed",
     viewport = ViewportState(),
 )
+
+private fun ParagraphNode.toPlainTextForControllerTest(): String = inlines.joinToString("") { inline ->
+    when (inline) {
+        is InlineText -> inline.text
+        else -> ""
+    }
+}
 
 private fun InputEvent.toDiagnostics(): InputDiagnostics = InputDiagnostics(
     tool = pointers.first().tool,
