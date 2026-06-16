@@ -43,6 +43,7 @@ public class RichContentEngine {
         is RichContentCommand.ToggleTodoCheckedState -> toggleTodoCheckedState(box, command.blockIndex)
         is RichContentCommand.InsertInlineFormula -> insertInlineFormula(box, command.expression, command.selection)
         is RichContentCommand.InsertBlockFormula -> insertBlockFormula(box, command.expression, command.index)
+        is RichContentCommand.ReplaceBlockFormulaExpression -> replaceBlockFormulaExpression(box, command.blockIndex, command.expression)
         is RichContentCommand.InsertInlineImage -> insertInlineImage(box, command.assetId, command.altText, command.selection)
         is RichContentCommand.InsertBlockImage -> insertBlockImage(box, command.assetId, command.altText, command.index)
         is RichContentCommand.InsertTable -> insertTable(box, command.rows, command.columns, command.index)
@@ -326,6 +327,24 @@ public class RichContentEngine {
     public fun insertBlockFormula(box: RichContentBox, expression: String, index: Int? = null): RichContentCommandResult.ContentInserted =
         insertBlock(box, BlockFormula(expression = expression), index)
 
+    public fun replaceBlockFormulaExpression(
+        box: RichContentBox,
+        blockIndex: Int,
+        expression: String,
+    ): RichContentCommandResult.ContentEdited {
+        require(blockIndex in box.content.blocks.indices) { "blockIndex must address an existing block" }
+        val block = box.content.blocks[blockIndex] as? BlockFormula
+            ?: return RichContentCommandResult.ContentEdited(
+                box = box,
+                selection = TextSelection.cursor(TextCursorPosition(blockIndex = blockIndex, inlineOffset = 0)),
+            )
+        val updatedBlock = block.copy(expression = expression)
+        return RichContentCommandResult.ContentEdited(
+            box = box.copy(content = RichContent(blocks = box.content.blocks.replaceAt(blockIndex, updatedBlock))),
+            selection = TextSelection.cursor(TextCursorPosition(blockIndex = blockIndex, inlineOffset = expression.length)),
+        )
+    }
+
     private fun insertParagraphBlock(box: RichContentBox, text: String, index: Int? = null): RichContentCommandResult.ContentInserted =
         insertBlock(box, ParagraphNode(inlines = listOf(InlineText(text))), index)
 
@@ -409,6 +428,7 @@ public sealed interface RichContentCommand {
     public data class ToggleTodoCheckedState(val blockIndex: Int) : RichContentCommand
     public data class InsertInlineFormula(val expression: String, val selection: TextSelection) : RichContentCommand
     public data class InsertBlockFormula(val expression: String, val index: Int? = null) : RichContentCommand
+    public data class ReplaceBlockFormulaExpression(val blockIndex: Int, val expression: String) : RichContentCommand
     public data class InsertInlineImage(val assetId: String, val altText: String? = null, val selection: TextSelection) : RichContentCommand
     public data class InsertBlockImage(val assetId: String, val altText: String? = null, val index: Int? = null) : RichContentCommand
     public data class InsertTable(val rows: Int, val columns: Int, val index: Int? = null) : RichContentCommand

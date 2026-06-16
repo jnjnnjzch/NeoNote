@@ -20,6 +20,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class RichContentEditorSessionTest {
@@ -213,6 +214,25 @@ class RichContentEditorSessionTest {
         assertIs<RichContentCommand.InsertBlockFormula>(formulaEdit.commands.single())
         assertIs<BlockFormula>(formulaEdit.box.content.blocks[1])
         assertIs<TableNode>(formulaEdit.box.content.blocks[2])
+    }
+
+
+    @Test
+    fun `formula block focus edit and blur keeps expression in block formula`() {
+        val session = RichContentEditorSession(
+            RichContentBox(
+                id = "box-1",
+                content = RichContent(blocks = listOf(BlockFormula(expression = "x"))),
+            ),
+        )
+
+        session.focusFormulaBlock(0)
+        val edit = session.replaceFormulaExpression(blockIndex = 0, expression = "x^2 + y^2")
+        session.blurFormulaBlock(0)
+
+        assertNull(session.activeFormulaBlockIndex)
+        assertIs<RichContentCommand.ReplaceBlockFormulaExpression>(edit.commands.single())
+        assertEquals("x^2 + y^2", assertIs<BlockFormula>(edit.box.content.blocks.single()).expression)
     }
 
     @Test

@@ -163,6 +163,24 @@ class NeoNoteEditorControllerTest {
         assertEquals(2, controller.selectedRichContentObjectBlockIndex(boxId))
     }
 
+
+    @Test
+    fun `formula block can be focused edited and blurred in place`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.insertRichContentFormulaPlaceholder(boxId = boxId, expression = "x")
+
+        controller.focusRichContentFormulaBlock(boxId = boxId, blockIndex = 1)
+        controller.updateRichContentFormulaExpression(boxId = boxId, blockIndex = 1, expression = "x^2 + y^2")
+        controller.blurRichContentFormulaBlock(boxId = boxId, blockIndex = 1)
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals("x^2 + y^2", assertIs<BlockFormula>(box.content.blocks[1]).expression)
+        assertNull(controller.activeRichContentFormulaBlockIndex(boxId))
+        assertEquals(boxId, controller.state.focusedRichContentBoxId)
+    }
+
     @Test
     fun `panning viewport does not move document objects`() {
         val controller = NeoNoteEditorController()

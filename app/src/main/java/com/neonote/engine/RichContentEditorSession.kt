@@ -1,5 +1,6 @@
 package com.neonote.engine
 
+import com.neonote.model.BlockFormula
 import com.neonote.model.InlineFormula
 import com.neonote.model.InlineImage
 import com.neonote.model.InlineText
@@ -15,17 +16,11 @@ import com.neonote.model.TextSelection
 /**
  * Editing-session state for a focused [RichContentBox].
  *
- * Compose TextField/BasicTextField remains only the platform input adapter: it
- * reports text snapshots, focus, and IME composition state. This session owns the
- * editor semantics (caret/selection, typing style, local buffer, and command
- * queue) and translates basic input into [RichContentCommand]s for
- * [RichContentEngine].
- *
- * Boundary: Android IME composition (notably Chinese pinyin conversion) is not a
- * complete rich-text composition engine here. While the platform reports an
- * active composing region, [replaceFromPlatformCompositionFallback] preserves
- * platform behavior with a whole plain-text replacement. Once composition is
- * committed, normal insert/paragraph/backspace commands resume.
+ * Platform text editing primitives such as Compose BasicTextField report text
+ * snapshots, focus, selection, and IME composition state. This session owns the
+ * editor semantics: active target, caret/selection, typing style, local buffers,
+ * and command queue. It translates platform snapshots into [RichContentCommand]s
+ * for [RichContentEngine].
  */
 public class RichContentEditorSession(
     initialBox: RichContentBox,
@@ -50,7 +45,8 @@ public class RichContentEditorSession(
     public var activeTarget: ActiveRichContentTarget = ActiveRichContentTarget.Paragraph(activeBlockIndex)
         private set
 
-    public var activeParagraphSelection: ParagraphTextSelection = ParagraphTextSelection.cursor(initialSelection.start.inlineOffset)
+    public var activeParagraphSelection: ParagraphTextSelection =
+        ParagraphTextSelection.cursor(initialSelection.start.inlineOffset)
         private set
 
     public val activeParagraphCaret: Int?
@@ -68,12 +64,8 @@ public class RichContentEditorSession(
         box = updatedBox
         localEditableBuffer = updatedBox.toPlainText()
         selection = selection.coerceInto(updatedBox)
-        if (activeTarget is ActiveRichContentTarget.TableCell) {
-            activeBlockIndex = (activeTarget as ActiveRichContentTarget.TableCell).address.blockIndex
-        } else {
-            activeBlockIndex = box.coerceParagraphBlockIndex(activeBlockIndex)
-            activeTarget = ActiveRichContentTarget.Paragraph(activeBlockIndex)
-        }
+        activeTarget = activeTarget.coerceInto(updatedBox)
+        activeBlockIndex = activeTarget.blockIndexForSession()
         syncActiveParagraphFromSelection()
     }
 
@@ -81,6 +73,28 @@ public class RichContentEditorSession(
         activeBlockIndex = box.coerceParagraphBlockIndex(blockIndex)
         activeTarget = ActiveRichContentTarget.Paragraph(activeBlockIndex)
         setActiveParagraphSelection(selectionStart, selectionEnd)
+    }
+
+    public fun focusTableCell(address: TableCellAddress) {
+        activeBlockIndex = address.blockIndex.coerceAtLeast(0)
+        activeTarget = ActiveRichContentTarget.TableCell(address)
+    }
+
+    public fun focusFormulaBlock(blockIndex: Int) {
+        if (box.content.blocks.getOrNull(blockIndex) !is BlockFormula) return
+        activeBlockIndex = blockIndex
+        activeTarget = ActiveRichContentTarget.FormulaBlock(blockIndex)
+        selection = TextSelection.cursor(TextCursorPosition(blockIndex = blockIndex, inlineOffset = 0))
+        syncActiveParagraphFromSelection()
+    }
+
+    public fun blurFormulaBlock(blockIndex: Int? = null) {
+        val target = activeTarget as? ActiveRichContentTarget.FormulaBlock ?: return
+        if (blockIndex != null && target.blockIndex != blockIndex) return
+
+        activeBlockIndex = box.coerceParagraphBlockIndex(target.blockIndex)
+        activeTarget = ActiveRichContentTarget.Paragraph(activeBlockIndex)
+        syncActiveParagraphFromSelection()
     }
 
     public fun setActiveParagraphSelection(start: Int, end: Int = start) {
@@ -188,11 +202,37 @@ public class RichContentEditorSession(
         RichContentCommand.InsertBlockImage(assetId = assetId, altText = altText, index = activeBlockInsertionIndex()),
     )
 
+    public fun replaceFormulaExpression(blockIndex: Int, expression: String): RichContentEditorEdit {
+        if (box.content.blocks.getOrNull(blockIndex) !is BlockFormula) {
+            return RichContentEditorEdit(box = box, selection = selection, commands = emptyList())
+        }
+
+        focusFormulaBlock(blockIndex)
+
+        val command = RichContentCommand.ReplaceBlockFormulaExpression(
+            blockIndex = blockIndex,
+            expression = expression,
+        )
+        val result = engine.execute(box, command) as RichContentCommandResult.ContentEdited
+
+        box = result.box
+        selection = result.selection
+        localEditableBuffer = box.toPlainText()
+        activeBlockIndex = blockIndex
+        activeTarget = ActiveRichContentTarget.FormulaBlock(blockIndex)
+        syncActiveParagraphFromSelection()
+        mutablePendingCommands += command
+
+        return RichContentEditorEdit(
+            box = box,
+            selection = selection,
+            commands = listOf(command),
+        )
+    }
+
     /**
-     * Translate a paragraph-local BasicTextField snapshot into semantic rich
-     * content commands. The field owns only one paragraph, so offsets are local
-     * to [blockIndex] and active IME composition can avoid rebuilding sibling
-     * rich blocks.
+     * Translate a paragraph-local platform text snapshot into semantic rich
+     * content commands. Offsets are local to [blockIndex].
      */
     public fun replaceFromPlatformParagraphInput(
         blockIndex: Int,
@@ -224,6 +264,7 @@ public class RichContentEditorSession(
             diff.insertedText == "\n" && diff.deletedStart == diff.deletedEnd -> {
                 appliedCommands += applyCommand(RichContentCommand.InsertParagraph(selection = selection)).commands
             }
+
             diff.insertedText.isEmpty() && diff.deletedEnd > diff.deletedStart -> {
                 if (diff.deletedEnd - diff.deletedStart == 1) {
                     selection = TextSelection.cursor(TextCursorPosition(activeBlockIndex, diff.deletedEnd))
@@ -232,11 +273,20 @@ public class RichContentEditorSession(
                     appliedCommands += applyCommand(RichContentCommand.DeleteSelection(selection = selection)).commands
                 }
             }
+
             else -> {
                 val command = if ('\n' in diff.insertedText || '\r' in diff.insertedText) {
-                    RichContentCommand.PastePlainText(text = diff.insertedText, selection = selection, typingStyle = typingStyle)
+                    RichContentCommand.PastePlainText(
+                        text = diff.insertedText,
+                        selection = selection,
+                        typingStyle = typingStyle,
+                    )
                 } else {
-                    RichContentCommand.InsertText(text = diff.insertedText, selection = selection, typingStyle = typingStyle)
+                    RichContentCommand.InsertText(
+                        text = diff.insertedText,
+                        selection = selection,
+                        typingStyle = typingStyle,
+                    )
                 }
                 appliedCommands += applyCommand(command).commands
             }
@@ -244,8 +294,16 @@ public class RichContentEditorSession(
 
         val selectionBlock = selection.start.blockIndex
         activeBlockIndex = box.coerceParagraphBlockIndex(selectionBlock)
-        val localStart = if (activeBlockIndex == selectionBlock) selection.start.inlineOffset else selectionStartOffset
-        val localEnd = if (activeBlockIndex == selection.end.blockIndex) selection.end.inlineOffset else localStart
+        val localStart = if (activeBlockIndex == selectionBlock) {
+            selection.start.inlineOffset
+        } else {
+            selectionStartOffset
+        }
+        val localEnd = if (activeBlockIndex == selection.end.blockIndex) {
+            selection.end.inlineOffset
+        } else {
+            localStart
+        }
         setActiveParagraphSelection(localStart, localEnd)
         return RichContentEditorEdit(box = box, selection = selection, commands = appliedCommands)
     }
@@ -258,28 +316,33 @@ public class RichContentEditorSession(
         selectionEndOffset: Int = selectionStartOffset,
     ): RichContentEditorEdit {
         activeBlockIndex = box.coerceParagraphBlockIndex(blockIndex)
+        activeTarget = ActiveRichContentTarget.Paragraph(activeBlockIndex)
+
         if (box.paragraphHasInlineAtom(activeBlockIndex)) {
-            // Interim protection: BasicTextField cannot edit inline atoms yet.
+            // Interim protection: platform text editing cannot edit inline atoms yet.
             // Avoid converting formula/image atoms into literal placeholder text
-            // during IME composition; ordinary text-only paragraphs still use the
-            // replacement fallback below.
+            // during IME composition.
             setActiveParagraphSelection(selectionStartOffset, selectionEndOffset)
             return RichContentEditorEdit(box = box, selection = selection, commands = emptyList())
         }
+
         val command = RichContentCommand.ReplaceParagraphText(activeBlockIndex, nextText)
         val result = engine.execute(box, command) as RichContentCommandResult.ContentEdited
+
         box = result.box
         localEditableBuffer = box.toPlainText()
         activeBlockIndex = box.coerceParagraphBlockIndex(result.selection.start.blockIndex)
+        activeTarget = ActiveRichContentTarget.Paragraph(activeBlockIndex)
         setActiveParagraphSelection(selectionStartOffset, selectionEndOffset)
         mutablePendingCommands += command
+
         return RichContentEditorEdit(box = box, selection = selection, commands = listOf(command))
     }
 
     /**
-     * Legacy whole-box platform input adapter retained for older controller helpers and
-     * tests. The Compose RichContent editor should prefer the paragraph-local
-     * adapter so platform snapshots do not rebuild unrelated rich blocks.
+     * Legacy whole-box platform text adapter retained for older controller helpers
+     * and tests. The block-native editor should prefer paragraph/table/formula
+     * target-specific adapters.
      */
     public fun replaceFromPlatformInput(
         previousText: String,
@@ -309,6 +372,7 @@ public class RichContentEditorSession(
             diff.insertedText == "\n" && diff.deletedStart == diff.deletedEnd -> {
                 appliedCommands += applyCommand(RichContentCommand.InsertParagraph(selection = selection)).commands
             }
+
             diff.insertedText.isEmpty() && diff.deletedEnd > diff.deletedStart -> {
                 if (diff.deletedEnd - diff.deletedStart == 1) {
                     selection = TextSelection.cursor(box.cursorPositionAtPlainOffset(diff.deletedEnd))
@@ -317,11 +381,20 @@ public class RichContentEditorSession(
                     appliedCommands += applyCommand(RichContentCommand.DeleteSelection(selection = selection)).commands
                 }
             }
+
             else -> {
                 val command = if ('\n' in diff.insertedText || '\r' in diff.insertedText) {
-                    RichContentCommand.PastePlainText(text = diff.insertedText, selection = selection, typingStyle = typingStyle)
+                    RichContentCommand.PastePlainText(
+                        text = diff.insertedText,
+                        selection = selection,
+                        typingStyle = typingStyle,
+                    )
                 } else {
-                    RichContentCommand.InsertText(text = diff.insertedText, selection = selection, typingStyle = typingStyle)
+                    RichContentCommand.InsertText(
+                        text = diff.insertedText,
+                        selection = selection,
+                        typingStyle = typingStyle,
+                    )
                 }
                 appliedCommands += applyCommand(command).commands
             }
@@ -334,9 +407,7 @@ public class RichContentEditorSession(
         return RichContentEditorEdit(box = box, selection = selection, commands = appliedCommands)
     }
 
-    /**
-     * Fallback path for active platform IME composition.
-     */
+    /** Legacy whole-box fallback path for active platform IME composition. */
     public fun replaceFromPlatformCompositionFallback(
         nextText: String,
         selectionStartPlainOffset: Int,
@@ -344,17 +415,13 @@ public class RichContentEditorSession(
     ): RichContentEditorEdit {
         val command = RichContentCommand.ReplacePlainText(nextText)
         val result = engine.execute(box, command) as RichContentCommandResult.ContentReplaced
+
         box = result.box
         localEditableBuffer = box.toPlainText()
         setSelectionFromPlainOffsets(selectionStartPlainOffset, selectionEndPlainOffset)
         mutablePendingCommands += command
+
         return RichContentEditorEdit(box = box, selection = selection, commands = listOf(command))
-    }
-
-
-    public fun focusTableCell(address: TableCellAddress) {
-        activeBlockIndex = address.blockIndex.coerceAtLeast(0)
-        activeTarget = ActiveRichContentTarget.TableCell(address)
     }
 
     public fun replaceTableCellParagraphFromPlatformInput(
@@ -362,8 +429,10 @@ public class RichContentEditorSession(
         nextText: String,
     ): RichContentEditorEdit {
         focusTableCell(address)
+
         val command = RichContentCommand.ReplaceTableCellParagraphText(address, nextText)
         val result = engine.execute(box, command) as RichContentCommandResult.ContentEdited
+
         box = result.box
         selection = result.selection
         localEditableBuffer = box.toPlainText()
@@ -371,6 +440,7 @@ public class RichContentEditorSession(
         activeTarget = ActiveRichContentTarget.TableCell(address)
         syncActiveParagraphFromSelection()
         mutablePendingCommands += command
+
         return RichContentEditorEdit(box = box, selection = selection, commands = listOf(command))
     }
 
@@ -398,27 +468,42 @@ public class RichContentEditorSession(
                 box = result.box
                 selection = result.selection
             }
+
             is RichContentCommandResult.ContentReplaced -> {
                 box = result.box
                 selection = TextSelection.cursor(box.content.endCursorPosition())
             }
-            is RichContentCommandResult.ContentInserted -> box = result.box
+
+            is RichContentCommandResult.ContentInserted -> {
+                box = result.box
+            }
         }
+
         localEditableBuffer = box.toPlainText()
         activeBlockIndex = box.coerceParagraphBlockIndex(selection.start.blockIndex)
         activeTarget = ActiveRichContentTarget.Paragraph(activeBlockIndex)
         syncActiveParagraphFromSelection()
         mutablePendingCommands += command
+
         return RichContentEditorEdit(box = box, selection = selection, commands = listOf(command))
     }
 
-    public fun activeBlockInsertionIndex(): Int = (activeBlockIndex + 1).coerceIn(0, box.content.blocks.size)
+    public fun activeBlockInsertionIndex(): Int = (activeTarget.blockIndexForSession() + 1)
+        .coerceIn(0, box.content.blocks.size)
 
     private fun syncActiveParagraphFromSelection() {
         val paragraphLength = box.paragraphTextLength(activeBlockIndex)
         activeParagraphSelection = ParagraphTextSelection(
-            start = if (selection.start.blockIndex == activeBlockIndex) selection.start.inlineOffset.coerceIn(0, paragraphLength) else 0,
-            end = if (selection.end.blockIndex == activeBlockIndex) selection.end.inlineOffset.coerceIn(0, paragraphLength) else 0,
+            start = if (selection.start.blockIndex == activeBlockIndex) {
+                selection.start.inlineOffset.coerceIn(0, paragraphLength)
+            } else {
+                0
+            },
+            end = if (selection.end.blockIndex == activeBlockIndex) {
+                selection.end.inlineOffset.coerceIn(0, paragraphLength)
+            } else {
+                0
+            },
         )
         localParagraphEditableBuffer = box.paragraphPlainTextOrEmpty(activeBlockIndex)
     }
@@ -491,6 +576,40 @@ private data class TextDiff(
     }
 }
 
+private fun ActiveRichContentTarget.blockIndexForSession(): Int = when (this) {
+    is ActiveRichContentTarget.Paragraph -> blockIndex
+    is ActiveRichContentTarget.TableCell -> address.blockIndex
+    is ActiveRichContentTarget.FormulaBlock -> blockIndex
+}
+
+private fun ActiveRichContentTarget.coerceInto(box: RichContentBox): ActiveRichContentTarget = when (this) {
+    is ActiveRichContentTarget.Paragraph -> {
+        ActiveRichContentTarget.Paragraph(box.coerceParagraphBlockIndex(blockIndex))
+    }
+
+    is ActiveRichContentTarget.TableCell -> {
+        val table = box.content.blocks.getOrNull(address.blockIndex) as? TableNode
+        val valid = table
+            ?.rows
+            ?.getOrNull(address.rowIndex)
+            ?.getOrNull(address.columnIndex) != null
+
+        if (valid) {
+            this
+        } else {
+            ActiveRichContentTarget.Paragraph(box.coerceParagraphBlockIndex(address.blockIndex))
+        }
+    }
+
+    is ActiveRichContentTarget.FormulaBlock -> {
+        if (box.content.blocks.getOrNull(blockIndex) is BlockFormula) {
+            this
+        } else {
+            ActiveRichContentTarget.Paragraph(box.coerceParagraphBlockIndex(blockIndex))
+        }
+    }
+}
+
 private fun String.modelPlainOffsetOf(platformOffset: Int): Int =
     take(platformOffset.coerceIn(0, length)).replace("\r\n", "\n").replace('\r', '\n').length
 
@@ -501,10 +620,12 @@ private fun TextSelection.coerceInto(box: RichContentBox): TextSelection = TextS
     ),
 )
 
-private fun RichContentBox.cursorPositionAtPlainOffset(offset: Int): TextCursorPosition = content.cursorPositionAtPlainOffset(offset)
+private fun RichContentBox.cursorPositionAtPlainOffset(offset: Int): TextCursorPosition =
+    content.cursorPositionAtPlainOffset(offset)
 
 private fun com.neonote.model.RichContent.cursorPositionAtPlainOffset(offset: Int): TextCursorPosition {
     if (blocks.isEmpty()) return TextCursorPosition(blockIndex = 0, inlineOffset = 0)
+
     val target = offset.coerceIn(0, toPlainText().length)
     var consumed = 0
     blocks.forEachIndexed { index, block ->
@@ -513,29 +634,41 @@ private fun com.neonote.model.RichContent.cursorPositionAtPlainOffset(offset: In
         if (target <= consumed + length) {
             return TextCursorPosition(blockIndex = index, inlineOffset = target - consumed)
         }
+
         consumed += length
         if (index < blocks.lastIndex) {
             if (target == consumed) return TextCursorPosition(blockIndex = index, inlineOffset = length)
             consumed += 1
-            if (target <= consumed) return TextCursorPosition(blockIndex = (index + 1).coerceAtMost(blocks.lastIndex), inlineOffset = 0)
+            if (target <= consumed) {
+                return TextCursorPosition(
+                    blockIndex = (index + 1).coerceAtMost(blocks.lastIndex),
+                    inlineOffset = 0,
+                )
+            }
         }
     }
+
     val lastIndex = blocks.lastIndex
     val lastParagraph = blocks[lastIndex] as? ParagraphNode
     return TextCursorPosition(blockIndex = lastIndex, inlineOffset = lastParagraph?.textLength() ?: 0)
 }
 
-private fun com.neonote.model.RichContent.endCursorPosition(): TextCursorPosition = cursorPositionAtPlainOffset(toPlainText().length)
+private fun com.neonote.model.RichContent.endCursorPosition(): TextCursorPosition =
+    cursorPositionAtPlainOffset(toPlainText().length)
 
 private fun RichContentBox.plainOffsetOf(position: TextCursorPosition): Int {
     if (content.blocks.isEmpty()) return 0
+
     var offset = 0
     content.blocks.forEachIndexed { index, block ->
         val paragraph = block as? ParagraphNode
-        if (index == position.blockIndex) return offset + position.inlineOffset.coerceIn(0, paragraph?.textLength() ?: 0)
+        if (index == position.blockIndex) {
+            return offset + position.inlineOffset.coerceIn(0, paragraph?.textLength() ?: 0)
+        }
         offset += paragraph?.textLength() ?: 0
         if (index < content.blocks.lastIndex) offset += 1
     }
+
     return content.toPlainText().length
 }
 
