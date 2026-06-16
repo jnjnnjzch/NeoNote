@@ -118,7 +118,7 @@ internal fun RichContentRenderer(
                 is TableNode -> {
                     previousNumbered = false
                     numberedIndex = 0
-                    StaticTablePreview(table = block)
+                    StaticTableGrid(table = block)
                 }
             }
         }
@@ -201,55 +201,34 @@ private fun RichBlockCard(label: String, accent: String, text: String, height: F
 }
 
 @Composable
-private fun StaticTablePreview(table: TableNode) {
-    val rowCount = table.rows.size.coerceAtLeast(RichContentLayoutDefaults.TableMinimumPreviewRows)
-    val tableHeight = RichContentLayoutDefaults.TableHeaderPreviewHeight +
-        rowCount * maxOf(RichContentLayoutDefaults.TableRowPreviewHeight, RichContentLayoutDefaults.TableCellPreviewHeight)
+private fun StaticTableGrid(table: TableNode) {
+    val rowCount = table.rows.size.coerceAtLeast(RichContentLayoutDefaults.TableMinimumLayoutRows)
+    val columnCount = (table.rows.maxOfOrNull { it.size } ?: 0).coerceAtLeast(RichContentLayoutDefaults.TableMinimumLayoutColumns)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(tableHeight.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .border(width = 1.dp, color = Color(0xFFCBD5E1), shape = RoundedCornerShape(10.dp)),
+            .border(width = 1.dp, color = Color(0xFFCBD5E1)),
     ) {
-        Text(
-            text = "Table preview",
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(RichContentLayoutDefaults.TableHeaderPreviewHeight.dp)
-                .background(Color(0xFFF1F5F9))
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            color = Color(0xFF475569),
-            style = MaterialTheme.typography.labelSmall,
-        )
-        if (table.rows.isEmpty()) {
-            Text(
-                text = "0 × 0",
-                modifier = Modifier.height(RichContentLayoutDefaults.TableRowPreviewHeight.dp).padding(8.dp),
-                color = Color(0xFF64748B),
-                style = MaterialTheme.typography.bodySmall,
-            )
-        } else {
-            table.rows.forEach { row ->
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    val cells = row.ifEmpty { listOf(null) }
-                    cells.forEach { cell ->
-                        Text(
-                            text = cell?.content?.previewText().orEmpty().ifBlank { " " },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(RichContentLayoutDefaults.TableCellPreviewHeight.dp)
-                                .border(width = 1.dp, color = Color(0xFFE2E8F0))
-                                .padding(horizontal = 6.dp, vertical = 6.dp),
-                            color = Color(0xFF334155),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
+        repeat(rowCount) { rowIndex ->
+            Row(modifier = Modifier.fillMaxWidth()) {
+                repeat(columnCount) { columnIndex ->
+                    val cell = table.rows.getOrNull(rowIndex)?.getOrNull(columnIndex)
+                    Text(
+                        text = cell?.content?.previewTextForTableCell().orEmpty().ifBlank { " " },
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = RichContentLayoutDefaults.TableMinCellHeight.dp)
+                            .border(width = 1.dp, color = Color(0xFFE2E8F0))
+                            .padding(horizontal = 6.dp, vertical = 6.dp),
+                        color = Color(0xFF334155),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
         }
     }
 }
+
 
 
 @Composable

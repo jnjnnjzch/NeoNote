@@ -15,6 +15,7 @@ import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
 import com.neonote.model.TableCell
 import com.neonote.model.TableNode
+import com.neonote.model.TableCellAddress
 import com.neonote.model.TextCursorPosition
 import com.neonote.model.TextRange
 import com.neonote.model.TextSelection
@@ -48,6 +49,7 @@ public class RichContentEngine {
         is RichContentCommand.InsertTable -> insertTable(box, command.rows, command.columns, command.index)
         is RichContentCommand.ReplacePlainText -> replacePlainText(box, command.text)
         is RichContentCommand.ReplaceParagraphText -> replaceParagraphText(box, command.blockIndex, command.text)
+        is RichContentCommand.ReplaceTableCellParagraphText -> replaceTableCellParagraphText(box, command.address, command.text)
     }
 
     /** Backward-compatible block insertion path used by canvas-level actions. */
@@ -265,6 +267,36 @@ public class RichContentEngine {
         return RichContentCommandResult.ContentEdited(box = insertResult.box, selection = insertResult.selection)
     }
 
+
+    public fun replaceTableCellParagraphText(
+        box: RichContentBox,
+        address: TableCellAddress,
+        text: String,
+    ): RichContentCommandResult.ContentEdited {
+        require(address.blockIndex in box.content.blocks.indices) { "blockIndex must address an existing block" }
+        val table = box.content.blocks[address.blockIndex] as? TableNode
+            ?: return RichContentCommandResult.ContentEdited(
+                box = box,
+                selection = TextSelection.cursor(TextCursorPosition(blockIndex = address.blockIndex, inlineOffset = 0)),
+            )
+        require(address.rowIndex in table.rows.indices) { "rowIndex must address an existing row" }
+        val row = table.rows[address.rowIndex]
+        require(address.columnIndex in row.indices) { "columnIndex must address an existing cell" }
+
+        val normalizedText = text.normalizePlainTextNewlines()
+        val cell = row[address.columnIndex]
+        val paragraph = (cell.content.blocks.firstOrNull() as? ParagraphNode)?.copy(inlines = listOf(InlineText(normalizedText)))
+            ?: ParagraphNode(inlines = listOf(InlineText(normalizedText)))
+        val updatedCell = cell.copy(content = RichContent(blocks = listOf(paragraph)))
+        val updatedRow = row.replaceAt(address.columnIndex, updatedCell)
+        val updatedTable = table.copy(rows = table.rows.replaceAt(address.rowIndex, updatedRow))
+        val updatedBlocks = box.content.blocks.replaceAt(address.blockIndex, updatedTable)
+        return RichContentCommandResult.ContentEdited(
+            box = box.copy(content = RichContent(blocks = updatedBlocks)),
+            selection = TextSelection.cursor(TextCursorPosition(blockIndex = address.blockIndex, inlineOffset = 0)),
+        )
+    }
+
     public fun insertInlineFormula(
         box: RichContentBox,
         expression: String,
@@ -402,6 +434,7 @@ public sealed interface RichContentCommand {
     public data class InsertTable(val rows: Int, val columns: Int, val index: Int? = null) : RichContentCommand
     public data class ReplacePlainText(val text: String) : RichContentCommand
     public data class ReplaceParagraphText(val blockIndex: Int, val text: String) : RichContentCommand
+    public data class ReplaceTableCellParagraphText(val address: TableCellAddress, val text: String) : RichContentCommand
 }
 
 public sealed interface RichContentCommandResult {

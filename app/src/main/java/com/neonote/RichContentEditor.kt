@@ -8,12 +8,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.neonote.engine.ActiveRichContentTarget
 import com.neonote.engine.RichContentLayoutDefaults
 import com.neonote.model.BlockFormula
 import com.neonote.model.BlockNode
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
+import com.neonote.model.TableNode
 
 @Composable
 internal fun RichContentEditor(
@@ -23,7 +25,8 @@ internal fun RichContentEditor(
     controller: NeoNoteEditorController,
     modifier: Modifier = Modifier,
 ) {
-    val activeBlockIndex = controller.activeRichContentBlockIndex(box.id)
+    val activeTarget = controller.activeRichContentTarget(box.id)
+    val activeBlockIndex = activeTarget?.blockIndexForEditor()
         ?: box.content.blocks.indexOfFirst { it is ParagraphNode }.coerceAtLeast(0)
 
     Column(
@@ -56,25 +59,40 @@ internal fun RichContentEditor(
                         box = box,
                         blockIndex = blockIndex,
                         paragraph = block,
-                        active = blockIndex == activeBlockIndex,
+                        active = activeTarget == ActiveRichContentTarget.Paragraph(blockIndex) ||
+                            (activeTarget == null && blockIndex == activeBlockIndex),
                         selectionMode = selectionMode,
                         selected = selected,
                         controller = controller,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
+
                 is BlockFormula -> {
                     FormulaBlockEditor(
                         box = box,
                         blockIndex = blockIndex,
                         formula = block,
-                        active = controller.activeRichContentFormulaBlockIndex(box.id) == blockIndex,
+                        active = activeTarget == ActiveRichContentTarget.FormulaBlock(blockIndex),
                         selectionMode = selectionMode,
                         selected = selected,
                         controller = controller,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
+
+                is TableNode -> {
+                    TableBlockEditor(
+                        box = box,
+                        blockIndex = blockIndex,
+                        table = block,
+                        selectionMode = selectionMode,
+                        selected = selected,
+                        controller = controller,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
                 else -> {
                     RichStaticEditorBlock(
                         block = block,
@@ -114,3 +132,8 @@ private fun RichStaticEditorBlock(
     )
 }
 
+private fun ActiveRichContentTarget.blockIndexForEditor(): Int = when (this) {
+    is ActiveRichContentTarget.Paragraph -> blockIndex
+    is ActiveRichContentTarget.TableCell -> address.blockIndex
+    is ActiveRichContentTarget.FormulaBlock -> blockIndex
+}

@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
+import com.neonote.engine.ActiveRichContentTarget
 import com.neonote.engine.CanvasCommand
 import com.neonote.engine.CanvasCommandResult
 import com.neonote.engine.CanvasEngine
@@ -51,6 +52,7 @@ import com.neonote.model.NotePage
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
 import com.neonote.model.SelectionState
+import com.neonote.model.TableCellAddress
 
 private const val DefaultBoxWidth = 320f
 private const val DefaultBoxHeight = 160f
@@ -435,6 +437,9 @@ public class NeoNoteEditorController(
         return richContentSessions[richContentSessionKey(boxId)]?.activeFormulaBlockIndex
     }
 
+    public fun activeRichContentTarget(boxId: String): ActiveRichContentTarget? =
+        richContentSessions[richContentSessionKey(boxId)]?.activeTarget
+
     public fun selectedRichContentObjectBlockIndex(boxId: String): Int? =
         selectedRichContentObjectBlocks[richContentSessionKey(boxId)]
 
@@ -480,6 +485,30 @@ public class NeoNoteEditorController(
         val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
         editorSessionFor(boxId, box).focusParagraph(blockIndex, selectionStart, selectionEnd)
         richContentInteractionRevision++
+    }
+
+
+    public fun focusRichContentTableCell(boxId: String, address: TableCellAddress) {
+        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        focusRichContentBox(boxId)
+        selectedRichContentObjectBlocks.remove(richContentSessionKey(boxId))
+        val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
+        editorSessionFor(boxId, box).focusTableCell(address)
+    }
+
+    public fun updateRichContentTableCellFromPlatformInput(
+        boxId: String,
+        address: TableCellAddress,
+        nextText: String,
+    ) {
+        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+
+        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val session = editorSessionFor(boxId, box)
+            val edit = session.replaceTableCellParagraphFromPlatformInput(address, nextText)
+            richContentMeasurer.resizeBoxToMeasuredContent(edit.box)
+        }
+        state = state.copy(document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)), focusedRichContentBoxId = boxId)
     }
 
     public fun updateRichContentParagraphFromPlatformInput(
