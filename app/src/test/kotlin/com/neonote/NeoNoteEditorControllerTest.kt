@@ -1041,6 +1041,54 @@ class NeoNoteEditorControllerTest {
     }
 
     @Test
+    fun `inserted object blocks keep editable trailing paragraph and focus target`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+
+        controller.updateRichContentText(boxId, "before")
+        controller.insertRichContentTablePlaceholder(boxId)
+
+        var box = controller.currentCanvas.objects.single() as RichContentBox
+        assertIs<ParagraphNode>(box.content.blocks[0])
+        assertIs<TableNode>(box.content.blocks[1])
+        assertIs<ParagraphNode>(box.content.blocks[2])
+        assertEquals(1, (controller.activeRichContentTarget(boxId) as com.neonote.engine.ActiveRichContentTarget.TableCell).address.blockIndex)
+
+        controller.updateRichContentTableCellFromPlatformInput(
+            boxId = boxId,
+            address = com.neonote.model.TableCellAddress(blockIndex = 1, rowIndex = 0, columnIndex = 0),
+            nextText = "short\nlonger cell text that should expand the table row",
+        )
+        box = controller.currentCanvas.objects.single() as RichContentBox
+        val heightAfterTableText = box.size.height
+
+        controller.focusRichContentParagraph(boxId = boxId, blockIndex = 2)
+        controller.updateRichContentParagraphFromPlatformInput(
+            boxId = boxId,
+            blockIndex = 2,
+            previousText = "",
+            nextText = "after table",
+            selectionStart = 11,
+        )
+        controller.insertRichContentFormulaPlaceholder(boxId, expression = "x+1")
+
+        box = controller.currentCanvas.objects.single() as RichContentBox
+        assertIs<BlockFormula>(box.content.blocks[3])
+        assertIs<ParagraphNode>(box.content.blocks[4])
+        assertEquals(3, controller.activeRichContentFormulaBlockIndex(boxId))
+
+        controller.updateRichContentFormulaExpression(boxId = boxId, blockIndex = 3, expression = "x^2 + y^2")
+        controller.insertRichContentImagePlaceholder(boxId)
+
+        box = controller.currentCanvas.objects.single() as RichContentBox
+        assertIs<BlockImage>(box.content.blocks[4])
+        assertIs<ParagraphNode>(box.content.blocks[5])
+        assertEquals(4, controller.selectedRichContentObjectBlockIndex(boxId))
+        assertTrue(box.size.height >= heightAfterTableText)
+    }
+
+    @Test
     fun `multiline rich content input expands height conservatively and delete keeps minimum height`() {
         val controller = NeoNoteEditorController()
         controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))

@@ -437,8 +437,10 @@ public class NeoNoteEditorController(
         return richContentSessions[richContentSessionKey(boxId)]?.activeFormulaBlockIndex
     }
 
-    public fun activeRichContentTarget(boxId: String): ActiveRichContentTarget? =
-        richContentSessions[richContentSessionKey(boxId)]?.activeTarget
+    public fun activeRichContentTarget(boxId: String): ActiveRichContentTarget? {
+        richContentInteractionRevision
+        return richContentSessions[richContentSessionKey(boxId)]?.activeTarget
+    }
 
     public fun selectedRichContentObjectBlockIndex(boxId: String): Int? =
         selectedRichContentObjectBlocks[richContentSessionKey(boxId)]
@@ -494,6 +496,7 @@ public class NeoNoteEditorController(
         selectedRichContentObjectBlocks.remove(richContentSessionKey(boxId))
         val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
         editorSessionFor(boxId, box).focusTableCell(address)
+        richContentInteractionRevision++
     }
 
     public fun updateRichContentTableCellFromPlatformInput(

@@ -99,9 +99,10 @@ internal fun FormulaBlockEditor(
                         if (focusState.isFocused && enabled && !box.isFocused) {
                             controller.activateRichContentBox(box.id)
                         }
-                        if (!focusState.isFocused) {
-                            controller.blurRichContentFormulaBlock(box.id, blockIndex)
-                        }
+                        // Keep the formula session active across transient platform
+                        // focus moves, such as tapping the rich-content toolbar.
+                        // Explicit editor transitions (focusing another block or
+                        // selection/page changes) own formula blur semantics.
                     },
                 decorationBox = { innerTextField ->
                     if (platformValue.text.isEmpty()) {

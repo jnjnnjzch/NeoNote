@@ -45,6 +45,9 @@ public class RichContentEditorSession(
     public var activeTarget: ActiveRichContentTarget = ActiveRichContentTarget.Paragraph(activeBlockIndex)
         private set
 
+    public val activeFormulaBlockIndex: Int?
+        get() = (activeTarget as? ActiveRichContentTarget.FormulaBlock)?.blockIndex
+
     public var activeParagraphSelection: ParagraphTextSelection =
         ParagraphTextSelection.cursor(initialSelection.start.inlineOffset)
         private set
@@ -190,17 +193,49 @@ public class RichContentEditorSession(
         RichContentCommand.ToggleTodoCheckedState(blockIndex = blockIndex),
     )
 
-    public fun insertTablePlaceholder(rows: Int = 2, columns: Int = 2): RichContentEditorEdit = applyCommand(
-        RichContentCommand.InsertTable(rows = rows, columns = columns, index = activeBlockInsertionIndex()),
-    )
+    public fun insertTablePlaceholder(rows: Int = 2, columns: Int = 2): RichContentEditorEdit {
+        val insertionIndex = activeBlockInsertionIndex()
+        val appliedCommands = mutableListOf<RichContentCommand>()
+        appliedCommands += applyCommand(
+            RichContentCommand.InsertTable(rows = rows, columns = columns, index = insertionIndex),
+        ).commands
+        appliedCommands += ensureTrailingParagraphAfter(insertionIndex).commands
 
-    public fun insertBlockFormulaPlaceholder(expression: String = ""): RichContentEditorEdit = applyCommand(
-        RichContentCommand.InsertBlockFormula(expression = expression, index = activeBlockInsertionIndex()),
-    )
+        activeBlockIndex = insertionIndex
+        activeTarget = ActiveRichContentTarget.TableCell(
+            TableCellAddress(blockIndex = insertionIndex, rowIndex = 0, columnIndex = 0),
+        )
+        return RichContentEditorEdit(box = box, selection = selection, commands = appliedCommands)
+    }
 
-    public fun insertBlockImagePlaceholder(assetId: String, altText: String? = null): RichContentEditorEdit = applyCommand(
-        RichContentCommand.InsertBlockImage(assetId = assetId, altText = altText, index = activeBlockInsertionIndex()),
-    )
+    public fun insertBlockFormulaPlaceholder(expression: String = ""): RichContentEditorEdit {
+        val insertionIndex = activeBlockInsertionIndex()
+        val appliedCommands = mutableListOf<RichContentCommand>()
+        appliedCommands += applyCommand(
+            RichContentCommand.InsertBlockFormula(expression = expression, index = insertionIndex),
+        ).commands
+        appliedCommands += ensureTrailingParagraphAfter(insertionIndex).commands
+
+        activeBlockIndex = insertionIndex
+        activeTarget = ActiveRichContentTarget.FormulaBlock(insertionIndex)
+        selection = TextSelection.cursor(TextCursorPosition(blockIndex = insertionIndex, inlineOffset = expression.length))
+        syncActiveParagraphFromSelection()
+        return RichContentEditorEdit(box = box, selection = selection, commands = appliedCommands)
+    }
+
+    public fun insertBlockImagePlaceholder(assetId: String, altText: String? = null): RichContentEditorEdit {
+        val insertionIndex = activeBlockInsertionIndex()
+        val appliedCommands = mutableListOf<RichContentCommand>()
+        appliedCommands += applyCommand(
+            RichContentCommand.InsertBlockImage(assetId = assetId, altText = altText, index = insertionIndex),
+        ).commands
+        appliedCommands += ensureTrailingParagraphAfter(insertionIndex).commands
+
+        activeBlockIndex = (insertionIndex + 1).coerceAtMost(box.content.blocks.lastIndex)
+        activeTarget = ActiveRichContentTarget.Paragraph(box.coerceParagraphBlockIndex(activeBlockIndex))
+        syncActiveParagraphFromSelection()
+        return RichContentEditorEdit(box = box, selection = selection, commands = appliedCommands)
+    }
 
     public fun replaceFormulaExpression(blockIndex: Int, expression: String): RichContentEditorEdit {
         if (box.content.blocks.getOrNull(blockIndex) !is BlockFormula) {
@@ -490,6 +525,14 @@ public class RichContentEditorSession(
 
     public fun activeBlockInsertionIndex(): Int = (activeTarget.blockIndexForSession() + 1)
         .coerceIn(0, box.content.blocks.size)
+
+    private fun ensureTrailingParagraphAfter(blockIndex: Int): RichContentEditorEdit {
+        val trailingIndex = (blockIndex + 1).coerceIn(0, box.content.blocks.size)
+        if (box.content.blocks.getOrNull(trailingIndex) is ParagraphNode) {
+            return RichContentEditorEdit(box = box, selection = selection, commands = emptyList())
+        }
+        return applyCommand(RichContentCommand.InsertParagraph(text = "", index = trailingIndex))
+    }
 
     private fun syncActiveParagraphFromSelection() {
         val paragraphLength = box.paragraphTextLength(activeBlockIndex)
