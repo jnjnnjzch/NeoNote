@@ -21,6 +21,7 @@ import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
 import com.neonote.model.TableCell
+import com.neonote.model.TableCellAddress
 import com.neonote.model.TableNode
 import com.neonote.model.TextCursorPosition
 import com.neonote.model.TextRange
@@ -671,6 +672,36 @@ class RichContentEngineTest {
         assertEquals("alpha", assertIs<ParagraphNode>(result.box.content.blocks[0]).toPlainTextForTest())
         assertEquals("beta", assertIs<ParagraphNode>(result.box.content.blocks[1]).toPlainTextForTest())
         assertEquals("charlie", assertIs<ParagraphNode>(result.box.content.blocks[2]).toPlainTextForTest())
+    }
+
+
+    @Test
+    fun `replace table cell paragraph text updates only addressed cell`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(
+                blocks = listOf(
+                    ParagraphNode(inlines = listOf(InlineText("before"))),
+                    TableNode(rows = List(2) { List(2) { TableCell() } }),
+                    ParagraphNode(inlines = listOf(InlineText("after"))),
+                ),
+            ),
+        )
+
+        val result = engine.execute(
+            box = box,
+            command = RichContentCommand.ReplaceTableCellParagraphText(
+                address = TableCellAddress(blockIndex = 1, rowIndex = 0, columnIndex = 0),
+                text = "hello\ncell",
+            ),
+        ) as RichContentCommandResult.ContentEdited
+
+        val table = assertIs<TableNode>(result.box.content.blocks[1])
+        assertEquals("hello\ncell", assertIs<ParagraphNode>(table.rows[0][0].content.blocks.single()).toPlainTextForTest())
+        assertTrue(table.rows[0][1].content.blocks.isEmpty())
+        assertEquals("before", assertIs<ParagraphNode>(result.box.content.blocks[0]).toPlainTextForTest())
+        assertEquals("after", assertIs<ParagraphNode>(result.box.content.blocks[2]).toPlainTextForTest())
     }
 
     @Test
