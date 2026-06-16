@@ -12,6 +12,8 @@ import com.neonote.model.ListKind
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
+import com.neonote.model.TableCell
+import com.neonote.model.TableCellAddress
 import com.neonote.model.TableNode
 import com.neonote.model.TextCursorPosition
 import kotlin.test.Test
@@ -372,6 +374,26 @@ class RichContentEditorSessionTest {
         assertEquals("", assertIs<ParagraphNode>(typedWorld.box.content.blocks[2]).toPlainTextForSessionTest())
         assertEquals(3, session.activeBlockIndex)
         assertEquals(5, session.activeParagraphCaret)
+    }
+
+
+    @Test
+    fun `table cell platform input emits table cell replacement command`() {
+        val session = RichContentEditorSession(
+            RichContentBox(
+                id = "box-1",
+                content = RichContent(blocks = listOf(TableNode(rows = listOf(listOf(TableCell()))))),
+            ),
+        )
+        val address = TableCellAddress(blockIndex = 0, rowIndex = 0, columnIndex = 0)
+
+        val edit = session.replaceTableCellParagraphFromPlatformInput(address, "cell text")
+
+        val table = assertIs<TableNode>(edit.box.content.blocks.single())
+        assertEquals("cell text", assertIs<ParagraphNode>(table.rows[0][0].content.blocks.single()).toPlainTextForSessionTest())
+        val command = assertIs<RichContentCommand.ReplaceTableCellParagraphText>(edit.commands.single())
+        assertEquals(address, command.address)
+        assertEquals(address.blockIndex, session.activeBlockIndex)
     }
 
     @Test

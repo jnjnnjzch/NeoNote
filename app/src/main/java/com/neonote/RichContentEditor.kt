@@ -13,6 +13,7 @@ import com.neonote.model.BlockNode
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
+import com.neonote.model.TableNode
 
 @Composable
 internal fun RichContentEditor(
@@ -56,6 +57,17 @@ internal fun RichContentEditor(
                         blockIndex = blockIndex,
                         paragraph = block,
                         active = blockIndex == activeBlockIndex,
+                        selectionMode = selectionMode,
+                        selected = selected,
+                        controller = controller,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                is TableNode -> {
+                    TableBlockEditor(
+                        box = box,
+                        blockIndex = blockIndex,
+                        table = block,
                         selectionMode = selectionMode,
                         selected = selected,
                         controller = controller,

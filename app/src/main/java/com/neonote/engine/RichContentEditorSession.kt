@@ -6,6 +6,8 @@ import com.neonote.model.InlineText
 import com.neonote.model.ListKind
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContentBox
+import com.neonote.model.TableCellAddress
+import com.neonote.model.TableNode
 import com.neonote.model.TextCursorPosition
 import com.neonote.model.TextRange
 import com.neonote.model.TextSelection
@@ -45,6 +47,9 @@ public class RichContentEditorSession(
     public var activeBlockIndex: Int = initialSelection.start.blockIndex.coerceAtLeast(0)
         private set
 
+    public var activeTarget: ActiveRichContentTarget = ActiveRichContentTarget.Paragraph(activeBlockIndex)
+        private set
+
     public var activeParagraphSelection: ParagraphTextSelection = ParagraphTextSelection.cursor(initialSelection.start.inlineOffset)
         private set
 
@@ -63,16 +68,23 @@ public class RichContentEditorSession(
         box = updatedBox
         localEditableBuffer = updatedBox.toPlainText()
         selection = selection.coerceInto(updatedBox)
-        activeBlockIndex = box.coerceParagraphBlockIndex(activeBlockIndex)
+        if (activeTarget is ActiveRichContentTarget.TableCell) {
+            activeBlockIndex = (activeTarget as ActiveRichContentTarget.TableCell).address.blockIndex
+        } else {
+            activeBlockIndex = box.coerceParagraphBlockIndex(activeBlockIndex)
+            activeTarget = ActiveRichContentTarget.Paragraph(activeBlockIndex)
+        }
         syncActiveParagraphFromSelection()
     }
 
     public fun focusParagraph(blockIndex: Int, selectionStart: Int = 0, selectionEnd: Int = selectionStart) {
         activeBlockIndex = box.coerceParagraphBlockIndex(blockIndex)
+        activeTarget = ActiveRichContentTarget.Paragraph(activeBlockIndex)
         setActiveParagraphSelection(selectionStart, selectionEnd)
     }
 
     public fun setActiveParagraphSelection(start: Int, end: Int = start) {
+        activeTarget = ActiveRichContentTarget.Paragraph(activeBlockIndex)
         val paragraphLength = box.paragraphTextLength(activeBlockIndex)
         activeParagraphSelection = ParagraphTextSelection(
             start = start.coerceIn(0, paragraphLength),
@@ -101,6 +113,7 @@ public class RichContentEditorSession(
             ),
         )
         activeBlockIndex = box.coerceParagraphBlockIndex(selection.start.blockIndex)
+        activeTarget = ActiveRichContentTarget.Paragraph(activeBlockIndex)
         syncActiveParagraphFromSelection()
     }
 
@@ -338,6 +351,40 @@ public class RichContentEditorSession(
         return RichContentEditorEdit(box = box, selection = selection, commands = listOf(command))
     }
 
+
+    public fun focusTableCell(address: TableCellAddress) {
+        activeBlockIndex = address.blockIndex.coerceAtLeast(0)
+        activeTarget = ActiveRichContentTarget.TableCell(address)
+    }
+
+    public fun replaceTableCellParagraphFromPlatformInput(
+        address: TableCellAddress,
+        nextText: String,
+    ): RichContentEditorEdit {
+        focusTableCell(address)
+        val command = RichContentCommand.ReplaceTableCellParagraphText(address, nextText)
+        val result = engine.execute(box, command) as RichContentCommandResult.ContentEdited
+        box = result.box
+        selection = result.selection
+        localEditableBuffer = box.toPlainText()
+        activeBlockIndex = address.blockIndex
+        activeTarget = ActiveRichContentTarget.TableCell(address)
+        syncActiveParagraphFromSelection()
+        mutablePendingCommands += command
+        return RichContentEditorEdit(box = box, selection = selection, commands = listOf(command))
+    }
+
+    public fun tableCellPlainText(address: TableCellAddress): String =
+        ((box.content.blocks.getOrNull(address.blockIndex) as? TableNode)
+            ?.rows
+            ?.getOrNull(address.rowIndex)
+            ?.getOrNull(address.columnIndex)
+            ?.content
+            ?.blocks
+            ?.firstOrNull() as? ParagraphNode)
+            ?.plainText()
+            .orEmpty()
+
     public fun drainPendingCommands(): List<RichContentCommand> {
         val commands = pendingCommands
         mutablePendingCommands.clear()
@@ -359,6 +406,7 @@ public class RichContentEditorSession(
         }
         localEditableBuffer = box.toPlainText()
         activeBlockIndex = box.coerceParagraphBlockIndex(selection.start.blockIndex)
+        activeTarget = ActiveRichContentTarget.Paragraph(activeBlockIndex)
         syncActiveParagraphFromSelection()
         mutablePendingCommands += command
         return RichContentEditorEdit(box = box, selection = selection, commands = listOf(command))
@@ -407,6 +455,12 @@ public data class RichContentEditorCommit(
     val selection: TextSelection,
     val committedCommands: List<RichContentCommand>,
 )
+
+public sealed interface ActiveRichContentTarget {
+    public data class Paragraph(val blockIndex: Int) : ActiveRichContentTarget
+    public data class TableCell(val address: TableCellAddress) : ActiveRichContentTarget
+    public data class FormulaBlock(val blockIndex: Int) : ActiveRichContentTarget
+}
 
 private data class TextDiff(
     val deletedStart: Int,
