@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.neonote.engine.RichContentLayoutDefaults
+import com.neonote.model.BlockFormula
 import com.neonote.model.BlockNode
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
@@ -56,6 +57,18 @@ internal fun RichContentEditor(
                         blockIndex = blockIndex,
                         paragraph = block,
                         active = blockIndex == activeBlockIndex,
+                        selectionMode = selectionMode,
+                        selected = selected,
+                        controller = controller,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                is BlockFormula -> {
+                    FormulaBlockEditor(
+                        box = box,
+                        blockIndex = blockIndex,
+                        formula = block,
+                        active = controller.activeRichContentFormulaBlockIndex(box.id) == blockIndex,
                         selectionMode = selectionMode,
                         selected = selected,
                         controller = controller,

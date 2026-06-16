@@ -649,6 +649,32 @@ class RichContentEngineTest {
         assertEquals("bravo", assertIs<ParagraphNode>(withFormula.box.content.blocks[3]).toPlainTextForTest())
     }
 
+
+    @Test
+    fun `replace block formula expression updates only targeted formula`() {
+        val engine = RichContentEngine()
+        val box = RichContentBox(
+            id = "box-1",
+            content = RichContent(
+                blocks = listOf(
+                    BlockFormula(expression = "a + b"),
+                    ParagraphNode(inlines = listOf(InlineText("body"))),
+                    BlockFormula(expression = "c + d", id = "formula-2"),
+                ),
+            ),
+        )
+
+        val result = engine.execute(
+            box = box,
+            command = RichContentCommand.ReplaceBlockFormulaExpression(blockIndex = 2, expression = "E = mc^2"),
+        ) as RichContentCommandResult.ContentEdited
+
+        assertEquals("a + b", assertIs<BlockFormula>(result.box.content.blocks[0]).expression)
+        val updatedFormula = assertIs<BlockFormula>(result.box.content.blocks[2])
+        assertEquals("E = mc^2", updatedFormula.expression)
+        assertEquals("formula-2", updatedFormula.id)
+    }
+
     @Test
     fun `replace paragraph text does not affect sibling blocks`() {
         val engine = RichContentEngine()

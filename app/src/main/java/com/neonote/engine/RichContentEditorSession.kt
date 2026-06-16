@@ -1,5 +1,6 @@
 package com.neonote.engine
 
+import com.neonote.model.BlockFormula
 import com.neonote.model.InlineFormula
 import com.neonote.model.InlineImage
 import com.neonote.model.InlineText
@@ -45,6 +46,9 @@ public class RichContentEditorSession(
     public var activeBlockIndex: Int = initialSelection.start.blockIndex.coerceAtLeast(0)
         private set
 
+    public var activeFormulaBlockIndex: Int? = null
+        private set
+
     public var activeParagraphSelection: ParagraphTextSelection = ParagraphTextSelection.cursor(initialSelection.start.inlineOffset)
         private set
 
@@ -64,10 +68,26 @@ public class RichContentEditorSession(
         localEditableBuffer = updatedBox.toPlainText()
         selection = selection.coerceInto(updatedBox)
         activeBlockIndex = box.coerceParagraphBlockIndex(activeBlockIndex)
+        activeFormulaBlockIndex = activeFormulaBlockIndex?.takeIf { updatedBox.content.blocks.getOrNull(it) is BlockFormula }
         syncActiveParagraphFromSelection()
     }
 
+    public fun focusFormulaBlock(blockIndex: Int) {
+        if (box.content.blocks.getOrNull(blockIndex) !is BlockFormula) return
+        activeFormulaBlockIndex = blockIndex
+        activeBlockIndex = blockIndex
+        selection = TextSelection.cursor(TextCursorPosition(blockIndex = blockIndex, inlineOffset = 0))
+        syncActiveParagraphFromSelection()
+    }
+
+    public fun blurFormulaBlock(blockIndex: Int? = activeFormulaBlockIndex) {
+        if (activeFormulaBlockIndex == blockIndex) {
+            activeFormulaBlockIndex = null
+        }
+    }
+
     public fun focusParagraph(blockIndex: Int, selectionStart: Int = 0, selectionEnd: Int = selectionStart) {
+        activeFormulaBlockIndex = null
         activeBlockIndex = box.coerceParagraphBlockIndex(blockIndex)
         setActiveParagraphSelection(selectionStart, selectionEnd)
     }
@@ -174,6 +194,23 @@ public class RichContentEditorSession(
     public fun insertBlockImagePlaceholder(assetId: String, altText: String? = null): RichContentEditorEdit = applyCommand(
         RichContentCommand.InsertBlockImage(assetId = assetId, altText = altText, index = activeBlockInsertionIndex()),
     )
+
+    public fun replaceFormulaExpression(blockIndex: Int, expression: String): RichContentEditorEdit {
+        if (box.content.blocks.getOrNull(blockIndex) !is BlockFormula) {
+            return RichContentEditorEdit(box = box, selection = selection, commands = emptyList())
+        }
+        focusFormulaBlock(blockIndex)
+        val command = RichContentCommand.ReplaceBlockFormulaExpression(blockIndex = blockIndex, expression = expression)
+        val result = engine.execute(box, command) as RichContentCommandResult.ContentEdited
+        box = result.box
+        selection = result.selection
+        localEditableBuffer = box.toPlainText()
+        activeBlockIndex = blockIndex
+        activeFormulaBlockIndex = blockIndex
+        syncActiveParagraphFromSelection()
+        mutablePendingCommands += command
+        return RichContentEditorEdit(box = box, selection = selection, commands = listOf(command))
+    }
 
     /**
      * Translate a paragraph-local BasicTextField snapshot into semantic rich

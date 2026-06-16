@@ -119,6 +119,7 @@ public class NeoNoteEditorController(
     private var activeSelectionGesture: ActiveSelectionGesture? by mutableStateOf(null)
     private var lastInputDiagnosticsUpdateMillis: Long? = null
     private var pendingInputDiagnostics: InputDiagnostics? = null
+    private var richContentInteractionRevision: Int by mutableStateOf(0)
     private val richContentSessions: MutableMap<String, RichContentEditorSession> = mutableMapOf()
     private val selectedRichContentObjectBlocks: MutableMap<String, Int> = mutableMapOf()
 
@@ -424,8 +425,15 @@ public class NeoNoteEditorController(
         state = state.copy(document = state.document.withCanvas(updatedCanvas))
     }
 
-    public fun activeRichContentBlockIndex(boxId: String): Int? =
-        richContentSessions[richContentSessionKey(boxId)]?.activeBlockIndex
+    public fun activeRichContentBlockIndex(boxId: String): Int? {
+        richContentInteractionRevision
+        return richContentSessions[richContentSessionKey(boxId)]?.activeBlockIndex
+    }
+
+    public fun activeRichContentFormulaBlockIndex(boxId: String): Int? {
+        richContentInteractionRevision
+        return richContentSessions[richContentSessionKey(boxId)]?.activeFormulaBlockIndex
+    }
 
     public fun selectedRichContentObjectBlockIndex(boxId: String): Int? =
         selectedRichContentObjectBlocks[richContentSessionKey(boxId)]
@@ -441,6 +449,25 @@ public class NeoNoteEditorController(
         )
     }
 
+    public fun focusRichContentFormulaBlock(boxId: String, blockIndex: Int) {
+        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        focusRichContentBox(boxId)
+        selectedRichContentObjectBlocks.remove(richContentSessionKey(boxId))
+        val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
+        editorSessionFor(boxId, box).focusFormulaBlock(blockIndex)
+        richContentInteractionRevision++
+        state = state.copy(
+            document = state.document.withCanvas(currentCanvas.setFocusedRichContentBox(boxId)),
+            focusedRichContentBoxId = boxId,
+            currentTool = EditorTool.Text,
+        )
+    }
+
+    public fun blurRichContentFormulaBlock(boxId: String, blockIndex: Int) {
+        richContentSessions[richContentSessionKey(boxId)]?.blurFormulaBlock(blockIndex)
+        richContentInteractionRevision++
+    }
+
     public fun focusRichContentParagraph(
         boxId: String,
         blockIndex: Int,
@@ -452,6 +479,7 @@ public class NeoNoteEditorController(
         selectedRichContentObjectBlocks.remove(richContentSessionKey(boxId))
         val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
         editorSessionFor(boxId, box).focusParagraph(blockIndex, selectionStart, selectionEnd)
+        richContentInteractionRevision++
     }
 
     public fun updateRichContentParagraphFromPlatformInput(
@@ -486,6 +514,24 @@ public class NeoNoteEditorController(
             richContentMeasurer.resizeBoxToMeasuredContent(edit.box)
         }
         state = state.copy(document = state.document.withCanvas(updatedCanvas))
+    }
+
+    public fun updateRichContentFormulaExpression(
+        boxId: String,
+        blockIndex: Int,
+        expression: String,
+    ) {
+        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+
+        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val session = editorSessionFor(boxId, box)
+            richContentMeasurer.resizeBoxToMeasuredContent(session.replaceFormulaExpression(blockIndex, expression).box)
+        }
+        richContentInteractionRevision++
+        state = state.copy(
+            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)),
+            focusedRichContentBoxId = boxId,
+        )
     }
 
     public fun toggleRichContentParagraphStyle(
