@@ -1,6 +1,7 @@
 package com.neonote
 
 import com.neonote.engine.InlineStyle
+import com.neonote.engine.ActiveRichContentTarget
 import com.neonote.engine.RichContentCommand
 import com.neonote.engine.RichContentEditorSession
 import com.neonote.engine.toPlainText
@@ -207,13 +208,18 @@ class RichContentEditorSessionTest {
         session.setSelectionFromPlainOffsets(4)
 
         val tableEdit = session.insertTablePlaceholder()
-        val formulaEdit = session.insertBlockFormulaPlaceholder()
-
-        assertIs<RichContentCommand.InsertTable>(tableEdit.commands.single())
+        assertIs<RichContentCommand.InsertTable>(tableEdit.commands.first())
         assertIs<TableNode>(tableEdit.box.content.blocks[1])
-        assertIs<RichContentCommand.InsertBlockFormula>(formulaEdit.commands.single())
-        assertIs<BlockFormula>(formulaEdit.box.content.blocks[1])
-        assertIs<TableNode>(formulaEdit.box.content.blocks[2])
+        assertEquals(
+            ActiveRichContentTarget.TableCell(TableCellAddress(blockIndex = 1, rowIndex = 0, columnIndex = 0)),
+            session.activeTarget,
+        )
+
+        val formulaEdit = session.insertBlockFormulaPlaceholder()
+        assertIs<RichContentCommand.InsertBlockFormula>(formulaEdit.commands.first())
+        assertIs<TableNode>(formulaEdit.box.content.blocks[1])
+        assertIs<BlockFormula>(formulaEdit.box.content.blocks[2])
+        assertEquals(ActiveRichContentTarget.FormulaBlock(2), session.activeTarget)
     }
 
 
@@ -327,12 +333,16 @@ class RichContentEditorSessionTest {
         session.focusParagraph(blockIndex = 1, selectionStart = 2)
 
         val tableEdit = session.insertTablePlaceholder(rows = 2, columns = 2)
-        val formulaEdit = session.insertBlockFormulaPlaceholder(expression = "x")
-
         assertIs<TableNode>(tableEdit.box.content.blocks[2])
-        assertIs<BlockFormula>(formulaEdit.box.content.blocks[2])
-        assertIs<TableNode>(formulaEdit.box.content.blocks[3])
-        assertEquals(1, session.activeBlockIndex)
+        assertEquals(
+            ActiveRichContentTarget.TableCell(TableCellAddress(blockIndex = 2, rowIndex = 0, columnIndex = 0)),
+            session.activeTarget,
+        )
+
+        val formulaEdit = session.insertBlockFormulaPlaceholder(expression = "x")
+        assertIs<TableNode>(formulaEdit.box.content.blocks[2])
+        assertIs<BlockFormula>(formulaEdit.box.content.blocks[3])
+        assertEquals(ActiveRichContentTarget.FormulaBlock(3), session.activeTarget)
     }
 
     @Test
