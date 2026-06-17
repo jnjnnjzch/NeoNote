@@ -1,6 +1,7 @@
 package com.neonote
 
 import androidx.compose.ui.geometry.Offset
+import com.neonote.engine.ActiveRichContentTarget
 import com.neonote.engine.InputEvent
 import com.neonote.engine.InputMode
 import com.neonote.engine.InputInkSample
@@ -130,8 +131,9 @@ class NeoNoteEditorControllerTest {
         assertTrue(text.bold)
         assertEquals(ListKind.Todo, paragraph.listMetadata?.kind)
         assertFalse(paragraph.listMetadata?.checked ?: true)
-        assertIs<BlockFormula>(box.content.blocks[1])
-        assertIs<TableNode>(box.content.blocks[2])
+        assertIs<TableNode>(box.content.blocks[1])
+        assertIs<BlockFormula>(box.content.blocks[2])
+        assertEquals(ActiveRichContentTarget.FormulaBlock(2), controller.activeRichContentTarget(boxId))
         assertEquals(boxId, controller.state.focusedRichContentBoxId)
         assertTrue(box.isFocused)
     }
@@ -151,16 +153,16 @@ class NeoNoteEditorControllerTest {
 
         val box = controller.currentCanvas.objects.single() as RichContentBox
         assertIs<ParagraphNode>(box.content.blocks[1])
-        val image = assertIs<BlockImage>(box.content.blocks[2])
+        assertIs<BlockFormula>(box.content.blocks[2])
+        assertIs<TableNode>(box.content.blocks[3])
+        val image = assertIs<BlockImage>(box.content.blocks[4])
         assertEquals("asset-toolbar-1", image.assetId)
         assertEquals("Toolbar image", image.altText)
-        assertIs<TableNode>(box.content.blocks[3])
-        assertIs<BlockFormula>(box.content.blocks[4])
         assertIs<ParagraphNode>(box.content.blocks[5])
         assertEquals(boxId, controller.state.focusedRichContentBoxId)
         assertTrue(box.isFocused)
-        assertEquals(1, controller.activeRichContentBlockIndex(boxId))
-        assertEquals(2, controller.selectedRichContentObjectBlockIndex(boxId))
+        assertEquals(5, controller.activeRichContentBlockIndex(boxId))
+        assertEquals(4, controller.selectedRichContentObjectBlockIndex(boxId))
     }
 
 
@@ -171,12 +173,13 @@ class NeoNoteEditorControllerTest {
         val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
         controller.insertRichContentFormulaPlaceholder(boxId = boxId, expression = "x")
 
-        controller.focusRichContentFormulaBlock(boxId = boxId, blockIndex = 1)
-        controller.updateRichContentFormulaExpression(boxId = boxId, blockIndex = 1, expression = "x^2 + y^2")
-        controller.blurRichContentFormulaBlock(boxId = boxId, blockIndex = 1)
+        val formulaBlockIndex = controller.activeRichContentFormulaBlockIndex(boxId)!!
+        controller.focusRichContentFormulaBlock(boxId = boxId, blockIndex = formulaBlockIndex)
+        controller.updateRichContentFormulaExpression(boxId = boxId, blockIndex = formulaBlockIndex, expression = "x^2 + y^2")
+        controller.blurRichContentFormulaBlock(boxId = boxId, blockIndex = formulaBlockIndex)
 
         val box = controller.currentCanvas.objects.single() as RichContentBox
-        assertEquals("x^2 + y^2", assertIs<BlockFormula>(box.content.blocks[1]).expression)
+        assertEquals("x^2 + y^2", assertIs<BlockFormula>(box.content.blocks[formulaBlockIndex]).expression)
         assertNull(controller.activeRichContentFormulaBlockIndex(boxId))
         assertEquals(boxId, controller.state.focusedRichContentBoxId)
     }
