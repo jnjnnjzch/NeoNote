@@ -2,6 +2,8 @@ package com.neonote
 
 import com.neonote.engine.RichContentLayoutDefaults
 import com.neonote.engine.RichContentMeasurer
+import com.neonote.model.BlockFormula
+import com.neonote.model.BlockImage
 import com.neonote.model.CanvasSize
 import com.neonote.model.InlineText
 import com.neonote.model.ParagraphNode
@@ -88,6 +90,82 @@ class RichContentTableLayoutTest {
         assertEquals(layout.rowHeights.single(), layout.cellRects[0][0].bottom - layout.cellRects[0][0].top)
         assertEquals(layout.rowHeights.single(), layout.cellRects[0][1].bottom - layout.cellRects[0][1].top)
         assertTrue(layout.rowHeights.single() > RichContentLayoutDefaults.TableMinCellHeight)
+    }
+
+    @Test
+    fun `formula and image blocks inside a cell propagate their height to the outer box`() {
+        val box = RichContentBox(
+            id = "box-nested-objects",
+            size = CanvasSize(width = 240f, height = 1f),
+            content = RichContent(
+                blocks = listOf(
+                    TableNode(
+                        rows = listOf(
+                            listOf(
+                                TableCell(
+                                    content = RichContent(
+                                        blocks = listOf(
+                                            BlockFormula(expression = "x^2 + y^2"),
+                                            BlockImage(assetId = "asset-1", altText = "diagram"),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val layout = RichContentMeasurer().measure(box)
+        val tableLayout = layout.tableLayouts.single()
+        val expectedCellContentHeight =
+            RichContentLayoutDefaults.FormulaCardHeight +
+                RichContentLayoutDefaults.BlockSpacing +
+                RichContentLayoutDefaults.ImageCardHeight +
+                RichContentLayoutDefaults.TableCellVerticalPadding * 2
+
+        assertEquals(expectedCellContentHeight, tableLayout.rowHeights.single())
+        assertEquals(
+            RichContentLayoutDefaults.VerticalPadding * 2 + expectedCellContentHeight,
+            layout.measuredSize.height,
+        )
+    }
+
+    @Test
+    fun `nested table height propagates through cell row outer table and box`() {
+        val innerTable = TableNode(
+            rows = listOf(
+                listOf(cell("inner one")),
+                listOf(cell("inner two")),
+            ),
+        )
+        val outerBox = RichContentBox(
+            id = "box-nested-table",
+            size = CanvasSize(width = 240f, height = 1f),
+            content = RichContent(
+                blocks = listOf(
+                    TableNode(
+                        rows = listOf(
+                            listOf(
+                                TableCell(content = RichContent(blocks = listOf(innerTable))),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val outerLayout = RichContentMeasurer().measure(outerBox)
+        val outerTable = outerLayout.tableLayouts.single()
+        val minimumInnerTableHeight = RichContentLayoutDefaults.TableMinCellHeight * 2
+        val expectedOuterRowHeight = minimumInnerTableHeight + RichContentLayoutDefaults.TableCellVerticalPadding * 2
+
+        assertTrue(outerTable.rowHeights.single() >= expectedOuterRowHeight)
+        assertEquals(
+            RichContentLayoutDefaults.VerticalPadding * 2 + outerTable.tableHeight,
+            outerLayout.measuredSize.height,
+        )
     }
 
     @Test
