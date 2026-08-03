@@ -1,7 +1,10 @@
 package com.neonote
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
@@ -44,6 +47,65 @@ internal fun TableCellEditor(
     boxId: String,
     address: TableCellAddress,
     cell: TableCell,
+    activeContentBlockIndex: Int?,
+    selectionMode: Boolean,
+    selected: Boolean,
+    controller: NeoNoteEditorController,
+    modifier: Modifier = Modifier,
+) {
+    val blocks = cell.content.blocks.ifEmpty { listOf(ParagraphNode()) }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(RichContentLayoutDefaults.BlockSpacing.dp),
+    ) {
+        blocks.forEachIndexed { contentBlockIndex, block ->
+            val blockAddress = address.copy(contentBlockIndex = contentBlockIndex)
+            when (block) {
+                is ParagraphNode -> {
+                    if (block.isPlatformEditable()) {
+                        TableCellParagraphEditor(
+                            boxId = boxId,
+                            address = blockAddress,
+                            paragraph = block,
+                            active = activeContentBlockIndex == contentBlockIndex,
+                            selectionMode = selectionMode,
+                            selected = selected,
+                            controller = controller,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        TableCellStaticBlock(
+                            boxId = boxId,
+                            address = blockAddress,
+                            content = RichContent(blocks = listOf(block)),
+                            selectionMode = selectionMode,
+                            selected = selected,
+                            controller = controller,
+                        )
+                    }
+                }
+
+                is BlockFormula, is BlockImage, is TableNode -> TableCellStaticBlock(
+                    boxId = boxId,
+                    address = blockAddress,
+                    content = RichContent(blocks = listOf(block)),
+                    selectionMode = selectionMode,
+                    selected = selected,
+                    controller = controller,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TableCellParagraphEditor(
+    boxId: String,
+    address: TableCellAddress,
+    paragraph: ParagraphNode,
     active: Boolean,
     selectionMode: Boolean,
     selected: Boolean,
@@ -52,8 +114,10 @@ internal fun TableCellEditor(
 ) {
     val enabled = !selectionMode && !selected
     val focusRequester = remember { FocusRequester() }
-    val modelText = cell.firstParagraphPlainTextForEditor()
-    var platformTextFieldValue by remember(boxId, address) { mutableStateOf(TextFieldValue(modelText)) }
+    val modelText = paragraph.plainTextForCellEditor()
+    var platformTextFieldValue by remember(boxId, address) {
+        mutableStateOf(TextFieldValue(modelText))
+    }
 
     LaunchedEffect(active, enabled) {
         if (active && enabled) focusRequester.requestFocus()
@@ -81,11 +145,13 @@ internal fun TableCellEditor(
             capitalization = KeyboardCapitalization.Sentences,
             imeAction = ImeAction.Default,
         ),
-        textStyle = LocalTextStyle.current.copy(color = Color(0xFF0F172A), lineHeight = RichContentLayoutDefaults.LineHeight.sp),
+        textStyle = LocalTextStyle.current.copy(
+            color = Color(0xFF0F172A),
+            lineHeight = RichContentLayoutDefaults.LineHeight.sp,
+        ),
         cursorBrush = SolidColor(Color(0xFF7C3AED)),
         modifier = modifier
-            .fillMaxSize()
-            .heightIn(min = RichContentLayoutDefaults.TableMinCellHeight.dp)
+            .heightIn(min = RichContentLayoutDefaults.LineHeight.dp)
             .focusRequester(focusRequester)
             .onFocusChanged { focusState ->
                 if (focusState.isFocused && enabled) {
@@ -93,9 +159,15 @@ internal fun TableCellEditor(
                 }
             },
         decorationBox = { innerTextField ->
-            Box(modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp, vertical = 4.dp)) {
+            Box(modifier = Modifier.fillMaxWidth()) {
                 if (platformTextFieldValue.text.isEmpty()) {
-                    Text(text = " ", color = Color(0xFF94A3B8), style = LocalTextStyle.current.copy(lineHeight = RichContentLayoutDefaults.LineHeight.sp))
+                    Text(
+                        text = " ",
+                        color = Color(0xFF94A3B8),
+                        style = LocalTextStyle.current.copy(
+                            lineHeight = RichContentLayoutDefaults.LineHeight.sp,
+                        ),
+                    )
                 }
                 innerTextField()
             }
@@ -103,16 +175,46 @@ internal fun TableCellEditor(
     )
 }
 
-internal fun TableCell.firstParagraphPlainTextForEditor(): String =
-    (content.blocks.firstOrNull() as? ParagraphNode)?.plainTextForCellEditor().orEmpty()
+@Composable
+private fun TableCellStaticBlock(
+    boxId: String,
+    address: TableCellAddress,
+    content: RichContent,
+    selectionMode: Boolean,
+    selected: Boolean,
+    controller: NeoNoteEditorController,
+) {
+    RichContentRenderer(
+        content = content,
+        selectionMode = selectionMode,
+        selected = selected,
+        onFocus = {
+            controller.focusRichContentTableCell(boxId = boxId, address = address)
+        },
+        onToggleTodoChecked = {},
+        modifier = Modifier.fillMaxWidth(),
+        applyContentPadding = false,
+        onObjectBlockFocus = {
+            controller.focusRichContentTableCell(boxId = boxId, address = address)
+        },
+    )
+}
 
-private fun ParagraphNode.plainTextForCellEditor(): String = inlines.joinToString("") { inline ->
+internal fun TableCell.firstEditableParagraphIndex(): Int =
+    content.blocks.indexOfFirst { block ->
+        block is ParagraphNode && block.isPlatformEditable()
+    }.takeIf { it >= 0 } ?: 0
+
+internal fun ParagraphNode.plainTextForCellEditor(): String = inlines.joinToString("") { inline ->
     when (inline) {
         is InlineText -> inline.text
         InlineLineBreak -> "\n"
         is InlineFormula, is InlineImage -> InlineAtomPlaceholder
     }
 }
+
+private fun ParagraphNode.isPlatformEditable(): Boolean =
+    inlines.none { it is InlineFormula || it is InlineImage }
 
 internal fun RichContent.previewTextForTableCell(): String = blocks.firstOrNull()?.let { block ->
     when (block) {
