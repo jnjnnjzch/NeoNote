@@ -56,6 +56,13 @@ internal fun InfiniteCanvasViewport(
     val router = remember { InputRouter() }
     val inputAdapter = remember { ComposeInputAdapter() }
     val platformSnapshotStore = remember { PlatformSnapshotStore() }
+    val inputMode = when (controller.state.currentTool) {
+        EditorTool.Pen -> InputMode.Navigate
+        EditorTool.Text -> InputMode.Write
+        EditorTool.Selection -> InputMode.Selection
+        EditorTool.Eraser -> InputMode.Erase
+    }
+
     Box(
         modifier = modifier
             .background(Color(0xFFF9F8FC))
@@ -67,15 +74,13 @@ internal fun InfiniteCanvasViewport(
                         eventTimeMillis = motionEvent.eventTime,
                         force = motionEvent.actionMasked != MotionEvent.ACTION_MOVE,
                     )
-
                     if (inputEvent != null) {
                         controller.routeInputEvent(
                             router = router,
                             event = inputEvent,
-                            mode = if (selectionMode) InputMode.Selection else InputMode.Write,
+                            mode = inputMode,
                         )
                     }
-
                     true
                 } else {
                     platformSnapshotStore.latest = motionEvent.toAndroidPointerSnapshot()
@@ -113,7 +118,7 @@ internal fun InfiniteCanvasViewport(
                 CanvasObjectView(
                     canvasObject = canvasObject,
                     selected = controller.state.selection.isObjectSelected(canvasObject.id),
-                    mode = mode,
+                    selectionMode = selectionMode,
                     controller = controller,
                 )
             }
@@ -123,6 +128,7 @@ internal fun InfiniteCanvasViewport(
                 modifier = Modifier.fillMaxSize(),
             )
         }
+
         if (controller.currentCanvas.objects.isEmpty() && controller.currentCanvas.inkLayer.strokes.isEmpty()) {
             Text(
                 text = when (controller.state.currentTool) {
@@ -158,7 +164,7 @@ private fun CanvasObjectView(
         is RichContentBox -> RichContentBoxView(
             box = canvasObject,
             selected = selected,
-            mode = mode,
+            selectionMode = selectionMode,
             controller = controller,
         )
         else -> Unit
