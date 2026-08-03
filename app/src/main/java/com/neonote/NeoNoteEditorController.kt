@@ -52,7 +52,9 @@ import com.neonote.model.NotePage
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
 import com.neonote.model.SelectionState
+import com.neonote.model.TableCell
 import com.neonote.model.TableCellAddress
+import com.neonote.model.TableNode
 import com.neonote.model.ViewportState
 import java.util.ArrayDeque
 
@@ -63,6 +65,8 @@ private const val MaxZoomScale = 4f
 private const val DefaultInputDiagnosticsThrottleMillis = 32L
 private const val HistoryLimit = 100
 private const val MaximumDocumentTitleLength = 120
+private const val MaximumTableRows = 50
+private const val MaximumTableColumns = 20
 
 /**
  * Small reducer-style controller for the first v2 interactive vertical slice.
@@ -806,6 +810,64 @@ public class NeoNoteEditorController(
             val session = editorSessionFor(boxId, box)
             richContentMeasurer.resizeBoxToMeasuredContent(session.insertTablePlaceholder(rows = rows, columns = columns).box)
         }
+        state = state.copy(
+            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)),
+            focusedRichContentBoxId = boxId,
+            currentTool = EditorTool.Text,
+        )
+    }
+
+    public fun addActiveRichContentTableRow(boxId: String) {
+        val target = activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell ?: return
+        val blockIndex = target.address.blockIndex
+        var nextBox: RichContentBox? = null
+        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val table = box.content.blocks.getOrNull(blockIndex) as? TableNode ?: return@updateRichContentBox box
+            if (table.rows.size >= MaximumTableRows) return@updateRichContentBox box
+            val columnCount = (table.rows.maxOfOrNull { it.size } ?: 0).coerceAtLeast(1)
+            val normalizedRows = table.rows.map { row ->
+                row + List((columnCount - row.size).coerceAtLeast(0)) { TableCell() }
+            }
+            val updatedTable = table.copy(
+                rows = normalizedRows + listOf(List(columnCount) { TableCell() }),
+            )
+            val updatedBox = box.copy(
+                content = RichContent(
+                    blocks = box.content.blocks.mapIndexed { index, block ->
+                        if (index == blockIndex) updatedTable else block
+                    },
+                ),
+            )
+            richContentMeasurer.resizeBoxToMeasuredContent(updatedBox).also { nextBox = it }
+        }
+        nextBox?.let { editorSessionFor(boxId, it).focus(it) }
+        state = state.copy(
+            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)),
+            focusedRichContentBoxId = boxId,
+            currentTool = EditorTool.Text,
+        )
+    }
+
+    public fun addActiveRichContentTableColumn(boxId: String) {
+        val target = activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell ?: return
+        val blockIndex = target.address.blockIndex
+        var nextBox: RichContentBox? = null
+        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val table = box.content.blocks.getOrNull(blockIndex) as? TableNode ?: return@updateRichContentBox box
+            val currentColumnCount = table.rows.maxOfOrNull { it.size } ?: 0
+            if (currentColumnCount >= MaximumTableColumns) return@updateRichContentBox box
+            val sourceRows = table.rows.ifEmpty { listOf(emptyList()) }
+            val updatedTable = table.copy(rows = sourceRows.map { row -> row + TableCell() })
+            val updatedBox = box.copy(
+                content = RichContent(
+                    blocks = box.content.blocks.mapIndexed { index, block ->
+                        if (index == blockIndex) updatedTable else block
+                    },
+                ),
+            )
+            richContentMeasurer.resizeBoxToMeasuredContent(updatedBox).also { nextBox = it }
+        }
+        nextBox?.let { editorSessionFor(boxId, it).focus(it) }
         state = state.copy(
             document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)),
             focusedRichContentBoxId = boxId,

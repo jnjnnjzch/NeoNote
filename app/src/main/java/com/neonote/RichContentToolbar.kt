@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import com.neonote.engine.ActiveRichContentTarget
 import com.neonote.engine.AssetDraft
 import com.neonote.engine.FileAssetStore
 import com.neonote.engine.InlineStyle
@@ -57,6 +58,7 @@ internal fun RichContentToolbar(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
+    val activeTableCell = controller.activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell
     val assetStore = remember(context) {
         FileAssetStore(FileAssetStore.defaultDirectory(context.filesDir))
     }
@@ -129,6 +131,15 @@ internal fun RichContentToolbar(
             }
             ToolbarAction(label = "Image", contentDescription = "Import image", compact = false) {
                 imagePicker.launch("image/*")
+            }
+            if (activeTableCell != null) {
+                ToolbarDivider()
+                ToolbarAction(label = "+ Row", contentDescription = "Add table row", compact = false) {
+                    controller.addActiveRichContentTableRow(boxId)
+                }
+                ToolbarAction(label = "+ Col", contentDescription = "Add table column", compact = false) {
+                    controller.addActiveRichContentTableColumn(boxId)
+                }
             }
         }
     }
