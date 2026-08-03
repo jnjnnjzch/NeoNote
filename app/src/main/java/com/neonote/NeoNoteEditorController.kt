@@ -495,15 +495,15 @@ public class NeoNoteEditorController(
      * platform keyboard to appear.
      */
     public fun activateRichContentBox(boxId: String) {
-        if (state.currentTool == EditorTool.Selection) {
-            selectCanvasObject(boxId)
-        } else {
-            focusRichContentBox(boxId)
+        when (state.currentTool) {
+            EditorTool.Text -> focusRichContentBox(boxId)
+            EditorTool.Selection -> selectCanvasObject(boxId)
+            EditorTool.Pen, EditorTool.Eraser -> Unit
         }
     }
 
     public fun focusRichContentBox(boxId: String) {
-        if (state.currentTool == EditorTool.Selection) return
+        if (state.currentTool != EditorTool.Text) return
         if (state.focusedRichContentBoxId != null && state.focusedRichContentBoxId != boxId) {
             commitRichContentEditing(state.focusedRichContentBoxId!!)
         }
@@ -539,7 +539,7 @@ public class NeoNoteEditorController(
         selectionEnd: Int = selectionStart,
         hasActiveComposition: Boolean = false,
     ) {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
 
         val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
             val session = editorSessionFor(boxId, box)
@@ -581,7 +581,7 @@ public class NeoNoteEditorController(
         selectedRichContentObjectBlocks[richContentSessionKey(boxId)]
 
     public fun selectRichContentObjectBlock(boxId: String, blockIndex: Int) {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
         focusRichContentBox(boxId)
         selectedRichContentObjectBlocks[richContentSessionKey(boxId)] = blockIndex
         state = state.copy(
@@ -592,7 +592,7 @@ public class NeoNoteEditorController(
     }
 
     public fun focusRichContentFormulaBlock(boxId: String, blockIndex: Int) {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
         focusRichContentBox(boxId)
         selectedRichContentObjectBlocks.remove(richContentSessionKey(boxId))
         val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
@@ -616,7 +616,7 @@ public class NeoNoteEditorController(
         selectionStart: Int = 0,
         selectionEnd: Int = selectionStart,
     ) {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
         focusRichContentBox(boxId)
         selectedRichContentObjectBlocks.remove(richContentSessionKey(boxId))
         val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
@@ -626,7 +626,7 @@ public class NeoNoteEditorController(
 
 
     public fun focusRichContentTableCell(boxId: String, address: TableCellAddress) {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
         focusRichContentBox(boxId)
         selectedRichContentObjectBlocks.remove(richContentSessionKey(boxId))
         val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
@@ -639,7 +639,7 @@ public class NeoNoteEditorController(
         address: TableCellAddress,
         nextText: String,
     ) {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
 
         val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
             val session = editorSessionFor(boxId, box)
@@ -658,7 +658,7 @@ public class NeoNoteEditorController(
         selectionEnd: Int = selectionStart,
         hasActiveComposition: Boolean = false,
     ) {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
 
         val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
             val session = editorSessionFor(boxId, box)
@@ -688,7 +688,7 @@ public class NeoNoteEditorController(
         blockIndex: Int,
         expression: String,
     ) {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
 
         val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
             val session = editorSessionFor(boxId, box)
@@ -708,7 +708,7 @@ public class NeoNoteEditorController(
         selectionStart: Int,
         selectionEnd: Int = selectionStart,
     ) {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
 
         val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
             val session = editorSessionFor(boxId, box)
@@ -725,7 +725,7 @@ public class NeoNoteEditorController(
         selectionStart: Int,
         selectionEnd: Int = selectionStart,
     ) {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
 
         val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
             val session = editorSessionFor(boxId, box)
@@ -741,7 +741,7 @@ public class NeoNoteEditorController(
         selectionStart: Int,
         selectionEnd: Int = selectionStart,
     ) {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
 
         val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
             val session = editorSessionFor(boxId, box)
@@ -757,7 +757,7 @@ public class NeoNoteEditorController(
         selectionStart: Int,
         selectionEnd: Int = selectionStart,
     ) {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
 
         val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
             val session = editorSessionFor(boxId, box)
@@ -768,6 +768,7 @@ public class NeoNoteEditorController(
     }
 
     public fun toggleRichContentTodoCheckedState(boxId: String, blockIndex: Int) {
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
         val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
             val session = editorSessionFor(boxId, box)
             richContentMeasurer.resizeBoxToMeasuredContent(session.toggleTodoCheckedState(blockIndex).box)
@@ -776,7 +777,7 @@ public class NeoNoteEditorController(
     }
 
     public fun toggleActiveRichContentStyle(boxId: String, style: InlineStyle) {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
 
         val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
             val session = editorSessionFor(boxId, box)
@@ -790,7 +791,7 @@ public class NeoNoteEditorController(
     }
 
     public fun toggleActiveRichContentList(boxId: String, kind: ListKind) {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
 
         val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
             val session = editorSessionFor(boxId, box)
@@ -804,7 +805,7 @@ public class NeoNoteEditorController(
     }
 
     public fun insertRichContentTablePlaceholder(boxId: String, rows: Int = 2, columns: Int = 2) {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
 
         val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
             val session = editorSessionFor(boxId, box)
@@ -818,6 +819,7 @@ public class NeoNoteEditorController(
     }
 
     public fun addActiveRichContentTableRow(boxId: String) {
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
         val target = activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell ?: return
         val blockIndex = target.address.blockIndex
         var nextBox: RichContentBox? = null
@@ -849,6 +851,7 @@ public class NeoNoteEditorController(
     }
 
     public fun addActiveRichContentTableColumn(boxId: String) {
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
         val target = activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell ?: return
         val blockIndex = target.address.blockIndex
         var nextBox: RichContentBox? = null
@@ -876,7 +879,7 @@ public class NeoNoteEditorController(
     }
 
     public fun insertRichContentFormulaPlaceholder(boxId: String, expression: String = "") {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
 
         val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
             val session = editorSessionFor(boxId, box)
@@ -894,7 +897,7 @@ public class NeoNoteEditorController(
         assetId: String = "image-placeholder",
         altText: String? = "Image placeholder",
     ) {
-        if (state.currentTool == EditorTool.Selection || state.selection.selectedRefs.isNotEmpty()) return
+        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
 
         var insertedIndex: Int? = null
         val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
