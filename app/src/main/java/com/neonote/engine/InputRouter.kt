@@ -129,8 +129,6 @@ public class InputRouter(
                     InputRouteResult(canvas = canvas, action = InputAction.Ignored)
                 pending.hasExceededTapSlop ->
                     InputRouteResult(canvas = canvas, action = InputAction.EndInteraction)
-                event.targetObjectId != null ->
-                    InputRouteResult(canvas = canvas, action = InputAction.FocusExisting(event.targetObjectId))
                 else -> InputRouteResult(canvas = canvas, action = InputAction.Ignored)
             }
         }
