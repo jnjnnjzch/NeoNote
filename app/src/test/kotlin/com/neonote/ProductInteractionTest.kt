@@ -153,7 +153,7 @@ class ProductInteractionTest {
     @Test
     fun `reset viewport returns to a predictable one hundred percent view`() {
         val controller = NeoNoteEditorController()
-        controller.panViewportBy(dx = 140f, dy = -80f)
+        controller.panViewportBy(screenDx = 140f, screenDy = -80f)
         controller.zoomViewportBy(2f, CanvasPoint(100f, 100f))
 
         controller.resetViewport()
