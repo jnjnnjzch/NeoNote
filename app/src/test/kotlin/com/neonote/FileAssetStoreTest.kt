@@ -33,8 +33,11 @@ class FileAssetStoreTest {
         assertEquals("diagram.png", loaded.fileName)
         assertTrue(stored.id.endsWith(".png"))
         assertContentEquals(expectedBytes, File(requireNotNull(loaded.uri)).readBytes())
+        assertTrue(directory.listFiles().orEmpty().none { it.name.endsWith(".tmp") })
+
         assertIs<AssetStoreResult.Deleted>(store.delete(stored.id))
         assertNull(store.get(stored.id))
+        assertTrue(directory.listFiles().orEmpty().isEmpty())
     }
 
     @Test
