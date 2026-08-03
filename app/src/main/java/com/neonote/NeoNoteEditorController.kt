@@ -1065,7 +1065,6 @@ public class NeoNoteEditorController(
                 currentPageId = nextPageId,
                 focusedRichContentBoxId = null,
                 selection = SelectionState(),
-                currentTool = EditorTool.Text,
             )
         }
         richContentSessions.clear()
