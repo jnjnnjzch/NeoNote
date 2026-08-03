@@ -2,7 +2,6 @@ package com.neonote
 
 import com.neonote.engine.JsonFilePersistenceStore
 import java.nio.file.Files
-import kotlin.io.path.deleteRecursively
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlinx.coroutines.runBlocking
@@ -10,10 +9,10 @@ import kotlinx.coroutines.runBlocking
 class SaveStateTest {
     @Test
     fun `save label follows the persisted document revision`() = runBlocking {
-        val directory = Files.createTempDirectory("neonote-save-state")
+        val directory = Files.createTempDirectory("neonote-save-state").toFile()
         try {
             val controller = NeoNoteEditorController()
-            val store = JsonFilePersistenceStore(directory.toFile())
+            val store = JsonFilePersistenceStore(directory)
 
             assertEquals("Saving locally", controller.saveStateLabel)
 
