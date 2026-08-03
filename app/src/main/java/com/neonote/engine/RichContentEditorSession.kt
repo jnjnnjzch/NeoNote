@@ -486,7 +486,7 @@ public class RichContentEditorSession(
             ?.getOrNull(address.columnIndex)
             ?.content
             ?.blocks
-            ?.firstOrNull() as? ParagraphNode)
+            ?.getOrNull(address.contentBlockIndex) as? ParagraphNode)
             ?.plainText()
             .orEmpty()
 
