@@ -53,6 +53,7 @@ import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
 import com.neonote.model.SelectionState
 import com.neonote.model.TableCellAddress
+import com.neonote.model.ViewportState
 import java.util.ArrayDeque
 
 private const val DefaultBoxWidth = 320f
@@ -168,6 +169,46 @@ public class NeoNoteEditorController(
         undoDocuments.addLast(state.document.historySnapshot())
         undoDocuments.trimToHistoryLimit()
         restoreDocumentFromHistory(nextDocument)
+    }
+
+    public fun setTool(tool: EditorTool) {
+        if (state.currentTool == tool) return
+        if (tool != EditorTool.Text) {
+            state.focusedRichContentBoxId?.let(::commitRichContentEditing)
+        }
+        cancelInkIfActive()
+        val nextCanvas = if (tool == EditorTool.Text) {
+            currentCanvas
+        } else {
+            currentCanvas.setFocusedRichContentBox(null)
+        }
+        state = state.copy(
+            currentTool = tool,
+            focusedRichContentBoxId = if (tool == EditorTool.Text) state.focusedRichContentBoxId else null,
+            selection = if (tool == EditorTool.Selection) state.selection else SelectionState(),
+            document = if (nextCanvas == currentCanvas) state.document else state.document.withCanvas(nextCanvas),
+        )
+    }
+
+    public fun resetViewport() {
+        state = state.copy(viewport = ViewportState())
+    }
+
+    public fun deleteSelection() {
+        val selection = state.selection
+        if (selection.selectedRefs.isEmpty()) return
+        val updatedCanvas = currentCanvas.copy(
+            objects = currentCanvas.objects.filterNot { selection.isObjectSelected(it.id) },
+            inkLayer = currentCanvas.inkLayer.copy(
+                strokes = currentCanvas.inkLayer.strokes.filterNot { selection.isStrokeSelected(it.id) },
+            ),
+        )
+        state = state.copy(
+            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(null)),
+            focusedRichContentBoxId = null,
+            selection = SelectionState(),
+        )
+        inkSession = InkSession.fromCanvas(updatedCanvas)
     }
 
     public suspend fun saveDocument(store: PersistenceStore): PersistenceResult.Saved {
@@ -286,6 +327,7 @@ public class NeoNoteEditorController(
         when (val action = result.action) {
             is InputAction.BeginInk -> beginInk(action.position, action.pressure, action.rawPressure)
             is InputAction.ContinueInk -> continueInk(action.samples)
+            is InputAction.EraseAt -> eraseInkAtScreenPositions(action.positions)
             is InputAction.PanBy -> panViewportBy(action.dx, action.dy)
             is InputAction.CreateOrFocusRichContentBox -> focusOrCreateRichContentBox(screenToDocument(action.position))
             is InputAction.FocusExisting -> action.objectId?.let(::activateRichContentBox)
@@ -344,6 +386,23 @@ public class NeoNoteEditorController(
     private fun commitInkLayer(inkLayer: com.neonote.model.InkLayer) {
         val updatedCanvas = currentCanvas.copy(inkLayer = inkLayer)
         state = state.copy(document = state.document.withCanvas(updatedCanvas))
+    }
+
+    private fun eraseInkAtScreenPositions(screenPositions: List<CanvasPoint>) {
+        if (screenPositions.isEmpty() || currentCanvas.inkLayer.strokes.isEmpty()) return
+        val documentPositions = screenPositions.map(::screenToDocument)
+        val tolerance = 14f / state.viewport.zoomScale.coerceAtLeast(MinZoomScale)
+        val remainingStrokes = currentCanvas.inkLayer.strokes.filterNot { stroke ->
+            documentPositions.any { point ->
+                selectionEngine.hitTestInkStroke(stroke = stroke, point = point, tolerance = tolerance)
+            }
+        }
+        if (remainingStrokes.size == currentCanvas.inkLayer.strokes.size) return
+        val updatedCanvas = currentCanvas.copy(
+            inkLayer = currentCanvas.inkLayer.copy(strokes = remainingStrokes),
+        )
+        state = state.copy(document = state.document.withCanvas(updatedCanvas))
+        inkSession = InkSession.fromCanvas(updatedCanvas)
     }
 
     public fun setSelectionMode(enabled: Boolean) {
