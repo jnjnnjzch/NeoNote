@@ -118,7 +118,7 @@ internal fun InfiniteCanvasViewport(
                 CanvasObjectView(
                     canvasObject = canvasObject,
                     selected = controller.state.selection.isObjectSelected(canvasObject.id),
-                    selectionMode = selectionMode,
+                    mode = mode,
                     controller = controller,
                 )
             }
@@ -164,7 +164,7 @@ private fun CanvasObjectView(
         is RichContentBox -> RichContentBoxView(
             box = canvasObject,
             selected = selected,
-            selectionMode = selectionMode,
+            mode = mode,
             controller = controller,
         )
         else -> Unit
