@@ -106,10 +106,12 @@ public fun classifyPointerTool(
     androidToolType: Int = AndroidToolTypes.Unknown,
     androidSource: Int = AndroidInputSources.Unknown,
 ): PointerTool = when {
-    androidToolType == AndroidToolTypes.Stylus || androidToolType == AndroidToolTypes.Eraser -> PointerTool.SPen
+    androidToolType == AndroidToolTypes.Eraser -> PointerTool.Eraser
+    androidToolType == AndroidToolTypes.Stylus -> PointerTool.SPen
     androidToolType == AndroidToolTypes.Mouse -> PointerTool.Mouse
     androidToolType == AndroidToolTypes.Finger -> PointerTool.Finger
-    composeType == PlatformPointerType.Stylus || composeType == PlatformPointerType.Eraser -> PointerTool.SPen
+    composeType == PlatformPointerType.Eraser -> PointerTool.Eraser
+    composeType == PlatformPointerType.Stylus -> PointerTool.SPen
     composeType == PlatformPointerType.Mouse -> PointerTool.Mouse
     androidSource.hasSource(AndroidInputSources.Stylus) -> PointerTool.SPen
     androidSource.hasSource(AndroidInputSources.Mouse) -> PointerTool.Mouse
