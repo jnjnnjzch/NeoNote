@@ -1,11 +1,11 @@
-name: Table-controls source patch
+name: History-state source patch
 
 on:
   push:
     branches:
       - agent/product-quality-loop
     paths:
-      - scripts/table_controls_patch.py
+      - scripts/history_state_patch.py
       - .github/workflows/product-quality-patch.yml
 
 permissions:
@@ -22,8 +22,8 @@ jobs:
           ref: agent/product-quality-loop
           fetch-depth: 0
 
-      - name: Add active table row and column controls
-        run: python3 scripts/table_controls_patch.py
+      - name: Preserve active tools and transient navigation state
+        run: python3 scripts/history_state_patch.py
 
       - name: Validate patch whitespace
         run: git diff --check
@@ -32,11 +32,11 @@ jobs:
         shell: bash
         run: |
           if git diff --quiet; then
-            echo 'Table-controls patch already applied.'
+            echo 'History-state patch already applied.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app/src/main/java
-          git commit -m 'Add table row and column actions'
+          git commit -m 'Keep undo and navigation state stable'
           git push origin HEAD:agent/product-quality-loop
