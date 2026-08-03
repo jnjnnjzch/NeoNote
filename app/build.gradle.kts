@@ -1,5 +1,16 @@
 import org.gradle.api.tasks.testing.Test
 
+val releaseStorePath = providers.environmentVariable("NEONOTE_KEYSTORE_PATH").orNull
+val releaseStorePassword = providers.environmentVariable("NEONOTE_KEYSTORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("NEONOTE_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("NEONOTE_KEY_PASSWORD").orNull
+val hasReleaseSigning = listOf(
+    releaseStorePath,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -14,8 +25,47 @@ android {
         applicationId = "com.neonote"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 10_000
+        versionName = "1.0.0"
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(requireNotNull(releaseStorePath))
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
+
+        getByName("release") {
+            isDebuggable = false
+            isMinifyEnabled = false
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+
+        create("releaseCandidate") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".rc"
+            versionNameSuffix = "-rc.1"
+            signingConfig = signingConfigs.getByName("debug")
+            isDebuggable = false
+            matchingFallbacks += listOf("release")
+        }
     }
 
     buildFeatures {
