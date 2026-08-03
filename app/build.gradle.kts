@@ -1,5 +1,11 @@
 import org.gradle.api.tasks.testing.Test
 
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
+}
+
 val releaseStorePath = providers.environmentVariable("NEONOTE_KEYSTORE_PATH").orNull
 val releaseStorePassword = providers.environmentVariable("NEONOTE_KEYSTORE_PASSWORD").orNull
 val releaseKeyAlias = providers.environmentVariable("NEONOTE_KEY_ALIAS").orNull
@@ -10,12 +16,6 @@ val hasReleaseSigning = listOf(
     releaseKeyAlias,
     releaseKeyPassword,
 ).all { !it.isNullOrBlank() }
-
-plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.plugin.compose")
-    id("org.jetbrains.kotlin.plugin.serialization")
-}
 
 android {
     namespace = "com.neonote"
