@@ -1,11 +1,11 @@
-name: Eraser-priority source patch
+name: Table-controls source patch
 
 on:
   push:
     branches:
       - agent/product-quality-loop
     paths:
-      - scripts/eraser_priority_patch.py
+      - scripts/table_controls_patch.py
       - .github/workflows/product-quality-patch.yml
 
 permissions:
@@ -22,8 +22,8 @@ jobs:
           ref: agent/product-quality-loop
           fetch-depth: 0
 
-      - name: Give the physical eraser priority
-        run: python3 scripts/eraser_priority_patch.py
+      - name: Add active table row and column controls
+        run: python3 scripts/table_controls_patch.py
 
       - name: Validate patch whitespace
         run: git diff --check
@@ -32,11 +32,11 @@ jobs:
         shell: bash
         run: |
           if git diff --quiet; then
-            echo 'Eraser-priority patch already applied.'
+            echo 'Table-controls patch already applied.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app/src/main/java
-          git commit -m 'Prioritize the physical S Pen eraser'
+          git commit -m 'Add table row and column actions'
           git push origin HEAD:agent/product-quality-loop
