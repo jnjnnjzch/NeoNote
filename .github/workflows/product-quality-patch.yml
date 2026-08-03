@@ -1,18 +1,17 @@
-name: History-state source patch
+name: Remove temporary quality infrastructure
 
 on:
   push:
     branches:
       - agent/product-quality-loop
     paths:
-      - scripts/history_state_patch.py
       - .github/workflows/product-quality-patch.yml
 
 permissions:
   contents: write
 
 jobs:
-  apply:
+  cleanup:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -22,21 +21,23 @@ jobs:
           ref: agent/product-quality-loop
           fetch-depth: 0
 
-      - name: Preserve active tools and transient navigation state
-        run: python3 scripts/history_state_patch.py
-
-      - name: Validate patch whitespace
-        run: git diff --check
-
-      - name: Commit patched sources
+      - name: Remove temporary patch infrastructure
         shell: bash
         run: |
-          if git diff --quiet; then
-            echo 'History-state patch already applied.'
-            exit 0
-          fi
+          git rm -f --ignore-unmatch \
+            .github/workflows/product-quality-patch.yml \
+            scripts/product_quality_patch.py \
+            scripts/product_quality_patch_v2.py \
+            scripts/final_product_patch.py \
+            scripts/save_state_patch.py \
+            scripts/history_state_patch.py \
+            scripts/eraser_priority_patch.py \
+            scripts/table_controls_patch.py
+
+      - name: Commit clean product tree
+        shell: bash
+        run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app/src/main/java
-          git commit -m 'Keep undo and navigation state stable'
+          git commit -m 'Remove temporary quality patch infrastructure'
           git push origin HEAD:agent/product-quality-loop
