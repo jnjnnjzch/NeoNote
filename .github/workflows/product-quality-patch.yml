@@ -1,11 +1,11 @@
-name: Final product source patch
+name: Save-state source patch
 
 on:
   push:
     branches:
       - agent/product-quality-loop
     paths:
-      - scripts/final_product_patch.py
+      - scripts/save_state_patch.py
       - .github/workflows/product-quality-patch.yml
 
 permissions:
@@ -22,8 +22,8 @@ jobs:
           ref: agent/product-quality-loop
           fetch-depth: 0
 
-      - name: Apply narrow final product patches
-        run: python3 scripts/final_product_patch.py
+      - name: Apply revision-backed save state
+        run: python3 scripts/save_state_patch.py
 
       - name: Validate patch whitespace
         run: git diff --check
@@ -32,11 +32,11 @@ jobs:
         shell: bash
         run: |
           if git diff --quiet; then
-            echo 'Final product patches already applied.'
+            echo 'Save-state patch already applied.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app/src/main/java
-          git commit -m 'Finish document title and startup interactions'
+          git commit -m 'Report accurate document save state'
           git push origin HEAD:agent/product-quality-loop
