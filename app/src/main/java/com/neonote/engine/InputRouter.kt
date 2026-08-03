@@ -16,13 +16,18 @@ public class InputRouter(
     private var activeFingerDown: PendingFingerDown? = null
 
     public fun route(canvas: InfiniteCanvas, event: InputEvent, mode: InputMode = InputMode.Write): InputRouteResult {
+        val hasPhysicalEraser = event.pointers.any { it.tool == PointerTool.Eraser }
+        if (hasPhysicalEraser) {
+            activeFingerDown = null
+            return InputRouteResult(canvas = canvas, action = event.toEraseAction())
+        }
+
         if (mode == InputMode.Selection) {
             return routeSelectionMode(canvas, event)
         }
 
-        val hasPhysicalEraser = event.pointers.any { it.tool == PointerTool.Eraser }
-        val hasStylus = event.pointers.any { it.tool == PointerTool.SPen || it.tool == PointerTool.Eraser }
-        if (hasPhysicalEraser || (mode == InputMode.Erase && hasStylus)) {
+        val hasStylus = event.pointers.any { it.tool == PointerTool.SPen }
+        if (mode == InputMode.Erase && hasStylus) {
             activeFingerDown = null
             return InputRouteResult(canvas = canvas, action = event.toEraseAction())
         }
