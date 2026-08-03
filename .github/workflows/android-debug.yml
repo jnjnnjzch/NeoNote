@@ -9,6 +9,9 @@ on:
       - codex/neonote-v2-blank-architecture
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-debug:
     runs-on: ubuntu-latest
@@ -16,6 +19,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Apply editor history migration
+        if: github.event_name == 'pull_request' && github.head_ref == 'codex/add-clean-undo-redo-history' && github.actor != 'github-actions[bot]'
+        shell: bash
+        run: |
+          python3 scripts/apply_editor_history_patch.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/neonote/NeoNoteEditorController.kt
+          git commit -m "Add bounded document undo and redo history"
+          git push origin HEAD:codex/add-clean-undo-redo-history
 
       - name: Set up JDK
         uses: actions/setup-java@v4
