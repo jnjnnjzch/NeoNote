@@ -1079,10 +1079,14 @@ public class NeoNoteEditorController(
         canvas = canvas,
     )
 
-    private fun NeoNoteDocument.withCanvasForPage(pageId: String?, canvas: InfiniteCanvas): NeoNoteDocument = copy(
-        pages = pages.map { page -> if (page.id == pageId) page.copy(canvas = canvas) else page },
-        revision = revision + 1,
-    )
+    private fun NeoNoteDocument.withCanvasForPage(pageId: String?, canvas: InfiniteCanvas): NeoNoteDocument {
+        val current = pages.firstOrNull { it.id == pageId } ?: return this
+        if (current.canvas == canvas) return this
+        return copy(
+            pages = pages.map { page -> if (page.id == pageId) page.copy(canvas = canvas) else page },
+            revision = revision + 1,
+        )
+    }
 }
 
 public fun createTestEditorState(): EditorState = EditorState(
