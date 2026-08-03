@@ -53,12 +53,14 @@ import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
 import com.neonote.model.SelectionState
 import com.neonote.model.TableCellAddress
+import java.util.ArrayDeque
 
 private const val DefaultBoxWidth = 320f
 private const val DefaultBoxHeight = 160f
 private const val MinZoomScale = 0.25f
 private const val MaxZoomScale = 4f
 private const val DefaultInputDiagnosticsThrottleMillis = 32L
+private const val HistoryLimit = 100
 
 /**
  * Small reducer-style controller for the first v2 interactive vertical slice.
@@ -76,8 +78,26 @@ public class NeoNoteEditorController(
     private val inputDiagnosticsThrottleMillis: Long = DefaultInputDiagnosticsThrottleMillis,
     private val diagnosticsClockMillis: () -> Long = { System.currentTimeMillis() },
 ) {
-    public var state: EditorState by mutableStateOf(initialState)
-        private set
+    private val undoDocuments: ArrayDeque<NeoNoteDocument> = ArrayDeque()
+    private val redoDocuments: ArrayDeque<NeoNoteDocument> = ArrayDeque()
+    private var historyMutationInProgress: Boolean = false
+    private var stateBacking: EditorState by mutableStateOf(initialState)
+
+    public var state: EditorState
+        get() = stateBacking
+        private set(value) {
+            val previousDocument = stateBacking.document.historySnapshot()
+            val nextDocument = value.document.historySnapshot()
+            if (
+                !historyMutationInProgress &&
+                !previousDocument.hasSameHistoryContentAs(nextDocument)
+            ) {
+                undoDocuments.addLast(previousDocument)
+                undoDocuments.trimToHistoryLimit()
+                redoDocuments.clear()
+            }
+            stateBacking = value
+        }
 
     public var inputDiagnostics: InputDiagnostics by mutableStateOf(InputDiagnostics())
         private set
@@ -118,6 +138,12 @@ public class NeoNoteEditorController(
     public val canSwitchToNextPage: Boolean
         get() = currentPageIndex < pageCount - 1
 
+    public val canUndo: Boolean
+        get() = undoDocuments.isNotEmpty()
+
+    public val canRedo: Boolean
+        get() = redoDocuments.isNotEmpty()
+
     private var activeSelectionGesture: ActiveSelectionGesture? by mutableStateOf(null)
     private var lastInputDiagnosticsUpdateMillis: Long? = null
     private var pendingInputDiagnostics: InputDiagnostics? = null
@@ -127,6 +153,22 @@ public class NeoNoteEditorController(
 
     private val currentPage: NotePage
         get() = state.document.pages.first { it.id == state.currentPageId }
+
+    public fun undo() {
+        if (undoDocuments.isEmpty()) return
+        val previousDocument = undoDocuments.removeLast()
+        redoDocuments.addLast(state.document.historySnapshot())
+        redoDocuments.trimToHistoryLimit()
+        restoreDocumentFromHistory(previousDocument)
+    }
+
+    public fun redo() {
+        if (redoDocuments.isEmpty()) return
+        val nextDocument = redoDocuments.removeLast()
+        undoDocuments.addLast(state.document.historySnapshot())
+        undoDocuments.trimToHistoryLimit()
+        restoreDocumentFromHistory(nextDocument)
+    }
 
     public suspend fun saveDocument(store: PersistenceStore): PersistenceResult.Saved {
         val saved = store.save(state.document)
@@ -148,12 +190,18 @@ public class NeoNoteEditorController(
         }
 
         val nextPageId = document.pages.firstOrNull()?.id
-        state = state.copy(
-            document = document.withMeasuredRichContentBoxHeights(),
-            currentPageId = nextPageId,
-            focusedRichContentBoxId = null,
-            selection = SelectionState(),
-        )
+        replaceStateWithoutRecordingHistory {
+            state = state.copy(
+                document = document.withMeasuredRichContentBoxHeights(),
+                currentPageId = nextPageId,
+                focusedRichContentBoxId = null,
+                selection = SelectionState(),
+            )
+        }
+        undoDocuments.clear()
+        redoDocuments.clear()
+        richContentSessions.clear()
+        selectedRichContentObjectBlocks.clear()
         val cacheRebuildTimeMillis = elapsedMillis {
             inkSession = document.pages.firstOrNull()?.canvas?.let(InkSession::fromCanvas) ?: InkSession()
         }
@@ -859,6 +907,64 @@ public class NeoNoteEditorController(
     public fun documentToScreen(documentPosition: CanvasPoint): CanvasPoint = state.viewport.documentToScreen(documentPosition)
 
     public fun screenDeltaToDocumentDelta(screenDelta: Offset): Offset = state.viewport.screenDeltaToDocumentDelta(screenDelta)
+
+    private fun restoreDocumentFromHistory(document: NeoNoteDocument) {
+        val measuredDocument = document.withMeasuredRichContentBoxHeights()
+        val nextPageId = state.currentPageId
+            .takeIf { currentId -> measuredDocument.pages.any { it.id == currentId } }
+            ?: measuredDocument.pages.firstOrNull()?.id
+
+        replaceStateWithoutRecordingHistory {
+            state = state.copy(
+                document = measuredDocument,
+                currentPageId = nextPageId,
+                focusedRichContentBoxId = null,
+                selection = SelectionState(),
+                currentTool = EditorTool.Text,
+            )
+        }
+        richContentSessions.clear()
+        selectedRichContentObjectBlocks.clear()
+        activeSelectionGesture = null
+        richContentInteractionRevision++
+        inkSession = measuredDocument.pages
+            .firstOrNull { it.id == nextPageId }
+            ?.canvas
+            ?.let(InkSession::fromCanvas)
+            ?: InkSession()
+    }
+
+    private inline fun replaceStateWithoutRecordingHistory(block: () -> Unit) {
+        historyMutationInProgress = true
+        try {
+            block()
+        } finally {
+            historyMutationInProgress = false
+        }
+    }
+
+    private fun NeoNoteDocument.historySnapshot(): NeoNoteDocument = copy(
+        pages = pages.map { page ->
+            page.copy(
+                canvas = page.canvas.copy(
+                    objects = page.canvas.objects.map { canvasObject ->
+                        if (canvasObject is RichContentBox) {
+                            canvasObject.copy(isFocused = false)
+                        } else {
+                            canvasObject
+                        }
+                    },
+                ),
+            )
+        },
+    )
+
+    private fun NeoNoteDocument.hasSameHistoryContentAs(other: NeoNoteDocument): Boolean =
+        copy(revision = 0L) == other.copy(revision = 0L)
+
+    private fun ArrayDeque<NeoNoteDocument>.trimToHistoryLimit() {
+        while (size > HistoryLimit) removeFirst()
+    }
 
     private fun nextRichContentBoxId(): String {
         val next = currentCanvas.objects
