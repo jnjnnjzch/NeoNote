@@ -38,9 +38,6 @@ internal fun NeoNoteEditorScreen(controller: NeoNoteEditorController) {
         }
     }
 
-    // Keying this effect by the immutable document snapshot cancels only the
-    // debounce delay when more edits arrive. JsonFilePersistenceStore performs
-    // the final write synchronously through an atomic same-directory replace.
     LaunchedEffect(state.document, restoreCompleted) {
         if (!restoreCompleted) return@LaunchedEffect
         delay(AutoSaveDebounceMillis)
@@ -57,9 +54,13 @@ internal fun NeoNoteEditorScreen(controller: NeoNoteEditorController) {
             pageLabel = "Page ${controller.currentPageNumber} / ${controller.pageCount}",
             canGoToPreviousPage = controller.canSwitchToPreviousPage,
             canGoToNextPage = controller.canSwitchToNextPage,
+            canUndo = controller.canUndo,
+            canRedo = controller.canRedo,
             onPreviousPage = controller::switchToPreviousPage,
             onNextPage = controller::switchToNextPage,
             onAddPage = controller::addPage,
+            onUndo = controller::undo,
+            onRedo = controller::redo,
             onToggleSelectionMode = { controller.setSelectionMode(!selectionMode) },
             onSave = { coroutineScope.launch { controller.saveDocument(persistenceStore) } },
             onLoad = { coroutineScope.launch { controller.loadDocument(persistenceStore) } },
