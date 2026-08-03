@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.neonote.engine.RichContentLayoutDefaults
+import com.neonote.model.EditorTool
 import com.neonote.model.RichContentBox
 import kotlin.math.roundToInt
 
@@ -36,6 +37,7 @@ internal fun RichContentBoxView(
 ) {
     val density = LocalDensity.current
     val focusManager = LocalFocusManager.current
+    val contentInteractionDisabled = controller.state.currentTool != EditorTool.Text
     LaunchedEffect(box.isFocused, selectionMode, selected) {
         if (selectionMode || selected) {
             focusManager.clearFocus()
@@ -102,7 +104,7 @@ internal fun RichContentBoxView(
             if (!box.isFocused) {
                 RichContentRenderer(
                     content = box.content,
-                    selectionMode = selectionMode,
+                    selectionMode = selectionMode || contentInteractionDisabled,
                     selected = selected,
                     onFocus = { controller.activateRichContentBox(box.id) },
                     onToggleTodoChecked = { blockIndex ->
