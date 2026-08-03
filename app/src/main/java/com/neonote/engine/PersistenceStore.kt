@@ -2,6 +2,9 @@ package com.neonote.engine
 
 import com.neonote.model.NeoNoteDocument
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.Locale
 import kotlinx.serialization.json.Json
 
@@ -20,6 +23,9 @@ public interface PersistenceStore {
  *
  * The JSON payload serializes document-space coordinates from the document model directly. It does not use,
  * derive, or persist viewport pan/zoom as a replacement for canvas object or ink positions.
+ *
+ * Writes use a same-directory temporary file followed by an atomic replacement when the filesystem supports it.
+ * A crash during encoding or temporary-file writing therefore leaves the previously committed document intact.
  */
 public class JsonFilePersistenceStore(
     private val documentsDirectory: File,
@@ -29,7 +35,9 @@ public class JsonFilePersistenceStore(
         documentsDirectory.mkdirs()
         val file = documentFile(document.id)
         val encodeResult = timed { json.encodeToString(NeoNoteDocument.serializer(), document) }
-        val writeTimeMillis = elapsedMillis { file.writeText(encodeResult.value) }
+        val writeTimeMillis = elapsedMillis {
+            file.writeTextAtomically(encodeResult.value)
+        }
         val inkCounts = document.inkCounts()
         return PersistenceResult.Saved(
             documentId = document.id,
@@ -67,7 +75,8 @@ public class JsonFilePersistenceStore(
         )
     }
 
-    private fun documentFile(documentId: String): File = File(documentsDirectory, "${documentId.toSafeFileName()}.json")
+    private fun documentFile(documentId: String): File =
+        File(documentsDirectory, "${documentId.toSafeFileName()}.json")
 
     private fun String.toSafeFileName(): String = map { char ->
         when {
@@ -128,6 +137,32 @@ public sealed interface PersistenceResult {
 private data class InkCounts(val strokeCount: Int, val pointCount: Int)
 
 private data class TimedResult<T>(val value: T, val elapsedMillis: Double)
+
+private fun File.writeTextAtomically(text: String) {
+    val parent = parentFile ?: error("Document file must have a parent directory")
+    parent.mkdirs()
+    val temporaryFile = File(parent, "$name.tmp")
+    temporaryFile.writeText(text)
+
+    try {
+        try {
+            Files.move(
+                temporaryFile.toPath(),
+                toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(
+                temporaryFile.toPath(),
+                toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        }
+    } finally {
+        if (temporaryFile.exists()) temporaryFile.delete()
+    }
+}
 
 private fun NeoNoteDocument.inkCounts(): InkCounts {
     var strokeCount = 0
