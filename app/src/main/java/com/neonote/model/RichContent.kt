@@ -165,12 +165,17 @@ data class TextRange(
     fun ordered(): TextRange = if (start <= end) this else TextRange(start = end, end = start)
 }
 
-/** Addresses one table cell inside a top-level table block. */
+/**
+ * Addresses one cell and one block inside that cell's nested [RichContent].
+ * [contentBlockIndex] defaults to the first cell block for backward-compatible
+ * serialized selections and existing call sites.
+ */
 @Serializable
 data class TableCellAddress(
     val blockIndex: Int,
     val rowIndex: Int,
     val columnIndex: Int,
+    val contentBlockIndex: Int = 0,
 )
 
 /** Current text selection. Collapsed selections represent a caret. */
