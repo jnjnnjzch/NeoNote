@@ -9,9 +9,6 @@ on:
       - codex/neonote-v2-blank-architecture
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build-debug:
     runs-on: ubuntu-latest
@@ -19,21 +16,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref }}
-          fetch-depth: 0
-
-      - name: Apply table cell engine migration
-        if: github.event_name == 'pull_request' && github.head_ref == 'codex/unify-table-cell-richcontent-editor' && github.actor != 'github-actions[bot]'
-        shell: bash
-        run: |
-          python3 scripts/apply_cell_engine_patch.py
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/java/com/neonote/engine/RichContentEngine.kt \
-                  app/src/main/java/com/neonote/engine/RichContentEditorSession.kt
-          git commit -m "Preserve sibling RichContent when editing table cells"
-          git push origin HEAD:codex/unify-table-cell-richcontent-editor
 
       - name: Set up JDK
         uses: actions/setup-java@v4
