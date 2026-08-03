@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -93,6 +95,7 @@ internal fun NeoNoteEditorScreen(controller: NeoNoteEditorController) {
         Column(modifier = Modifier.fillMaxSize()) {
             WorkspaceTopBar(
                 title = state.document.title,
+                onTitleChange = controller::renameDocument,
                 saveLabel = controller.persistenceStatus.toFriendlySaveLabel(),
                 canUndo = controller.canUndo,
                 canRedo = controller.canRedo,
@@ -177,6 +180,7 @@ internal fun NeoNoteEditorScreen(controller: NeoNoteEditorController) {
 @Composable
 private fun WorkspaceTopBar(
     title: String,
+    onTitleChange: (String) -> Unit,
     saveLabel: String,
     canUndo: Boolean,
     canRedo: Boolean,
@@ -213,13 +217,31 @@ private fun WorkspaceTopBar(
                     .padding(start = 12.dp),
                 verticalArrangement = Arrangement.Center,
             ) {
-                Text(
-                    text = title.ifBlank { "Untitled note" },
-                    color = InkColor,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                BasicTextField(
+                    value = title,
+                    onValueChange = onTitleChange,
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.titleMedium.copy(
+                        color = InkColor,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    cursorBrush = SolidColor(NeoPurple),
+                    modifier = Modifier.fillMaxWidth(),
+                    decorationBox = { innerTextField ->
+                        Box {
+                            if (title.isBlank()) {
+                                Text(
+                                    text = "Untitled note",
+                                    color = Color(0xFF9A94A5),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            innerTextField()
+                        }
+                    },
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(

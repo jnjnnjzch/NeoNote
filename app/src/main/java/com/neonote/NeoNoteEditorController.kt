@@ -62,6 +62,7 @@ private const val MinZoomScale = 0.25f
 private const val MaxZoomScale = 4f
 private const val DefaultInputDiagnosticsThrottleMillis = 32L
 private const val HistoryLimit = 100
+private const val MaximumDocumentTitleLength = 120
 
 /**
  * Small reducer-style controller for the first v2 interactive vertical slice.
@@ -192,6 +193,17 @@ public class NeoNoteEditorController(
 
     public fun resetViewport() {
         state = state.copy(viewport = ViewportState())
+    }
+
+    public fun renameDocument(title: String) {
+        val nextTitle = title.take(MaximumDocumentTitleLength)
+        if (state.document.title == nextTitle) return
+        state = state.copy(
+            document = state.document.copy(
+                title = nextTitle,
+                revision = state.document.revision + 1,
+            ),
+        )
     }
 
     public fun deleteSelection() {
