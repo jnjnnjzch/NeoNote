@@ -664,6 +664,7 @@ class NeoNoteEditorControllerTest {
         controller.setSelectionMode(true)
         controller.setSelectionMode(false)
         assertEquals(EditorTool.Pen, controller.state.currentTool)
+        controller.setTool(EditorTool.Text)
 
         controller.activateRichContentBox(boxId)
         controller.updateRichContentText(boxId, "edited again")

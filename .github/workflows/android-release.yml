@@ -17,6 +17,7 @@ permissions:
 jobs:
   build-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       NEONOTE_KEYSTORE_BASE64: ${{ secrets.NEONOTE_KEYSTORE_BASE64 }}
       NEONOTE_KEYSTORE_PASSWORD: ${{ secrets.NEONOTE_KEYSTORE_PASSWORD }}
@@ -49,10 +50,36 @@ jobs:
       - name: Make Gradle executable
         run: chmod +x ./gradlew
 
-      - name: Test and assemble release packages
+      - name: Clean build tree
+        run: ./gradlew clean --stacktrace --no-daemon
+
+      - name: Run JVM unit tests
+        run: ./gradlew :app:testDebugUnitTest --stacktrace --no-daemon
+
+      - name: Upload JVM test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: neonote-jvm-test-reports
+          path: |
+            app/build/reports/tests/testDebugUnitTest/**
+            app/build/test-results/testDebugUnitTest/**
+          if-no-files-found: ignore
+
+      - name: Run Android release lint
+        run: ./gradlew :app:lintRelease --stacktrace --no-daemon
+
+      - name: Upload lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: neonote-lint-reports
+          path: app/build/reports/lint-results-release.*
+          if-no-files-found: ignore
+
+      - name: Assemble release candidate and production packages
         run: |
-          ./gradlew clean \
-            :app:testDebugUnitTest \
+          ./gradlew \
             :app:assembleReleaseCandidate \
             :app:assembleRelease \
             --stacktrace --no-daemon

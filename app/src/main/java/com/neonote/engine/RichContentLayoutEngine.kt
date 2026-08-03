@@ -473,7 +473,7 @@ public object RichContentLayoutDefaults {
     public const val VerticalPadding: Float = 16f
     public const val BlockSpacing: Float = 4f
     public const val FormulaCardHeight: Float = 56f
-    public const val ImageCardHeight: Float = 96f
+    public const val ImageCardHeight: Float = 220f
     public const val TableHeaderPreviewHeight: Float = 32f
     public const val TableRowPreviewHeight: Float = 32f
     public const val TableCellPreviewHeight: Float = 32f

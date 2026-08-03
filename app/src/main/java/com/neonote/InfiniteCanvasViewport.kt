@@ -43,6 +43,7 @@ import com.neonote.input.toAndroidPointerSnapshot
 import com.neonote.input.withPressureSamples
 import com.neonote.model.CanvasObject
 import com.neonote.model.CanvasPoint
+import com.neonote.model.EditorTool
 import com.neonote.model.RichContentBox
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -55,9 +56,16 @@ internal fun InfiniteCanvasViewport(
     val router = remember { InputRouter() }
     val inputAdapter = remember { ComposeInputAdapter() }
     val platformSnapshotStore = remember { PlatformSnapshotStore() }
+    val inputMode = when (controller.state.currentTool) {
+        EditorTool.Pen -> InputMode.Navigate
+        EditorTool.Text -> InputMode.Write
+        EditorTool.Selection -> InputMode.Selection
+        EditorTool.Eraser -> InputMode.Erase
+    }
+
     Box(
         modifier = modifier
-            .background(Color(0xFFEFF6FF))
+            .background(Color(0xFFF9F8FC))
             .pointerInteropFilter { motionEvent ->
                 if (AndroidStylusInputAdapter.isStylusOrEraser(motionEvent)) {
                     val inputEvent = AndroidStylusInputAdapter.toInputEvent(motionEvent)
@@ -66,28 +74,26 @@ internal fun InfiniteCanvasViewport(
                         eventTimeMillis = motionEvent.eventTime,
                         force = motionEvent.actionMasked != MotionEvent.ACTION_MOVE,
                     )
-
                     if (inputEvent != null) {
                         controller.routeInputEvent(
                             router = router,
                             event = inputEvent,
-                            mode = if (selectionMode) InputMode.Selection else InputMode.Write,
+                            mode = inputMode,
                         )
                     }
-
                     true
                 } else {
                     platformSnapshotStore.latest = motionEvent.toAndroidPointerSnapshot()
                     false
                 }
             }
-            .pointerInput(selectionMode) {
+            .pointerInput(inputMode) {
                 handleCanvasPointerInput(
                     router = router,
                     inputAdapter = inputAdapter,
                     platformSnapshotProvider = { platformSnapshotStore.latest },
                     controller = controller,
-                    selectionMode = selectionMode,
+                    mode = inputMode,
                 )
             },
     ) {
@@ -122,17 +128,24 @@ internal fun InfiniteCanvasViewport(
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        Text(
-            text = "Tap blank canvas to create text · Drag blank canvas to pan · Pinch to zoom",
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(16.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color.White.copy(alpha = 0.88f))
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            color = Color(0xFF334155),
-            style = MaterialTheme.typography.bodySmall,
-        )
+
+        if (controller.currentCanvas.objects.isEmpty() && controller.currentCanvas.inkLayer.strokes.isEmpty()) {
+            Text(
+                text = when (controller.state.currentTool) {
+                    EditorTool.Text -> "Tap anywhere to start typing"
+                    EditorTool.Pen -> "Write with S Pen · Drag with one finger · Pinch to zoom"
+                    EditorTool.Selection -> "Draw around ink or objects to select them"
+                    EditorTool.Eraser -> "Erase with S Pen or the pen eraser"
+                },
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.White.copy(alpha = 0.92f))
+                    .padding(horizontal = 18.dp, vertical = 12.dp),
+                color = Color(0xFF746D82),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
     }
 }
 
@@ -163,7 +176,7 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
     inputAdapter: ComposeInputAdapter,
     platformSnapshotProvider: () -> AndroidPointerSnapshot?,
     controller: NeoNoteEditorController,
-    selectionMode: Boolean,
+    mode: InputMode,
 ) {
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
@@ -176,7 +189,7 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
             type = PointerEventType.Down,
             changes = listOf(down),
             platformSnapshot = platformSnapshotProvider(),
-            selectionMode = selectionMode,
+            mode = mode,
         )
 
         while (true) {
@@ -195,7 +208,7 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
                     type = PointerEventType.Move,
                     changes = pressedChanges,
                     platformSnapshot = platformSnapshot,
-                    selectionMode = selectionMode,
+                    mode = mode,
                 )
                 controller.zoomViewportBy(zoomChange, CanvasPoint(centroid.x, centroid.y))
                 event.changes.forEach { it.consume() }
@@ -211,7 +224,7 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
                     type = PointerEventType.Up,
                     changes = listOf(primary),
                     platformSnapshot = platformSnapshot,
-                    selectionMode = selectionMode,
+                    mode = mode,
                 )
                 return@awaitEachGesture
             }
@@ -224,7 +237,7 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
                     type = PointerEventType.Move,
                     changes = listOf(primary),
                     platformSnapshot = platformSnapshot,
-                    selectionMode = selectionMode,
+                    mode = mode,
                 )
             }
         }
@@ -238,7 +251,7 @@ private fun routePointerEvent(
     type: PointerEventType,
     changes: List<PointerInputChange>,
     platformSnapshot: AndroidPointerSnapshot?,
-    selectionMode: Boolean,
+    mode: InputMode,
 ) {
     val inputEvent = inputAdapter.toInputEvent(
         type = type,
@@ -263,6 +276,6 @@ private fun routePointerEvent(
     controller.routeInputEvent(
         router = router,
         event = inputEvent,
-        mode = if (selectionMode) InputMode.Selection else InputMode.Write,
+        mode = mode,
     )
 }

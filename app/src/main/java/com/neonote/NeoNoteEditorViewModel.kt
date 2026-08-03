@@ -1,6 +1,7 @@
 package com.neonote
 
 import androidx.lifecycle.ViewModel
+import com.neonote.model.EditorTool
 
 /**
  * Activity-scoped holder for the editor controller.
@@ -12,7 +13,10 @@ import androidx.lifecycle.ViewModel
 public class NeoNoteEditorViewModel : ViewModel() {
     public val controller: NeoNoteEditorController = NeoNoteEditorController(
         initialState = createTestEditorState().let { state ->
-            state.copy(document = state.document.copy(title = "Untitled Note"))
+            state.copy(
+                document = state.document.copy(title = "Untitled Note"),
+                currentTool = EditorTool.Pen,
+            )
         },
     )
 }

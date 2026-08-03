@@ -5,9 +5,10 @@ import com.neonote.model.InfiniteCanvas
 import kotlin.math.hypot
 
 /**
- * Pure pointer-event router. It exposes down/move/up/cancel primitives and
- * resolves only the early editor intent: ink, tap-to-text, pan, zoom, or a
- * selection-mode placeholder for later lasso/object-drag routing.
+ * Pure pointer-event router. Stylus input is kept independent from touch
+ * navigation so a user can rest a hand, pan with a finger, and write or erase
+ * with the S Pen without switching the entire canvas into a fragile gesture
+ * mode.
  */
 public class InputRouter(
     private val tapSlop: Float = DefaultTapSlop,
@@ -15,25 +16,45 @@ public class InputRouter(
     private var activeFingerDown: PendingFingerDown? = null
 
     public fun route(canvas: InfiniteCanvas, event: InputEvent, mode: InputMode = InputMode.Write): InputRouteResult {
+        val hasPhysicalEraser = event.pointers.any { it.tool == PointerTool.Eraser }
+        if (hasPhysicalEraser) {
+            activeFingerDown = null
+            return InputRouteResult(canvas = canvas, action = event.toEraseAction())
+        }
+
         if (mode == InputMode.Selection) {
             return routeSelectionMode(canvas, event)
         }
 
-        if (event.pointers.any { it.tool == PointerTool.SPen }) {
+        val hasStylus = event.pointers.any { it.tool == PointerTool.SPen }
+        if (mode == InputMode.Erase && hasStylus) {
+            activeFingerDown = null
+            return InputRouteResult(canvas = canvas, action = event.toEraseAction())
+        }
+
+        if (hasStylus) {
             activeFingerDown = null
             return InputRouteResult(canvas = canvas, action = event.toInkAction())
         }
 
-        val touchPointers = event.pointers.filter { it.tool == PointerTool.Finger }
+        val surfacePointers = event.pointers.filter {
+            it.tool == PointerTool.Finger || it.tool == PointerTool.Mouse
+        }
+        val touchPointers = surfacePointers.filter { it.tool == PointerTool.Finger }
         if (touchPointers.size >= 2) {
             activeFingerDown = null
             return InputRouteResult(canvas = canvas, action = InputAction.Zoom(centroid = touchPointers.centroid()))
         }
 
+        val primary = surfacePointers.singleOrNull()
+        if (mode == InputMode.Navigate || mode == InputMode.Erase) {
+            return routeNavigationMode(canvas, event, primary)
+        }
+
         return when (event.type) {
-            PointerEventType.Down -> routeFingerDown(canvas, touchPointers.singleOrNull())
-            PointerEventType.Move -> routeFingerMove(canvas, touchPointers.singleOrNull())
-            PointerEventType.Up -> routeFingerUp(canvas, event, touchPointers.singleOrNull())
+            PointerEventType.Down -> routeFingerDown(canvas, primary)
+            PointerEventType.Move -> routeFingerMove(canvas, primary)
+            PointerEventType.Up -> routeFingerUp(canvas, event, primary)
             PointerEventType.Cancel -> {
                 activeFingerDown = null
                 InputRouteResult(canvas = canvas, action = InputAction.CancelInteraction)
@@ -93,6 +114,30 @@ public class InputRouter(
         return InputRouteResult(canvas = canvas, action = InputAction.FocusExisting(event.targetObjectId))
     }
 
+    private fun routeNavigationMode(
+        canvas: InfiniteCanvas,
+        event: InputEvent,
+        pointer: InputPointer?,
+    ): InputRouteResult = when (event.type) {
+        PointerEventType.Down -> routeFingerDown(canvas, pointer)
+        PointerEventType.Move -> routeFingerMove(canvas, pointer)
+        PointerEventType.Up -> {
+            val pending = activeFingerDown
+            activeFingerDown = null
+            when {
+                pointer == null || pending == null || pointer.id != pending.pointerId ->
+                    InputRouteResult(canvas = canvas, action = InputAction.Ignored)
+                pending.hasExceededTapSlop ->
+                    InputRouteResult(canvas = canvas, action = InputAction.EndInteraction)
+                else -> InputRouteResult(canvas = canvas, action = InputAction.Ignored)
+            }
+        }
+        PointerEventType.Cancel -> {
+            activeFingerDown = null
+            InputRouteResult(canvas = canvas, action = InputAction.CancelInteraction)
+        }
+    }
+
     private fun routeSelectionMode(canvas: InfiniteCanvas, event: InputEvent): InputRouteResult = InputRouteResult(
         canvas = canvas,
         action = when (event.type) {
@@ -110,6 +155,13 @@ public class InputRouter(
         PointerEventType.Cancel -> InputAction.CancelInteraction
     }
 
+    private fun InputEvent.toEraseAction(): InputAction = when (type) {
+        PointerEventType.Down,
+        PointerEventType.Move -> InputAction.EraseAt(primaryInkSamples.map { it.position })
+        PointerEventType.Up -> InputAction.EndInteraction
+        PointerEventType.Cancel -> InputAction.CancelInteraction
+    }
+
     private data class PendingFingerDown(
         val pointerId: Int,
         val start: CanvasPoint,
@@ -123,8 +175,14 @@ public class InputRouter(
 }
 
 public enum class InputMode {
+    /** Finger taps create text boxes; stylus input writes. */
     Write,
+
+    /** Finger input only navigates; stylus input writes. */
+    Navigate,
+
     Selection,
+    Erase,
 }
 
 public enum class PointerEventType {
@@ -136,6 +194,7 @@ public enum class PointerEventType {
 
 public enum class PointerTool {
     SPen,
+    Eraser,
     Finger,
     Mouse,
 }
@@ -183,6 +242,7 @@ public data class InputRouteResult(
 public sealed interface InputAction {
     public data class BeginInk(val position: CanvasPoint, val pressure: Float, val rawPressure: Float? = null) : InputAction
     public data class ContinueInk(val samples: List<InputInkSample>) : InputAction
+    public data class EraseAt(val positions: List<CanvasPoint>) : InputAction
     public data class PendingTap(val position: CanvasPoint) : InputAction
     public data class PanBy(val dx: Float, val dy: Float) : InputAction
     public data class Zoom(val centroid: CanvasPoint) : InputAction

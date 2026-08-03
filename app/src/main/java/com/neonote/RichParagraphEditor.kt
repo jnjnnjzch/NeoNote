@@ -29,8 +29,16 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -109,6 +117,7 @@ internal fun RichParagraphEditor(
         ),
         textStyle = LocalTextStyle.current.copy(color = Color(0xFF0F172A), lineHeight = RichContentLayoutDefaults.LineHeight.sp),
         cursorBrush = SolidColor(Color(0xFF7C3AED)),
+        visualTransformation = remember(paragraph) { ParagraphStyleVisualTransformation(paragraph) },
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = RichContentLayoutDefaults.LineHeight.dp)
@@ -190,6 +199,37 @@ private fun ParagraphNode.plainTextForEditor(): String = inlines.joinToString(""
 }
 
 private const val InlineAtomPlaceholder: String = "\uFFFC"
+
+private class ParagraphStyleVisualTransformation(
+    private val paragraph: ParagraphNode,
+) : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val builder = AnnotatedString.Builder(text.text)
+        var offset = 0
+        paragraph.inlines.forEach { inline ->
+            when (inline) {
+                is InlineText -> {
+                    val end = (offset + inline.text.length).coerceAtMost(text.length)
+                    if (end > offset && (inline.bold || inline.italic || inline.underline)) {
+                        builder.addStyle(
+                            style = SpanStyle(
+                                fontWeight = if (inline.bold) FontWeight.Bold else null,
+                                fontStyle = if (inline.italic) FontStyle.Italic else null,
+                                textDecoration = if (inline.underline) TextDecoration.Underline else null,
+                            ),
+                            start = offset,
+                            end = end,
+                        )
+                    }
+                    offset = end
+                }
+                InlineLineBreak -> offset = (offset + 1).coerceAtMost(text.length)
+                is InlineFormula, is InlineImage -> offset = (offset + 1).coerceAtMost(text.length)
+            }
+        }
+        return TransformedText(builder.toAnnotatedString(), OffsetMapping.Identity)
+    }
+}
 
 private fun androidx.compose.ui.input.key.KeyEvent.richContentPlainTextPaste(
     clipboardManager: ClipboardManager?,
