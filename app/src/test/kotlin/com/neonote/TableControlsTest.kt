@@ -24,7 +24,7 @@ class TableControlsTest {
             .single()
 
         assertEquals(2, activeTable().rows.size)
-        assertEquals(2, activeTable().rows.single().size)
+        assertEquals(2, activeTable().rows.first().size)
 
         controller.addActiveRichContentTableRow(boxId)
         assertEquals(3, activeTable().rows.size)
