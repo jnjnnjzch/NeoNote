@@ -52,7 +52,7 @@ jobs:
       - name: Test and assemble release candidate
         run: |
           ./gradlew clean \
-            :app:testReleaseCandidateUnitTest \
+            :app:testDebugUnitTest \
             :app:assembleReleaseCandidate \
             --stacktrace --no-daemon
 
@@ -102,7 +102,6 @@ jobs:
           NEONOTE_KEYSTORE_PATH: ${{ runner.temp }}/neonote-release.jks
         run: |
           ./gradlew \
-            :app:testReleaseUnitTest \
             :app:assembleRelease \
             --stacktrace --no-daemon
 
