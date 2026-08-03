@@ -34,6 +34,7 @@ class EditorHistoryTest {
             "hello history",
             (controller.currentCanvas.objects.single() as RichContentBox).toPlainText(),
         )
+        assertFalse(controller.canRedo)
     }
 
     @Test
