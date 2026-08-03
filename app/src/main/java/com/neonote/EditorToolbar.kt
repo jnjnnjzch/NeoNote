@@ -25,9 +25,13 @@ internal fun EditorToolbar(
     pageLabel: String,
     canGoToPreviousPage: Boolean,
     canGoToNextPage: Boolean,
+    canUndo: Boolean,
+    canRedo: Boolean,
     onPreviousPage: () -> Unit,
     onNextPage: () -> Unit,
     onAddPage: () -> Unit,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
     onToggleSelectionMode: () -> Unit,
     onSave: () -> Unit,
     onLoad: () -> Unit,
@@ -63,6 +67,20 @@ internal fun EditorToolbar(
             Button(onClick = onAddPage, modifier = Modifier.padding(start = 8.dp)) {
                 Text("Add Page")
             }
+        }
+        Button(
+            onClick = onUndo,
+            enabled = canUndo,
+            modifier = Modifier.padding(start = 8.dp),
+        ) {
+            Text("Undo")
+        }
+        Button(
+            onClick = onRedo,
+            enabled = canRedo,
+            modifier = Modifier.padding(start = 8.dp),
+        ) {
+            Text("Redo")
         }
         Button(onClick = onSave, modifier = Modifier.padding(start = 8.dp)) {
             Text("Save")
