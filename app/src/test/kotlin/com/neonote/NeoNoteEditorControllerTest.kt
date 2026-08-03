@@ -1,671 +1,642 @@
 package com.neonote
 
-import com.neonote.engine.InputAction
+import androidx.compose.ui.geometry.Offset
+import com.neonote.engine.ActiveRichContentTarget
 import com.neonote.engine.InputEvent
-import com.neonote.engine.InputInkSample
 import com.neonote.engine.InputMode
+import com.neonote.engine.InputInkSample
 import com.neonote.engine.InputPointer
 import com.neonote.engine.InputRouter
-import com.neonote.engine.PointerEventType
-import com.neonote.engine.PointerTool
 import com.neonote.engine.RichContentLayoutDefaults
 import com.neonote.engine.InlineStyle
+import com.neonote.engine.PointerEventType
+import com.neonote.engine.PointerTool
+import com.neonote.engine.toPlainText
 import com.neonote.input.InputDiagnostics
+import com.neonote.input.withPressureSamples
 import com.neonote.model.BlockFormula
 import com.neonote.model.BlockImage
 import com.neonote.model.CanvasPoint
+import com.neonote.model.CanvasSize
+import com.neonote.model.EditorState
 import com.neonote.model.EditorTool
+import com.neonote.model.InfiniteCanvas
+import com.neonote.model.InkLayer
 import com.neonote.model.InkPoint
+import com.neonote.model.InkStroke
 import com.neonote.model.InlineText
 import com.neonote.model.ListKind
+import com.neonote.model.NeoNoteDocument
+import com.neonote.model.NotePage
 import com.neonote.model.ParagraphNode
-import com.neonote.model.RichContent
-import com.neonote.model.RichContentBox
-import com.neonote.model.TableCellAddress
 import com.neonote.model.TableNode
-import kotlin.math.abs
+import com.neonote.model.ViewportState
+import com.neonote.model.RichContentBox
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
-import kotlin.test.assertNotNull
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class NeoNoteEditorControllerTest {
-    @Test
-    fun `s pen routed events create committed ink stroke`() {
-        val controller = NeoNoteEditorController()
-        val router = InputRouter()
-
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Down,
-                pointers = listOf(InputPointer(1, CanvasPoint(10f, 10f), PointerTool.SPen, pressure = 0.25f)),
-            ),
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Move,
-                pointers = listOf(InputPointer(1, CanvasPoint(20f, 18f), PointerTool.SPen, pressure = 0.75f)),
-            ),
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Up,
-                pointers = listOf(InputPointer(1, CanvasPoint(20f, 18f), PointerTool.SPen, pressure = 0.75f)),
-            ),
-        )
-
-        assertEquals(1, controller.currentCanvas.inkLayer.strokes.size)
-        assertEquals(listOf(0.25f, 0.75f), controller.currentCanvas.inkLayer.strokes.single().points.map { it.pressure })
-        assertNull(controller.activeInkStroke)
-    }
-
-    @Test
-    fun `finger drag pans without creating ink strokes`() {
-        val controller = NeoNoteEditorController()
-        val router = InputRouter(tapSlop = 4f)
-
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Down,
-                pointers = listOf(InputPointer(1, CanvasPoint(0f, 0f), PointerTool.Finger)),
-            ),
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Move,
-                pointers = listOf(InputPointer(1, CanvasPoint(12f, 9f), PointerTool.Finger)),
-            ),
-        )
-
-        assertEquals(12f, controller.state.viewport.panOffsetX)
-        assertEquals(9f, controller.state.viewport.panOffsetY)
-        assertTrue(controller.currentCanvas.inkLayer.strokes.isEmpty())
-        assertNull(controller.state.focusedRichContentBoxId)
-    }
-
-    @Test
-    fun `routed blank tap converts screen point to document point once`() {
-        val controller = NeoNoteEditorController()
-        val router = InputRouter()
-        controller.panViewportBy(screenDx = 20f, screenDy = 30f)
-        controller.zoomViewportBy(zoomChange = 2f, screenCentroid = CanvasPoint(0f, 0f))
-
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Down,
-                pointers = listOf(InputPointer(1, CanvasPoint(100f, 130f), PointerTool.Finger)),
-            ),
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Up,
-                pointers = listOf(InputPointer(1, CanvasPoint(100f, 130f), PointerTool.Finger)),
-            ),
-        )
-
-        val box = controller.currentCanvas.objects.single() as RichContentBox
-        assertEquals(CanvasPoint(40f, 50f), box.position)
-        assertEquals(box.id, controller.state.focusedRichContentBoxId)
-    }
-
-    @Test
-    fun `panning viewport does not move document objects`() {
-        val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(50f, 70f))
-        val objectPosition = (controller.currentCanvas.objects.single() as RichContentBox).position
-
-        controller.panViewportBy(screenDx = 200f, screenDy = -100f)
-
-        assertEquals(objectPosition, (controller.currentCanvas.objects.single() as RichContentBox).position)
-        assertEquals(200f, controller.state.viewport.panOffsetX)
-        assertEquals(-100f, controller.state.viewport.panOffsetY)
-    }
-
-    @Test
-    fun `pan and zoom do not mutate stroke document coordinates`() {
-        val controller = NeoNoteEditorController()
-        val router = InputRouter()
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Down,
-                pointers = listOf(InputPointer(1, CanvasPoint(10f, 10f), PointerTool.SPen, pressure = 0.4f)),
-            ),
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Move,
-                pointers = listOf(InputPointer(1, CanvasPoint(20f, 20f), PointerTool.SPen, pressure = 0.8f)),
-            ),
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Up,
-                pointers = listOf(InputPointer(1, CanvasPoint(20f, 20f), PointerTool.SPen, pressure = 0.8f)),
-            ),
-        )
-        val pointsBeforeTransform = controller.currentCanvas.inkLayer.strokes.single().points
-
-        controller.panViewportBy(screenDx = 50f, screenDy = 60f)
-        controller.zoomViewportBy(zoomChange = 2f, screenCentroid = CanvasPoint(100f, 100f))
-
-        assertEquals(pointsBeforeTransform, controller.currentCanvas.inkLayer.strokes.single().points)
-    }
-
-    @Test
-    fun `zooming viewport around centroid keeps centroid document point stable without resizing objects`() {
-        val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(120f, 90f))
-        val boxBeforeZoom = controller.currentCanvas.objects.single() as RichContentBox
-        controller.panViewportBy(screenDx = 15f, screenDy = 25f)
-        val centroid = CanvasPoint(300f, 220f)
-        val documentPointBefore = controller.screenToDocument(centroid)
-
-        controller.zoomViewportBy(zoomChange = 2f, screenCentroid = centroid)
-
-        val documentPointAfter = controller.screenToDocument(centroid)
-        val boxAfterZoom = controller.currentCanvas.objects.single() as RichContentBox
-        assertTrue(abs(documentPointBefore.x - documentPointAfter.x) < 0.0001f)
-        assertTrue(abs(documentPointBefore.y - documentPointAfter.y) < 0.0001f)
-        assertEquals(boxBeforeZoom.position, boxAfterZoom.position)
-        assertEquals(boxBeforeZoom.size, boxAfterZoom.size)
-    }
-
-    @Test
-    fun `coalesced ink samples append in document order`() {
-        val controller = NeoNoteEditorController()
-        val router = InputRouter()
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Down,
-                pointers = listOf(InputPointer(1, CanvasPoint(1f, 1f), PointerTool.SPen, pressure = 0.2f)),
-            ),
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Move,
-                pointers = listOf(
-                    InputPointer(
-                        id = 1,
-                        position = CanvasPoint(4f, 4f),
-                        tool = PointerTool.SPen,
-                        pressure = 0.8f,
-                        historicalSamples = listOf(
-                            InputInkSample(CanvasPoint(2f, 2f), 0.4f),
-                            InputInkSample(CanvasPoint(3f, 3f), 0.6f),
-                        ),
-                    ),
-                ),
-            ),
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Up,
-                pointers = listOf(InputPointer(1, CanvasPoint(4f, 4f), PointerTool.SPen, pressure = 0.8f)),
-            ),
-        )
-
-        assertEquals(
-            listOf(
-                InkPoint(1f, 1f, 0.2f),
-                InkPoint(2f, 2f, 0.4f),
-                InkPoint(3f, 3f, 0.6f),
-                InkPoint(4f, 4f, 0.8f),
-            ),
-            controller.currentCanvas.inkLayer.strokes.single().points,
-        )
-    }
-
-    @Test
-    fun `coalesced move samples preserve changing pressure`() {
-        val controller = NeoNoteEditorController()
-        val router = InputRouter()
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Down,
-                pointers = listOf(InputPointer(1, CanvasPoint(1f, 1f), PointerTool.SPen, pressure = 0.15f, rawPressure = 0.15f)),
-            ),
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Move,
-                pointers = listOf(
-                    InputPointer(
-                        id = 1,
-                        position = CanvasPoint(5f, 5f),
-                        tool = PointerTool.SPen,
-                        pressure = 0.95f,
-                        rawPressure = 0.95f,
-                        historicalSamples = listOf(
-                            InputInkSample(CanvasPoint(2f, 2f), 0.25f, 0.25f),
-                            InputInkSample(CanvasPoint(3f, 3f), 0.55f, 0.55f),
-                            InputInkSample(CanvasPoint(4f, 4f), 0.75f, 0.75f),
-                        ),
-                    ),
-                ),
-            ),
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Up,
-                pointers = listOf(InputPointer(1, CanvasPoint(5f, 5f), PointerTool.SPen, pressure = 0.95f, rawPressure = 0.95f)),
-            ),
-        )
-
-        assertEquals(
-            listOf(0.15f, 0.25f, 0.55f, 0.75f, 0.95f),
-            controller.currentCanvas.inkLayer.strokes.single().points.map { it.pressure },
-        )
-        assertEquals(
-            listOf(0.15f, 0.25f, 0.55f, 0.75f, 0.95f),
-            controller.currentCanvas.inkLayer.strokes.single().points.map { it.rawPressure },
-        )
-    }
-
-    @Test
-    fun `diagnostics throttle does not reduce committed stroke points or raw pressure`() {
-        var now = 0L
-        val controller = NeoNoteEditorController(
-            inputDiagnosticsThrottleMillis = 1_000L,
-            diagnosticsClockMillis = { now },
-        )
-        val router = InputRouter()
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Down,
-                pointers = listOf(InputPointer(1, CanvasPoint(1f, 1f), PointerTool.SPen, pressure = 0.2f, rawPressure = 0.2f)),
-            ),
-        )
-        controller.updateInputDiagnostics(InputDiagnostics(tool = PointerTool.SPen, pressure = 0.2f, rawPressure = 0.2f), eventTimeMillis = now)
-        now += 10
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Move,
-                pointers = listOf(
-                    InputPointer(
-                        id = 1,
-                        position = CanvasPoint(4f, 4f),
-                        tool = PointerTool.SPen,
-                        pressure = 0.8f,
-                        rawPressure = 0.8f,
-                        historicalSamples = listOf(
-                            InputInkSample(CanvasPoint(2f, 2f), 0.4f, 0.4f),
-                            InputInkSample(CanvasPoint(3f, 3f), 0.6f, 0.6f),
-                        ),
-                    ),
-                ),
-            ),
-        )
-        controller.updateInputDiagnostics(InputDiagnostics(tool = PointerTool.SPen, pressure = 0.8f, rawPressure = 0.8f), eventTimeMillis = now)
-        now += 10
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Up,
-                pointers = listOf(InputPointer(1, CanvasPoint(4f, 4f), PointerTool.SPen, pressure = 0.8f, rawPressure = 0.8f)),
-            ),
-        )
-
-        assertEquals(4, controller.currentCanvas.inkLayer.strokes.single().points.size)
-        assertEquals(listOf(0.2f, 0.4f, 0.6f, 0.8f), controller.currentCanvas.inkLayer.strokes.single().points.map { it.rawPressure })
-        assertEquals(0.2f, controller.inputDiagnostics.pressureMin)
-        assertEquals(0.8f, controller.inputDiagnostics.pressureMax)
-    }
-
-    @Test
-    fun `selection mode exposes active lasso path in document coordinates while drawing`() {
-        val controller = NeoNoteEditorController()
-        controller.setSelectionMode(true)
-        val router = InputRouter()
-
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Down,
-                pointers = listOf(InputPointer(1, CanvasPoint(10f, 10f), PointerTool.Finger)),
-            ),
-            mode = InputMode.Selection,
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Move,
-                pointers = listOf(InputPointer(1, CanvasPoint(20f, 25f), PointerTool.Finger)),
-            ),
-            mode = InputMode.Selection,
-        )
-
-        assertEquals(listOf(CanvasPoint(10f, 10f), CanvasPoint(20f, 25f)), controller.activeLassoPath)
-    }
-
-    @Test
-    fun `selection mode drag moves mixed lasso selection in document coordinates under zoom`() {
-        val controller = NeoNoteEditorController()
-        val router = InputRouter()
-        controller.focusOrCreateRichContentBox(CanvasPoint(40f, 40f))
-        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Down,
-                pointers = listOf(InputPointer(2, CanvasPoint(50f, 50f), PointerTool.SPen)),
-            ),
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Move,
-                pointers = listOf(InputPointer(2, CanvasPoint(60f, 60f), PointerTool.SPen)),
-            ),
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Up,
-                pointers = listOf(InputPointer(2, CanvasPoint(60f, 60f), PointerTool.SPen)),
-            ),
-        )
-        val strokeId = controller.currentCanvas.inkLayer.strokes.single().id
-        controller.setSelectionMode(true)
-        controller.replaceSelection(objectIds = setOf(boxId), strokeIds = setOf(strokeId))
-        controller.zoomViewportBy(zoomChange = 2f, screenCentroid = CanvasPoint(0f, 0f))
-
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Down,
-                pointers = listOf(InputPointer(3, CanvasPoint(100f, 100f), PointerTool.Finger)),
-            ),
-            mode = InputMode.Selection,
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Move,
-                pointers = listOf(InputPointer(3, CanvasPoint(120f, 140f), PointerTool.Finger)),
-            ),
-            mode = InputMode.Selection,
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Up,
-                pointers = listOf(InputPointer(3, CanvasPoint(120f, 140f), PointerTool.Finger)),
-            ),
-            mode = InputMode.Selection,
-        )
-
-        val movedBox = controller.currentCanvas.objects.single() as RichContentBox
-        val movedStroke = controller.currentCanvas.inkLayer.strokes.single()
-        assertEquals(CanvasPoint(50f, 60f), movedBox.position)
-        assertEquals(CanvasPoint(60f, 70f), CanvasPoint(movedStroke.points.first().x, movedStroke.points.first().y))
-    }
-
-    @Test
-    fun `selection mode drag can start from inside selected bounds between selected geometries`() {
-        val controller = NeoNoteEditorController()
-        val router = InputRouter()
-        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 10f))
-        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Down,
-                pointers = listOf(InputPointer(4, CanvasPoint(400f, 10f), PointerTool.SPen)),
-            ),
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Move,
-                pointers = listOf(InputPointer(4, CanvasPoint(420f, 20f), PointerTool.SPen)),
-            ),
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Up,
-                pointers = listOf(InputPointer(4, CanvasPoint(420f, 20f), PointerTool.SPen)),
-            ),
-        )
-        val strokeId = controller.currentCanvas.inkLayer.strokes.single().id
-        controller.setSelectionMode(true)
-        controller.replaceSelection(objectIds = setOf(boxId), strokeIds = setOf(strokeId))
-        val bounds = assertNotNull(controller.selectedBounds)
-        val interiorGap = CanvasPoint((bounds.left + bounds.right) / 2f, (bounds.top + bounds.bottom) / 2f)
-
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Down,
-                pointers = listOf(InputPointer(5, interiorGap, PointerTool.Finger)),
-            ),
-            mode = InputMode.Selection,
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Move,
-                pointers = listOf(InputPointer(5, CanvasPoint(interiorGap.x + 30f, interiorGap.y + 15f), PointerTool.Finger)),
-            ),
-            mode = InputMode.Selection,
-        )
-
-        val movedBox = controller.currentCanvas.objects.single() as RichContentBox
-        assertEquals(CanvasPoint(40f, 25f), movedBox.position)
-    }
-
-    @Test
-    fun `selection mode can move a selected rich content box in document coordinates under zoom`() {
-        val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(20f, 30f))
-        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
-        controller.setSelectionMode(true)
-        controller.selectCanvasObject(boxId)
-        controller.zoomViewportBy(zoomChange = 2f, screenCentroid = CanvasPoint(0f, 0f))
-        val router = InputRouter()
-
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Down,
-                pointers = listOf(InputPointer(1, CanvasPoint(60f, 80f), PointerTool.Finger)),
-            ),
-            mode = InputMode.Selection,
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Move,
-                pointers = listOf(InputPointer(1, CanvasPoint(100f, 120f), PointerTool.Finger)),
-            ),
-            mode = InputMode.Selection,
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Up,
-                pointers = listOf(InputPointer(1, CanvasPoint(100f, 120f), PointerTool.Finger)),
-            ),
-            mode = InputMode.Selection,
-        )
-
-        assertEquals(CanvasPoint(40f, 50f), (controller.currentCanvas.objects.single() as RichContentBox).position)
-    }
-
-    @Test
-    fun `routed selection mode tap on text box selects without focusing`() {
-        val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 20f))
-        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
-        controller.setSelectionMode(true)
-        val router = InputRouter()
-        val tapPoint = CanvasPoint(15f, 25f)
-
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Down,
-                pointers = listOf(InputPointer(1, tapPoint, PointerTool.Finger)),
-                targetObjectId = boxId,
-            ),
-            mode = InputMode.Selection,
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Up,
-                pointers = listOf(InputPointer(1, tapPoint, PointerTool.Finger)),
-                targetObjectId = boxId,
-            ),
-            mode = InputMode.Selection,
-        )
-
-        assertTrue(controller.state.selection.isObjectSelected(boxId))
-        assertNull(controller.state.focusedRichContentBoxId)
-        assertEquals(EditorTool.Selection, controller.state.currentTool)
-    }
-
-    @Test
-    fun `routed selection mode stylus tap selects without inking`() {
-        val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 20f))
-        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
-        controller.setSelectionMode(true)
-        val router = InputRouter()
-        val tapPoint = CanvasPoint(15f, 25f)
-
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Down,
-                pointers = listOf(InputPointer(1, tapPoint, PointerTool.SPen)),
-                targetObjectId = boxId,
-            ),
-            mode = InputMode.Selection,
-        )
-        controller.routeInputEvent(
-            router,
-            InputEvent(
-                type = PointerEventType.Up,
-                pointers = listOf(InputPointer(1, tapPoint, PointerTool.SPen)),
-                targetObjectId = boxId,
-            ),
-            mode = InputMode.Selection,
-        )
-
-        assertTrue(controller.currentCanvas.inkLayer.strokes.isEmpty())
-        assertTrue(controller.state.selection.isObjectSelected(boxId))
-    }
-
-    @Test
-    fun `switch page exposes only that page canvas for editing`() {
-        val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 20f))
-        val firstPageId = controller.state.currentPageId
-        val firstPageObjectId = (controller.currentCanvas.objects.single() as RichContentBox).id
-
-        controller.addPage()
-        val secondPageId = controller.state.currentPageId
-        assertNotEquals(firstPageId, secondPageId)
-        assertTrue(controller.currentCanvas.objects.isEmpty())
-        controller.focusOrCreateRichContentBox(CanvasPoint(30f, 40f))
-        val secondPageObjectId = (controller.currentCanvas.objects.single() as RichContentBox).id
-        assertNotEquals(firstPageObjectId, secondPageObjectId)
-
-        controller.switchPage(requireNotNull(firstPageId))
-        assertEquals(firstPageObjectId, (controller.currentCanvas.objects.single() as RichContentBox).id)
-        controller.switchPage(requireNotNull(secondPageId))
-        assertEquals(secondPageObjectId, (controller.currentCanvas.objects.single() as RichContentBox).id)
-    }
 
     @Test
     fun `add page appends a blank page and switches to it`() {
         val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 20f))
         val firstPageId = controller.state.currentPageId
 
         controller.addPage()
 
         assertEquals(2, controller.pageCount)
         assertEquals(2, controller.currentPageNumber)
-        assertNotEquals(firstPageId, controller.state.currentPageId)
+        assertTrue(controller.state.currentPageId != firstPageId)
         assertTrue(controller.currentCanvas.objects.isEmpty())
-        assertNull(controller.state.focusedRichContentBoxId)
-        assertTrue(controller.state.selection.selectedRefs.isEmpty())
+        assertTrue(controller.currentCanvas.inkLayer.strokes.isEmpty())
+    }
+
+    @Test
+    fun `switch page exposes only that page canvas for editing`() {
+        val controller = NeoNoteEditorController()
+        val firstPageId = controller.state.currentPageId!!
+        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 20f))
+        val firstBoxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(firstBoxId, "first page")
+
+        controller.addPage()
+        val secondPageId = controller.state.currentPageId!!
+        controller.focusOrCreateRichContentBox(CanvasPoint(100f, 120f))
+        val secondBoxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(secondBoxId, "second page")
+
+        controller.switchPage(firstPageId)
+        assertEquals(1, controller.currentPageNumber)
+        assertEquals("first page", (controller.currentCanvas.objects.single() as RichContentBox).toPlainText())
+
+        controller.switchPage(secondPageId)
+        assertEquals(2, controller.currentPageNumber)
+        assertEquals("second page", (controller.currentCanvas.objects.single() as RichContentBox).toPlainText())
     }
 
     @Test
     fun `switch page clears selection focus and active ink session`() {
         val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 20f))
-        val firstPageId = requireNotNull(controller.state.currentPageId)
+        val router = InputRouter()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
         val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
         controller.addPage()
-        val secondPageId = requireNotNull(controller.state.currentPageId)
-        controller.switchPage(firstPageId)
-        controller.setSelectionMode(true)
+        controller.switchToPreviousPage()
         controller.selectCanvasObject(boxId)
-        controller.setSelectionMode(false)
-        controller.focusRichContentBox(boxId)
-        controller.beginInk(CanvasPoint(1f, 1f), pressure = 0.4f)
 
-        controller.switchPage(secondPageId)
+        controller.switchToNextPage()
 
         assertTrue(controller.state.selection.selectedRefs.isEmpty())
+        controller.switchToPreviousPage()
+        controller.focusRichContentBox(boxId)
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(5f, 5f), tool = PointerTool.SPen)),
+            ),
+        )
+        assertTrue(controller.activeInkStroke != null)
+
+        controller.switchToNextPage()
+
         assertNull(controller.state.focusedRichContentBoxId)
         assertNull(controller.activeInkStroke)
+        controller.switchToPreviousPage()
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals(false, box.isFocused)
+        assertTrue(controller.currentCanvas.inkLayer.strokes.isEmpty())
+    }
+    @Test
+    fun `toolbar equivalent commands update focused rich content`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "hello")
+        controller.focusRichContentParagraph(boxId = boxId, blockIndex = 0, selectionStart = 0, selectionEnd = 5)
+
+        controller.toggleActiveRichContentStyle(boxId = boxId, style = InlineStyle.Bold)
+        controller.toggleActiveRichContentList(boxId = boxId, kind = ListKind.Todo)
+        controller.insertRichContentTablePlaceholder(boxId = boxId)
+        controller.insertRichContentFormulaPlaceholder(boxId = boxId)
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        val paragraph = assertIs<ParagraphNode>(box.content.blocks[0])
+        val text = assertIs<InlineText>(paragraph.inlines.single())
+        assertTrue(text.bold)
+        assertEquals(ListKind.Todo, paragraph.listMetadata?.kind)
+        assertFalse(paragraph.listMetadata?.checked ?: true)
+        assertIs<TableNode>(box.content.blocks[1])
+        assertIs<BlockFormula>(box.content.blocks[2])
+        assertEquals(ActiveRichContentTarget.FormulaBlock(2), controller.activeRichContentTarget(boxId))
+        assertEquals(boxId, controller.state.focusedRichContentBoxId)
+        assertTrue(box.isFocused)
+    }
+
+
+    @Test
+    fun `toolbar placeholder commands insert after active paragraph and keep focus`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "alpha\nbravo\ncharlie")
+        controller.focusRichContentParagraph(boxId = boxId, blockIndex = 1, selectionStart = 2)
+
+        controller.insertRichContentFormulaPlaceholder(boxId = boxId, expression = "x")
+        controller.insertRichContentTablePlaceholder(boxId = boxId)
+        controller.insertRichContentImagePlaceholder(boxId = boxId, assetId = "asset-toolbar-1", altText = "Toolbar image")
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertIs<ParagraphNode>(box.content.blocks[1])
+        assertIs<BlockFormula>(box.content.blocks[2])
+        assertIs<TableNode>(box.content.blocks[3])
+        val image = assertIs<BlockImage>(box.content.blocks[4])
+        assertEquals("asset-toolbar-1", image.assetId)
+        assertEquals("Toolbar image", image.altText)
+        assertIs<ParagraphNode>(box.content.blocks[5])
+        assertEquals(boxId, controller.state.focusedRichContentBoxId)
+        assertTrue(box.isFocused)
+        assertEquals(5, controller.activeRichContentBlockIndex(boxId))
+        assertEquals(4, controller.selectedRichContentObjectBlockIndex(boxId))
+    }
+
+
+    @Test
+    fun `formula block can be focused edited and blurred in place`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.insertRichContentFormulaPlaceholder(boxId = boxId, expression = "x")
+
+        val formulaBlockIndex = controller.activeRichContentFormulaBlockIndex(boxId)!!
+        controller.focusRichContentFormulaBlock(boxId = boxId, blockIndex = formulaBlockIndex)
+        controller.updateRichContentFormulaExpression(boxId = boxId, blockIndex = formulaBlockIndex, expression = "x^2 + y^2")
+        controller.blurRichContentFormulaBlock(boxId = boxId, blockIndex = formulaBlockIndex)
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals("x^2 + y^2", assertIs<BlockFormula>(box.content.blocks[formulaBlockIndex]).expression)
+        assertNull(controller.activeRichContentFormulaBlockIndex(boxId))
+        assertEquals(boxId, controller.state.focusedRichContentBoxId)
     }
 
     @Test
-    fun `multiline rich content input expands height conservatively and delete keeps minimum height`() {
+    fun `panning viewport does not move document objects`() {
         val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(20f, 20f))
+        controller.focusOrCreateRichContentBox(CanvasPoint(100f, 150f))
+        val originalPosition = (controller.currentCanvas.objects.single() as RichContentBox).position
+
+        controller.panViewportBy(screenDx = 40f, screenDy = -12f)
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals(originalPosition, box.position)
+        assertEquals(40f, controller.state.viewport.panOffsetX)
+        assertEquals(-12f, controller.state.viewport.panOffsetY)
+        assertEquals(CanvasPoint(140f, 138f), controller.documentToScreen(box.position))
+    }
+
+    @Test
+    fun `zooming viewport around centroid keeps centroid document point stable without resizing objects`() {
+        val controller = NeoNoteEditorController()
+        controller.panViewportBy(screenDx = 20f, screenDy = -10f)
+        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 20f))
+        val originalBox = controller.currentCanvas.objects.single() as RichContentBox
+        val screenCentroid = CanvasPoint(60f, 50f)
+        val documentAtCentroidBeforeZoom = controller.screenToDocument(screenCentroid)
+
+        controller.zoomViewportBy(zoomChange = 2f, screenCentroid = screenCentroid)
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals(2f, controller.state.viewport.zoomScale)
+        assertEquals(documentAtCentroidBeforeZoom, controller.screenToDocument(screenCentroid))
+        assertEquals(originalBox.position, box.position)
+        assertEquals(originalBox.size, box.size)
+    }
+
+    @Test
+    fun `routed blank tap converts screen point to document point once`() {
+        val controller = NeoNoteEditorController()
+        val router = InputRouter()
+        controller.panViewportBy(screenDx = 50f, screenDy = 20f)
+        controller.zoomViewportBy(zoomChange = 2f, screenCentroid = CanvasPoint(0f, 0f))
+        val screenTap = CanvasPoint(150f, 220f)
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = screenTap, tool = PointerTool.Finger)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = screenTap, tool = PointerTool.Finger)),
+            ),
+        )
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals(CanvasPoint(25f, 90f), box.position)
+    }
+
+    @Test
+    fun `s pen routed events create committed ink stroke`() {
+        val controller = NeoNoteEditorController()
+        val router = InputRouter()
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(10f, 12f), tool = PointerTool.SPen, pressure = 0.4f)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(20f, 24f), tool = PointerTool.SPen, pressure = 0.8f)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(20f, 24f), tool = PointerTool.SPen, pressure = 0.8f)),
+            ),
+        )
+
+        val stroke = controller.currentCanvas.inkLayer.strokes.single()
+        assertEquals("stroke-1", stroke.id)
+        assertEquals(2, stroke.points.size)
+        assertEquals(10f, stroke.points[0].x)
+        assertEquals(12f, stroke.points[0].y)
+        assertEquals(0.4f, stroke.points[0].pressure)
+        assertEquals(16.5f, stroke.points[1].x)
+        assertEquals(19.8f, stroke.points[1].y)
+        assertEquals(0.8f, stroke.points[1].pressure, 0.0001f)
+    }
+
+
+    @Test
+    fun `diagnostics throttle does not reduce committed stroke points or raw pressure`() {
+        var now = 0L
+        val controller = NeoNoteEditorController(
+            inputDiagnosticsThrottleMillis = 50L,
+            diagnosticsClockMillis = { now },
+        )
+        val router = InputRouter()
+
+        val down = InputEvent(
+            type = PointerEventType.Down,
+            pointers = listOf(
+                InputPointer(
+                    id = 1,
+                    position = CanvasPoint(0f, 0f),
+                    tool = PointerTool.SPen,
+                    pressure = 0.2f,
+                    rawPressure = 0.2f,
+                ),
+            ),
+        )
+        val firstMove = InputEvent(
+            type = PointerEventType.Move,
+            pointers = listOf(
+                InputPointer(
+                    id = 1,
+                    position = CanvasPoint(30f, 0f),
+                    tool = PointerTool.SPen,
+                    pressure = 0.6f,
+                    rawPressure = 0.6f,
+                    historicalSamples = listOf(
+                        InputInkSample(position = CanvasPoint(10f, 0f), pressure = 0.4f, rawPressure = 0.4f),
+                        InputInkSample(position = CanvasPoint(20f, 0f), pressure = 0.5f, rawPressure = 0.5f),
+                    ),
+                ),
+            ),
+        )
+        val secondMove = InputEvent(
+            type = PointerEventType.Move,
+            pointers = listOf(
+                InputPointer(
+                    id = 1,
+                    position = CanvasPoint(60f, 0f),
+                    tool = PointerTool.SPen,
+                    pressure = 1.1f,
+                    rawPressure = 1.1f,
+                    historicalSamples = listOf(
+                        InputInkSample(position = CanvasPoint(40f, 0f), pressure = 0.8f, rawPressure = 0.8f),
+                        InputInkSample(position = CanvasPoint(50f, 0f), pressure = 0.9f, rawPressure = 0.9f),
+                    ),
+                ),
+            ),
+        )
+        val up = InputEvent(
+            type = PointerEventType.Up,
+            pointers = listOf(
+                InputPointer(
+                    id = 1,
+                    position = CanvasPoint(60f, 0f),
+                    tool = PointerTool.SPen,
+                    pressure = 1.1f,
+                    rawPressure = 1.1f,
+                ),
+            ),
+        )
+
+        assertTrue(controller.updateInputDiagnostics(down.toDiagnostics(), eventTimeMillis = now, force = true))
+        controller.routeInputEvent(router, down)
+
+        now = 5L
+        assertEquals(false, controller.updateInputDiagnostics(firstMove.toDiagnostics(), eventTimeMillis = now))
+        controller.routeInputEvent(router, firstMove)
+
+        now = 10L
+        assertEquals(false, controller.updateInputDiagnostics(secondMove.toDiagnostics(), eventTimeMillis = now))
+        controller.routeInputEvent(router, secondMove)
+
+        now = 12L
+        assertTrue(controller.updateInputDiagnostics(up.toDiagnostics(), eventTimeMillis = now, force = true))
+        controller.routeInputEvent(router, up)
+
+        val stroke = controller.currentCanvas.inkLayer.strokes.single()
+        val unthrottledController = NeoNoteEditorController(inputDiagnosticsThrottleMillis = 0L)
+        val unthrottledRouter = InputRouter()
+        listOf(down, firstMove, secondMove, up).forEach { event ->
+            unthrottledController.updateInputDiagnostics(event.toDiagnostics())
+            unthrottledController.routeInputEvent(unthrottledRouter, event)
+        }
+        val unthrottledStroke = unthrottledController.currentCanvas.inkLayer.strokes.single()
+
+        assertEquals(7, stroke.points.size)
+        assertEquals(unthrottledStroke.points.size, stroke.points.size)
+        assertEquals(unthrottledStroke.points.map { it.pressure }, stroke.points.map { it.pressure })
+        assertEquals(unthrottledStroke.points.map { it.rawPressure }, stroke.points.map { it.rawPressure })
+        assertEquals(listOf(0.2f, 0.4f, 0.5f, 0.6f, 0.8f, 0.9f, 1.1f), stroke.points.map { it.rawPressure })
+        assertTrue(stroke.points.last().pressure <= 1f)
+
+        val diagnosticsText = controller.inputDiagnostics.asToolbarText()
+        assertTrue("tool=SPen" in diagnosticsText)
+        assertTrue("range=0.40..1.10" in diagnosticsText)
+        assertTrue("samples=7" in diagnosticsText)
+    }
+
+    @Test
+    fun `finger drag pans without creating ink strokes`() {
+        val controller = NeoNoteEditorController()
+        val router = InputRouter(tapSlop = 8f)
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(0f, 0f), tool = PointerTool.Finger)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(12f, 0f), tool = PointerTool.Finger)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(12f, 0f), tool = PointerTool.Finger)),
+            ),
+        )
+
+        assertTrue(controller.currentCanvas.inkLayer.strokes.isEmpty())
+        assertEquals(12f, controller.state.viewport.panOffsetX)
+    }
+
+    @Test
+    fun `coalesced ink samples append in document order`() {
+        val controller = NeoNoteEditorController()
+        val router = InputRouter()
+        controller.panViewportBy(screenDx = 10f, screenDy = 20f)
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(10f, 20f), tool = PointerTool.SPen)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(
+                    InputPointer(
+                        id = 1,
+                        position = CanvasPoint(40f, 50f),
+                        tool = PointerTool.SPen,
+                        historicalSamples = listOf(
+                            InputInkSample(position = CanvasPoint(20f, 30f), pressure = 0.4f),
+                            InputInkSample(position = CanvasPoint(30f, 40f), pressure = 0.6f),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(40f, 50f), tool = PointerTool.SPen)),
+            ),
+        )
+
+        val points = controller.currentCanvas.inkLayer.strokes.single().points
+        assertEquals(4, points.size)
+        assertEquals(0f, points[0].x, 0.0001f)
+        assertEquals(0f, points[0].y, 0.0001f)
+        assertEquals(6.5f, points[1].x, 0.0001f)
+        assertEquals(6.5f, points[1].y, 0.0001f)
+        assertEquals(15.275f, points[2].x, 0.0001f)
+        assertEquals(15.275f, points[2].y, 0.0001f)
+        assertEquals(24.84625f, points[3].x, 0.0001f)
+        assertEquals(24.84625f, points[3].y, 0.0001f)
+        assertEquals(listOf(1f, 0.4f, 0.6f, 1f), points.map { it.rawPressure })
+        assertTrue(points.map { it.pressure }.distinct().size > 1)
+    }
+
+    @Test
+    fun `coalesced move samples preserve changing pressure`() {
+        val controller = NeoNoteEditorController()
+        val router = InputRouter()
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(0f, 0f), tool = PointerTool.SPen, pressure = 0.2f, rawPressure = 0.2f)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(
+                    InputPointer(
+                        id = 1,
+                        position = CanvasPoint(30f, 0f),
+                        tool = PointerTool.SPen,
+                        pressure = 0.4f,
+                        rawPressure = 0.4f,
+                        historicalSamples = listOf(
+                            InputInkSample(position = CanvasPoint(10f, 0f), pressure = 0.8f, rawPressure = 0.8f),
+                            InputInkSample(position = CanvasPoint(20f, 0f), pressure = 0.6f, rawPressure = 0.6f),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(30f, 0f), tool = PointerTool.SPen, pressure = 0.4f, rawPressure = 0.4f)),
+            ),
+        )
+
+        val points = controller.currentCanvas.inkLayer.strokes.single().points
+        assertEquals(listOf(0.2f, 0.8f, 0.6f, 0.4f), points.map { it.rawPressure })
+        assertTrue(points.map { it.pressure }.distinct().size > 1)
+    }
+
+    @Test
+    fun `pan and zoom do not mutate stroke document coordinates`() {
+        val controller = NeoNoteEditorController()
+        val router = InputRouter()
+        controller.panViewportBy(screenDx = 50f, screenDy = 20f)
+        controller.zoomViewportBy(zoomChange = 2f, screenCentroid = CanvasPoint(0f, 0f))
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(150f, 220f), tool = PointerTool.SPen)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(170f, 260f), tool = PointerTool.SPen)),
+            ),
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(170f, 260f), tool = PointerTool.SPen)),
+            ),
+        )
+
+        val originalPoints = controller.currentCanvas.inkLayer.strokes.single().points
+        assertEquals(25f, originalPoints[0].x)
+        assertEquals(90f, originalPoints[0].y)
+        assertEquals(31.5f, originalPoints[1].x)
+        assertEquals(103f, originalPoints[1].y)
+
+        controller.panViewportBy(screenDx = -30f, screenDy = 15f)
+        controller.zoomViewportBy(zoomChange = 0.5f, screenCentroid = CanvasPoint(100f, 100f))
+
+        assertEquals(originalPoints, controller.currentCanvas.inkLayer.strokes.single().points)
+    }
+
+    @Test
+    fun `selection mode can move a selected rich content box in document coordinates under zoom`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        controller.panViewportBy(screenDx = 50f, screenDy = -20f)
+        controller.zoomViewportBy(zoomChange = 2f, screenCentroid = CanvasPoint(0f, 0f))
         val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
-        val initialHeight = (controller.currentCanvas.objects.single() as RichContentBox).size.height
 
-        controller.updateRichContentText(boxId, "alpha\nbeta\ngamma\ndelta")
-        val grownHeight = (controller.currentCanvas.objects.single() as RichContentBox).size.height
-        controller.updateRichContentText(boxId, "")
-        val shrunkHeight = (controller.currentCanvas.objects.single() as RichContentBox).size.height
+        controller.setSelectionMode(true)
+        controller.selectCanvasObject(boxId)
+        controller.moveSelectedObjectsByScreenDelta(Offset(20f, 10f))
 
-        assertTrue(grownHeight > initialHeight)
-        assertTrue(shrunkHeight < grownHeight)
-        assertTrue(shrunkHeight >= RichContentLayoutDefaults.MinimumBoxHeight)
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertTrue(controller.state.selection.isObjectSelected(boxId))
+        assertEquals(CanvasPoint(35f, 35f), box.position)
+    }
+
+    @Test
+    fun `selection mode drag moves mixed lasso selection in document coordinates under zoom`() {
+        val controller = NeoNoteEditorController(initialState = editorStateWithMixedCanvas())
+        val router = InputRouter()
+
+        controller.setSelectionMode(true)
+        val lassoSelection = controller.selectWithLasso(
+            listOf(
+                CanvasPoint(0f, 0f),
+                CanvasPoint(80f, 0f),
+                CanvasPoint(80f, 80f),
+                CanvasPoint(0f, 80f),
+            ),
+        )
+        controller.panViewportBy(screenDx = 50f, screenDy = -20f)
+        controller.zoomViewportBy(zoomChange = 2f, screenCentroid = CanvasPoint(0f, 0f))
+
+        val start = controller.documentToScreen(CanvasPoint(15f, 15f))
+        val end = CanvasPoint(start.x + 20f, start.y + 10f)
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = start, tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(InputPointer(id = 1, position = end, tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = end, tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+
+        val movedBox = controller.currentCanvas.objects.single() as RichContentBox
+        val movedStroke = controller.currentCanvas.inkLayer.strokes.single()
+        assertTrue(lassoSelection.isObjectSelected("box-1"))
+        assertTrue(lassoSelection.isStrokeSelected("stroke-1"))
+        assertEquals(CanvasPoint(20f, 15f), movedBox.position)
+        assertEquals(listOf(InkPoint(15f, 25f), InkPoint(70f, 25f)), movedStroke.points)
     }
 
     @Test
     fun `rich content box height grows with measured multiline content and selection bounds`() {
         val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(20f, 30f))
-        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
-        controller.updateRichContentText(boxId, (1..14).joinToString("\n") { "line $it" })
-        val box = controller.currentCanvas.objects.single() as RichContentBox
-        controller.setSelectionMode(true)
-        controller.selectCanvasObject(boxId)
-        val bounds = assertNotNull(controller.selectedBounds)
+        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 20f))
+        val initialBox = controller.currentCanvas.objects.single() as RichContentBox
+        val text = (1..12).joinToString("\n") { "line $it" }
 
-        assertEquals(box.position.x, bounds.left)
-        assertEquals(box.position.y, bounds.top)
-        assertEquals(box.position.x + box.size.width, bounds.right)
+        controller.updateRichContentText(initialBox.id, text)
+        controller.selectCanvasObject(initialBox.id)
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        val bounds = controller.selectedBounds!!
+        assertEquals(initialBox.size.width, box.size.width)
+        assertTrue(box.size.height > initialBox.size.height)
         assertEquals(box.position.y + box.size.height, bounds.bottom)
     }
 
@@ -714,19 +685,25 @@ class NeoNoteEditorControllerTest {
         controller.updateRichContentFromPlatformInput(
             boxId = boxId,
             previousText = "",
-            nextText = "alpha\nbeta",
+            nextText = "first line",
             selectionStart = 10,
+            selectionEnd = 10,
+            hasActiveComposition = false,
         )
         controller.updateRichContentFromPlatformInput(
             boxId = boxId,
-            previousText = "alpha\nbeta",
-            nextText = "alpha\nbeta\ngamma\ndelta",
+            previousText = "first line",
+            nextText = "first line\nsecond line",
             selectionStart = 22,
+            selectionEnd = 22,
+            hasActiveComposition = false,
         )
 
         val box = controller.currentCanvas.objects.single() as RichContentBox
-        assertEquals("alpha\nbeta\ngamma\ndelta", box.toPlainText())
-        assertTrue(box.size.height > RichContentLayoutDefaults.MinimumBoxHeight)
+        assertEquals(boxId, controller.state.focusedRichContentBoxId)
+        assertEquals(true, box.isFocused)
+        assertEquals("first line\nsecond line", box.toPlainText())
+        assertEquals(2, box.content.blocks.size)
     }
 
     @Test
@@ -737,36 +714,69 @@ class NeoNoteEditorControllerTest {
 
         controller.updateRichContentFromPlatformInput(
             boxId = boxId,
-            previousText = "",
-            nextText = "ni",
-            selectionStart = 2,
-            hasActiveComposition = true,
-        )
-        controller.updateRichContentFromPlatformInput(
-            boxId = boxId,
             previousText = "ni",
             nextText = "你",
             selectionStart = 1,
-            hasActiveComposition = false,
+            selectionEnd = 1,
+            hasActiveComposition = true,
         )
 
-        assertEquals("你", (controller.currentCanvas.objects.single() as RichContentBox).toPlainText())
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals("你", box.toPlainText())
+        assertEquals(boxId, controller.state.focusedRichContentBoxId)
+        assertEquals(true, box.isFocused)
     }
 
     @Test
-    fun `selection mode clears focus and ignores rich content text edits`() {
+    fun `rich content shortcut controller paths remain usable for style and list commands`() {
         val controller = NeoNoteEditorController()
         controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
         val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
-        controller.updateRichContentText(boxId, "before")
+        controller.updateRichContentText(boxId, "shortcut")
 
-        controller.setSelectionMode(true)
-        controller.updateRichContentText(boxId, "after")
+        controller.toggleRichContentStyle(
+            boxId = boxId,
+            style = InlineStyle.Bold,
+            selectionStart = 0,
+            selectionEnd = 8,
+        )
+        controller.toggleRichContentList(
+            boxId = boxId,
+            kind = ListKind.Bullet,
+            selectionStart = 0,
+            selectionEnd = 8,
+        )
+
+        val paragraph = (controller.currentCanvas.objects.single() as RichContentBox).content.blocks.single() as ParagraphNode
+        val inline = paragraph.inlines.single() as InlineText
+        assertEquals("shortcut", inline.text)
+        assertEquals(true, inline.bold)
+        assertEquals(ListKind.Bullet, paragraph.listMetadata?.kind)
+    }
+
+
+    @Test
+    fun `one rich content box can edit multiple paragraph nodes independently`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "first\nsecond")
+
+        controller.focusRichContentParagraph(boxId = boxId, blockIndex = 1, selectionStart = 6)
+        controller.updateRichContentParagraphFromPlatformInput(
+            boxId = boxId,
+            blockIndex = 1,
+            previousText = "second",
+            nextText = "second!",
+            selectionStart = 7,
+        )
 
         val box = controller.currentCanvas.objects.single() as RichContentBox
-        assertEquals("before", box.toPlainText())
-        assertNull(controller.state.focusedRichContentBoxId)
-        assertEquals(false, box.isFocused)
+        assertEquals("first\nsecond!", box.toPlainText())
+        assertEquals(2, box.content.blocks.size)
+        assertEquals(1, controller.activeRichContentBlockIndex(boxId))
+        assertEquals("first", ((box.content.blocks[0] as ParagraphNode).inlines.single() as InlineText).text)
+        assertEquals("second!", ((box.content.blocks[1] as ParagraphNode).inlines.single() as InlineText).text)
     }
 
     @Test
@@ -774,171 +784,393 @@ class NeoNoteEditorControllerTest {
         val controller = NeoNoteEditorController()
         controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
         val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "select me")
+
         controller.setSelectionMode(true)
-
         controller.activateRichContentBox(boxId)
+        controller.updateRichContentText(boxId, "keyboard edit should be ignored")
 
+        val box = controller.currentCanvas.objects.single() as RichContentBox
         assertTrue(controller.state.selection.isObjectSelected(boxId))
         assertNull(controller.state.focusedRichContentBoxId)
-        assertEquals(EditorTool.Selection, controller.state.currentTool)
+        assertEquals(false, box.isFocused)
+        assertEquals("select me", box.toPlainText())
     }
 
     @Test
-    fun `one rich content box can edit multiple paragraph nodes independently`() {
+    fun `routed selection mode tap on text box selects without focusing`() {
         val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 10f))
+        val router = InputRouter()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
         val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
-        controller.updateRichContentText(boxId, "first\nsecond")
+        controller.updateRichContentText(boxId, "select me")
+        controller.setSelectionMode(true)
+        val screenTap = controller.documentToScreen(CanvasPoint(30f, 35f))
 
-        controller.focusRichContentParagraph(boxId, blockIndex = 1, selectionStart = 6)
-        controller.updateRichContentParagraphFromPlatformInput(
-            boxId = boxId,
-            blockIndex = 1,
-            previousText = "second",
-            nextText = "changed",
-            selectionStart = 7,
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = screenTap, tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = screenTap, tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
         )
 
         val box = controller.currentCanvas.objects.single() as RichContentBox
-        val paragraphs = box.content.blocks.filterIsInstance<ParagraphNode>()
-        assertEquals("first", (paragraphs[0].inlines.single() as InlineText).text)
-        assertEquals("changed", (paragraphs[1].inlines.single() as InlineText).text)
+        assertTrue(controller.state.selection.isObjectSelected(boxId))
+        assertNull(controller.state.focusedRichContentBoxId)
+        assertEquals(false, box.isFocused)
+        assertEquals("select me", box.toPlainText())
     }
+
+    @Test
+    fun `routed selection mode stylus tap selects without inking`() {
+        val controller = NeoNoteEditorController()
+        val router = InputRouter()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "select me")
+        controller.setSelectionMode(true)
+        val screenTap = controller.documentToScreen(CanvasPoint(30f, 35f))
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = screenTap, tool = PointerTool.SPen)),
+            ),
+            mode = InputMode.Selection,
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = screenTap, tool = PointerTool.SPen)),
+            ),
+            mode = InputMode.Selection,
+        )
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertTrue(controller.state.selection.isObjectSelected(boxId))
+        assertNull(controller.state.focusedRichContentBoxId)
+        assertEquals(false, box.isFocused)
+        assertTrue(controller.currentCanvas.inkLayer.strokes.isEmpty())
+        assertEquals("select me", box.toPlainText())
+    }
+
+    @Test
+    fun `selection mode clears focus and ignores rich content text edits`() {
+        val controller = NeoNoteEditorController()
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.updateRichContentText(boxId, "editable")
+
+        controller.setSelectionMode(true)
+        controller.updateRichContentText(boxId, "ignored")
+
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals(null, controller.state.focusedRichContentBoxId)
+        assertEquals(false, box.isFocused)
+        assertEquals("editable", box.toPlainText())
+    }
+    @Test
+    fun `selection mode exposes active lasso path in document coordinates while drawing`() {
+        val controller = NeoNoteEditorController(initialState = editorStateWithMixedCanvas())
+        val router = InputRouter()
+        controller.setSelectionMode(true)
+        controller.panViewportBy(screenDx = 10f, screenDy = 20f)
+        controller.zoomViewportBy(zoomChange = 2f, screenCentroid = CanvasPoint(0f, 0f))
+
+        val down = controller.documentToScreen(CanvasPoint(50f, 50f))
+        val move = controller.documentToScreen(CanvasPoint(60f, 70f))
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = down, tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(InputPointer(id = 1, position = move, tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+
+        assertEquals(listOf(CanvasPoint(50f, 50f), CanvasPoint(60f, 70f)), controller.activeLassoPath)
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = move, tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+
+        assertTrue(controller.activeLassoPath.isEmpty())
+    }
+
+    @Test
+    fun `selection mode drag can start from inside selected bounds between selected geometries`() {
+        val controller = NeoNoteEditorController(initialState = editorStateWithMixedCanvas())
+        val router = InputRouter()
+        controller.setSelectionMode(true)
+        controller.selectWithLasso(
+            listOf(
+                CanvasPoint(0f, 0f),
+                CanvasPoint(80f, 0f),
+                CanvasPoint(80f, 80f),
+                CanvasPoint(0f, 80f),
+            ),
+        )
+
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Down,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(50f, 28f), tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Move,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(60f, 33f), tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+        controller.routeInputEvent(
+            router = router,
+            event = InputEvent(
+                type = PointerEventType.Up,
+                pointers = listOf(InputPointer(id = 1, position = CanvasPoint(60f, 33f), tool = PointerTool.Finger)),
+            ),
+            mode = InputMode.Selection,
+        )
+
+        val movedBox = controller.currentCanvas.objects.single() as RichContentBox
+        val movedStroke = controller.currentCanvas.inkLayer.strokes.single()
+        assertEquals(CanvasPoint(20f, 15f), movedBox.position)
+        assertEquals(listOf(InkPoint(15f, 25f), InkPoint(70f, 25f)), movedStroke.points)
+    }
+
 
     @Test
     fun `paragraph local input keeps consecutive empty paragraphs visible and resizes box`() {
         val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 10f))
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
         val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
-        controller.updateRichContentText(boxId, "first\n\nthird")
-        val heightBefore = (controller.currentCanvas.objects.single() as RichContentBox).size.height
 
-        controller.focusRichContentParagraph(boxId, blockIndex = 1, selectionStart = 0)
+        controller.updateRichContentParagraphFromPlatformInput(
+            boxId = boxId,
+            blockIndex = 0,
+            previousText = "",
+            nextText = "hello",
+            selectionStart = 5,
+        )
+        val heightAfterHello = (controller.currentCanvas.objects.single() as RichContentBox).size.height
+
+        controller.updateRichContentParagraphFromPlatformInput(
+            boxId = boxId,
+            blockIndex = 0,
+            previousText = "hello",
+            nextText = "hello\n",
+            selectionStart = 6,
+        )
         controller.updateRichContentParagraphFromPlatformInput(
             boxId = boxId,
             blockIndex = 1,
             previousText = "",
-            nextText = "middle\nnext",
-            selectionStart = 11,
+            nextText = "\n",
+            selectionStart = 1,
+        )
+        controller.updateRichContentParagraphFromPlatformInput(
+            boxId = boxId,
+            blockIndex = 2,
+            previousText = "",
+            nextText = "\n",
+            selectionStart = 1,
+        )
+        controller.updateRichContentParagraphFromPlatformInput(
+            boxId = boxId,
+            blockIndex = 3,
+            previousText = "",
+            nextText = "world",
+            selectionStart = 5,
         )
 
         val box = controller.currentCanvas.objects.single() as RichContentBox
-        assertEquals("first\nmiddle\nnext\nthird", box.toPlainText())
-        assertEquals(4, box.content.blocks.filterIsInstance<ParagraphNode>().size)
-        assertTrue(box.size.height > heightBefore)
+        assertEquals("hello\n\n\nworld", box.toPlainText())
+        assertEquals(4, box.content.blocks.size)
+        assertEquals("", assertIs<ParagraphNode>(box.content.blocks[1]).toPlainTextForControllerTest())
+        assertEquals("", assertIs<ParagraphNode>(box.content.blocks[2]).toPlainTextForControllerTest())
+        assertEquals(3, controller.activeRichContentBlockIndex(boxId))
+        assertTrue(box.size.height > heightAfterHello)
+        assertEquals(boxId, controller.state.focusedRichContentBoxId)
+        assertTrue(box.isFocused)
     }
 
     @Test
     fun `toolbar actions reuse active paragraph selection after platform focus loss commit`() {
         val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 10f))
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
         val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
-        controller.updateRichContentText(boxId, "first\nsecond")
-        controller.focusRichContentParagraph(boxId, blockIndex = 1, selectionStart = 0, selectionEnd = 6)
+        controller.updateRichContentText(boxId, "hello")
+        controller.focusRichContentParagraph(boxId = boxId, blockIndex = 0, selectionStart = 0, selectionEnd = 5)
 
         controller.commitRichContentEditing(boxId)
-        controller.toggleActiveRichContentStyle(boxId, InlineStyle.Bold)
+        controller.toggleActiveRichContentStyle(boxId = boxId, style = InlineStyle.Bold)
+        controller.toggleActiveRichContentList(boxId = boxId, kind = ListKind.Bullet)
 
-        val paragraphs = (controller.currentCanvas.objects.single() as RichContentBox).content.blocks.filterIsInstance<ParagraphNode>()
-        assertEquals("first", (paragraphs[0].inlines.single() as InlineText).text)
-        assertEquals("second", (paragraphs[1].inlines.single() as InlineText).text)
-        assertEquals(false, (paragraphs[0].inlines.single() as InlineText).bold)
-        assertEquals(true, (paragraphs[1].inlines.single() as InlineText).bold)
+        val box = controller.currentCanvas.objects.single() as RichContentBox
+        val paragraph = assertIs<ParagraphNode>(box.content.blocks.single())
+        val text = assertIs<InlineText>(paragraph.inlines.single())
+        assertTrue(text.bold)
+        assertEquals(ListKind.Bullet, paragraph.listMetadata?.kind)
+        assertEquals(boxId, controller.state.focusedRichContentBoxId)
+        assertTrue(box.isFocused)
     }
 
     @Test
     fun `inserted object blocks keep editable trailing paragraph and focus target`() {
         val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 10f))
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
         val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+
         controller.updateRichContentText(boxId, "before")
-        controller.focusRichContentParagraph(boxId, blockIndex = 0, selectionStart = 6)
-
-        controller.insertRichContentFormulaPlaceholder(boxId, expression = "x^2")
-
-        val box = controller.currentCanvas.objects.single() as RichContentBox
-        assertEquals(listOf(ParagraphNode::class, BlockFormula::class, ParagraphNode::class), box.content.blocks.map { it::class })
-        assertEquals(2, controller.activeRichContentBlockIndex(boxId))
-    }
-
-    @Test
-    fun `formula block can be focused edited and blurred in place`() {
-        val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 10f))
-        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
-        controller.updateRichContentText(boxId, "before")
-        controller.insertRichContentFormulaPlaceholder(boxId, expression = "x")
-
-        controller.focusRichContentFormulaBlock(boxId, blockIndex = 1)
-        assertEquals(1, controller.activeRichContentFormulaBlockIndex(boxId))
-        controller.updateRichContentFormulaExpression(boxId, blockIndex = 1, expression = "x^2 + y^2")
-        controller.blurRichContentFormulaBlock(boxId, blockIndex = 1)
-
-        val formula = (controller.currentCanvas.objects.single() as RichContentBox).content.blocks[1] as BlockFormula
-        assertEquals("x^2 + y^2", formula.expression)
-        assertNull(controller.activeRichContentFormulaBlockIndex(boxId))
-    }
-
-    @Test
-    fun `toolbar placeholder commands insert after active paragraph and keep focus`() {
-        val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 10f))
-        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
-        controller.updateRichContentText(boxId, "before")
-
         controller.insertRichContentTablePlaceholder(boxId)
-        controller.insertRichContentFormulaPlaceholder(boxId, expression = "x^2")
-        controller.insertRichContentImagePlaceholder(boxId, assetId = "asset-1", altText = "figure")
 
-        val box = controller.currentCanvas.objects.single() as RichContentBox
-        assertEquals(1, box.content.blocks.count { it is TableNode })
-        assertEquals(1, box.content.blocks.count { it is BlockFormula })
-        assertEquals(1, box.content.blocks.count { it is BlockImage })
-        assertEquals(boxId, controller.state.focusedRichContentBoxId)
-        assertEquals(EditorTool.Text, controller.state.currentTool)
+        var box = controller.currentCanvas.objects.single() as RichContentBox
+        assertIs<ParagraphNode>(box.content.blocks[0])
+        assertIs<TableNode>(box.content.blocks[1])
+        assertIs<ParagraphNode>(box.content.blocks[2])
+        assertEquals(1, (controller.activeRichContentTarget(boxId) as com.neonote.engine.ActiveRichContentTarget.TableCell).address.blockIndex)
+
+        controller.updateRichContentTableCellFromPlatformInput(
+            boxId = boxId,
+            address = com.neonote.model.TableCellAddress(blockIndex = 1, rowIndex = 0, columnIndex = 0),
+            nextText = "short\nlonger cell text that should expand the table row",
+        )
+        box = controller.currentCanvas.objects.single() as RichContentBox
+        val heightAfterTableText = box.size.height
+
+        controller.focusRichContentParagraph(boxId = boxId, blockIndex = 2)
+        controller.updateRichContentParagraphFromPlatformInput(
+            boxId = boxId,
+            blockIndex = 2,
+            previousText = "",
+            nextText = "after table",
+            selectionStart = 11,
+        )
+        controller.insertRichContentFormulaPlaceholder(boxId, expression = "x+1")
+
+        box = controller.currentCanvas.objects.single() as RichContentBox
+        assertIs<BlockFormula>(box.content.blocks[3])
+        assertIs<ParagraphNode>(box.content.blocks[4])
+        assertEquals(3, controller.activeRichContentFormulaBlockIndex(boxId))
+
+        controller.updateRichContentFormulaExpression(boxId = boxId, blockIndex = 3, expression = "x^2 + y^2")
+        controller.insertRichContentImagePlaceholder(boxId)
+
+        box = controller.currentCanvas.objects.single() as RichContentBox
+        assertIs<BlockImage>(box.content.blocks[4])
+        assertIs<ParagraphNode>(box.content.blocks[5])
+        assertEquals(4, controller.selectedRichContentObjectBlockIndex(boxId))
+        assertTrue(box.size.height >= heightAfterTableText)
     }
 
     @Test
-    fun `toolbar equivalent commands update focused rich content`() {
+    fun `multiline rich content input expands height conservatively and delete keeps minimum height`() {
         val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 10f))
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
         val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
-        controller.updateRichContentText(boxId, "hello")
 
-        controller.toggleRichContentStyle(boxId, InlineStyle.Bold, selectionStart = 0, selectionEnd = 5)
-        controller.toggleRichContentList(boxId, ListKind.Bullet, selectionStart = 0, selectionEnd = 5)
+        controller.updateRichContentText(boxId, "first line\nsecond line\nthird line")
+        val multilineBox = controller.currentCanvas.objects.single() as RichContentBox
 
-        val paragraph = (controller.currentCanvas.objects.single() as RichContentBox).content.blocks.single() as ParagraphNode
-        val text = paragraph.inlines.single() as InlineText
-        assertEquals(true, text.bold)
-        assertEquals(ListKind.Bullet, paragraph.listKind)
+        assertTrue(multilineBox.size.height > RichContentLayoutDefaults.MinimumBoxHeight)
+        assertEquals(320f, multilineBox.size.width)
+
+        controller.updateRichContentText(boxId, "")
+        val emptiedBox = controller.currentCanvas.objects.single() as RichContentBox
+
+        assertEquals(320f, emptiedBox.size.width)
+        assertTrue(emptiedBox.size.height >= RichContentLayoutDefaults.MinimumBoxHeight)
+        assertTrue(emptiedBox.size.height <= multilineBox.size.height)
     }
 
     @Test
-    fun `rich content shortcut controller paths remain usable for style and list commands`() {
+    fun `zooming viewport does not mutate content driven rich content height`() {
         val controller = NeoNoteEditorController()
-        controller.focusOrCreateRichContentBox(CanvasPoint(10f, 10f))
+        controller.focusOrCreateRichContentBox(CanvasPoint(25f, 30f))
         val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
-        controller.updateRichContentText(boxId, "hello")
+        controller.updateRichContentText(boxId, "first line\nsecond line\nthird line\nfourth line")
+        val heightBeforeZoom = (controller.currentCanvas.objects.single() as RichContentBox).size.height
 
-        controller.toggleRichContentParagraphStyle(
-            boxId = boxId,
-            blockIndex = 0,
-            style = InlineStyle.Italic,
-            selectionStart = 0,
-            selectionEnd = 5,
-        )
-        controller.toggleRichContentParagraphList(
-            boxId = boxId,
-            blockIndex = 0,
-            kind = ListKind.Numbered,
-            selectionStart = 0,
-            selectionEnd = 5,
-        )
+        controller.zoomViewportBy(zoomChange = 1.75f, screenCentroid = CanvasPoint(100f, 100f))
+        controller.zoomViewportBy(zoomChange = 0.5f, screenCentroid = CanvasPoint(100f, 100f))
 
-        val paragraph = (controller.currentCanvas.objects.single() as RichContentBox).content.blocks.single() as ParagraphNode
-        val text = paragraph.inlines.single() as InlineText
-        assertEquals(true, text.italic)
-        assertEquals(ListKind.Numbered, paragraph.listKind)
+        val boxAfterZoom = controller.currentCanvas.objects.single() as RichContentBox
+        assertEquals(heightBeforeZoom, boxAfterZoom.size.height)
+        assertTrue(boxAfterZoom.size.height >= RichContentLayoutDefaults.MinimumBoxHeight)
+    }
+
+}
+
+private fun editorStateWithMixedCanvas(): EditorState = EditorState(
+    document = NeoNoteDocument(
+        id = "test-document-mixed",
+        title = "Mixed selection test",
+        assetStoreId = "test-assets",
+        pages = listOf(
+            NotePage(
+                id = "test-page-mixed",
+                canvas = InfiniteCanvas(
+                    objects = listOf(
+                        RichContentBox(
+                            id = "box-1",
+                            position = CanvasPoint(10f, 10f),
+                            size = CanvasSize(20f, 20f),
+                        ),
+                    ),
+                    inkLayer = InkLayer(
+                        strokes = listOf(
+                            InkStroke(
+                                id = "stroke-1",
+                                points = listOf(InkPoint(5f, 20f), InkPoint(60f, 20f)),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    ),
+    currentPageId = "test-page-mixed",
+    viewport = ViewportState(),
+)
+
+private fun ParagraphNode.toPlainTextForControllerTest(): String = inlines.joinToString("") { inline ->
+    when (inline) {
+        is InlineText -> inline.text
+        else -> ""
     }
 }
+
+private fun InputEvent.toDiagnostics(): InputDiagnostics = InputDiagnostics(
+    tool = pointers.first().tool,
+    pressure = primaryPressure,
+    pointerCount = pointers.size,
+).withPressureSamples(primaryInkSamples)
