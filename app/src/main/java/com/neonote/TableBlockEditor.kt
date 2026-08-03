@@ -36,22 +36,42 @@ internal fun TableBlockEditor(
         repeat(rowCount) { rowIndex ->
             Row {
                 repeat(columnCount) { columnIndex ->
-                    val address = TableCellAddress(blockIndex = blockIndex, rowIndex = rowIndex, columnIndex = columnIndex)
+                    val address = TableCellAddress(
+                        blockIndex = blockIndex,
+                        rowIndex = rowIndex,
+                        columnIndex = columnIndex,
+                    )
                     val cell = table.rows.getOrNull(rowIndex)?.getOrNull(columnIndex) ?: TableCell()
+                    val activeContentBlockIndex = activeAddress
+                        ?.takeIf { it.addressesSameCell(address) }
+                        ?.contentBlockIndex
+
                     TableCellEditor(
                         boxId = box.id,
                         address = address,
                         cell = cell,
-                        active = activeAddress == address,
+                        activeContentBlockIndex = activeContentBlockIndex,
                         selectionMode = selectionMode,
                         selected = selected,
                         controller = controller,
                         modifier = Modifier
                             .width((layout?.columnWidths?.getOrNull(columnIndex) ?: 80f).dp)
                             .height((layout?.rowHeights?.getOrNull(rowIndex) ?: 32f).dp)
-                            .border(width = 1.dp, color = if (activeAddress == address) Color(0xFF7C3AED) else Color(0xFFCBD5E1))
+                            .border(
+                                width = 1.dp,
+                                color = if (activeContentBlockIndex != null) {
+                                    Color(0xFF7C3AED)
+                                } else {
+                                    Color(0xFFCBD5E1)
+                                },
+                            )
                             .clickable(enabled = !selectionMode && !selected) {
-                                controller.focusRichContentTableCell(boxId = box.id, address = address)
+                                controller.focusRichContentTableCell(
+                                    boxId = box.id,
+                                    address = address.copy(
+                                        contentBlockIndex = cell.firstEditableParagraphIndex(),
+                                    ),
+                                )
                             },
                     )
                 }
@@ -59,3 +79,8 @@ internal fun TableBlockEditor(
         }
     }
 }
+
+private fun TableCellAddress.addressesSameCell(other: TableCellAddress): Boolean =
+    blockIndex == other.blockIndex &&
+        rowIndex == other.rowIndex &&
+        columnIndex == other.columnIndex
