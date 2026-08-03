@@ -1,0 +1,134 @@
+name: Android Release
+
+on:
+  pull_request:
+    branches:
+      - codex/neonote-v2-blank-architecture
+  push:
+    branches:
+      - codex/neonote-v2-blank-architecture
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    env:
+      NEONOTE_KEYSTORE_BASE64: ${{ secrets.NEONOTE_KEYSTORE_BASE64 }}
+      NEONOTE_KEYSTORE_PASSWORD: ${{ secrets.NEONOTE_KEYSTORE_PASSWORD }}
+      NEONOTE_KEY_ALIAS: ${{ secrets.NEONOTE_KEY_ALIAS }}
+      NEONOTE_KEY_PASSWORD: ${{ secrets.NEONOTE_KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
+
+      - name: Make Gradle executable
+        run: chmod +x ./gradlew
+
+      - name: Test and assemble release candidate
+        run: |
+          ./gradlew clean \
+            :app:testReleaseCandidateUnitTest \
+            :app:assembleReleaseCandidate \
+            --stacktrace --no-daemon
+
+      - name: Verify and name release candidate
+        shell: bash
+        run: |
+          mkdir -p dist
+          apk="$(find app/build/outputs/apk/releaseCandidate -type f -name '*.apk' | head -n 1)"
+          test -n "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | grep -E "package: name='com.neonote.rc'.*versionCode='10000'.*versionName='1.0.0-rc.1'"
+          cp "$apk" dist/NeoNote-1.0.0-rc.1.apk
+          sha256sum dist/NeoNote-1.0.0-rc.1.apk > dist/NeoNote-1.0.0-rc.1.apk.sha256
+
+      - name: Upload release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: neonote-v1-release-candidate
+          path: |
+            dist/NeoNote-1.0.0-rc.1.apk
+            dist/NeoNote-1.0.0-rc.1.apk.sha256
+          if-no-files-found: error
+
+      - name: Detect production signing material
+        id: signing
+        shell: bash
+        run: |
+          if [[ -n "$NEONOTE_KEYSTORE_BASE64" \
+             && -n "$NEONOTE_KEYSTORE_PASSWORD" \
+             && -n "$NEONOTE_KEY_ALIAS" \
+             && -n "$NEONOTE_KEY_PASSWORD" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Decode production keystore
+        if: github.event_name != 'pull_request' && steps.signing.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          printf '%s' "$NEONOTE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/neonote-release.jks"
+          chmod 600 "$RUNNER_TEMP/neonote-release.jks"
+
+      - name: Assemble signed production release
+        if: github.event_name != 'pull_request' && steps.signing.outputs.enabled == 'true'
+        env:
+          NEONOTE_KEYSTORE_PATH: ${{ runner.temp }}/neonote-release.jks
+        run: |
+          ./gradlew \
+            :app:testReleaseUnitTest \
+            :app:assembleRelease \
+            --stacktrace --no-daemon
+
+      - name: Verify and name signed production release
+        if: github.event_name != 'pull_request' && steps.signing.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          apk="$(find app/build/outputs/apk/release -type f -name '*.apk' | head -n 1)"
+          test -n "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | grep -E "package: name='com.neonote'.*versionCode='10000'.*versionName='1.0.0'"
+          cp "$apk" dist/NeoNote-1.0.0.apk
+          sha256sum dist/NeoNote-1.0.0.apk > dist/NeoNote-1.0.0.apk.sha256
+
+      - name: Upload signed production release
+        if: github.event_name != 'pull_request' && steps.signing.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: neonote-v1-signed-release
+          path: |
+            dist/NeoNote-1.0.0.apk
+            dist/NeoNote-1.0.0.apk.sha256
+          if-no-files-found: error
+
+      - name: Require production signing for version tags
+        if: startsWith(github.ref, 'refs/tags/v') && steps.signing.outputs.enabled != 'true'
+        run: |
+          echo 'A version tag cannot publish without the NeoNote production signing secrets.' >&2
+          exit 1
