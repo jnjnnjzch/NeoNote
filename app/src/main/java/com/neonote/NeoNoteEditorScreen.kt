@@ -96,7 +96,7 @@ internal fun NeoNoteEditorScreen(controller: NeoNoteEditorController) {
             WorkspaceTopBar(
                 title = state.document.title,
                 onTitleChange = controller::renameDocument,
-                saveLabel = controller.persistenceStatus.toFriendlySaveLabel(),
+                saveLabel = controller.saveStateLabel,
                 canUndo = controller.canUndo,
                 canRedo = controller.canRedo,
                 onUndo = controller::undo,

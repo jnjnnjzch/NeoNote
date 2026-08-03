@@ -113,6 +113,15 @@ public class NeoNoteEditorController(
     public var persistenceDiagnostics: PersistenceDiagnostics? by mutableStateOf(null)
         private set
 
+    private var lastPersistedRevision: Long? by mutableStateOf(null)
+
+    public val saveStateLabel: String
+        get() = when {
+            lastPersistedRevision == state.document.revision -> "Saved"
+            lastPersistedRevision == null -> "Saving locally"
+            else -> "Saving…"
+        }
+
     public val activeInkStroke: InkStroke?
         get() = inkSession.activeStroke
 
@@ -225,6 +234,7 @@ public class NeoNoteEditorController(
 
     public suspend fun saveDocument(store: PersistenceStore): PersistenceResult.Saved {
         val saved = store.save(state.document)
+        lastPersistedRevision = saved.revision
         persistenceDiagnostics = saved.diagnostics
         persistenceStatus = "Saved ${saved.documentId} at revision ${saved.revision}" + saved.diagnostics.toStatusSuffix()
         return saved
@@ -237,6 +247,7 @@ public class NeoNoteEditorController(
         val loaded = store.load(documentId)
         val document = loaded.document
         if (document == null) {
+            lastPersistedRevision = null
             persistenceDiagnostics = null
             persistenceStatus = "No local document found for $documentId"
             return loaded
@@ -259,6 +270,7 @@ public class NeoNoteEditorController(
             inkSession = document.pages.firstOrNull()?.canvas?.let(InkSession::fromCanvas) ?: InkSession()
         }
         val diagnostics = loaded.diagnostics?.copy(cacheRebuildTimeMillis = cacheRebuildTimeMillis)
+        lastPersistedRevision = document.revision
         persistenceDiagnostics = diagnostics
         persistenceStatus = "Loaded ${document.id} at revision ${document.revision}" + diagnostics.toStatusSuffix()
         return loaded.copy(diagnostics = diagnostics)
