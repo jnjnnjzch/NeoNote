@@ -1,0 +1,556 @@
+name: Apply unified table cell editor migration
+
+on:
+  push:
+    branches:
+      - codex/unify-table-cell-richcontent-editor
+
+permissions:
+  contents: write
+
+jobs:
+  apply-migration:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/unify-table-cell-richcontent-editor
+          fetch-depth: 0
+
+      - name: Apply precise source migration
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              if old not in text:
+                  raise SystemExit(f"Expected source fragment not found in {path}")
+              file.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "app/src/main/java/com/neonote/model/RichContent.kt",
+              '''data class TableCellAddress(
+              val blockIndex: Int,
+              val rowIndex: Int,
+              val columnIndex: Int,
+          )''',
+              '''data class TableCellAddress(
+              val blockIndex: Int,
+              val rowIndex: Int,
+              val columnIndex: Int,
+              /** Block inside the cell's nested RichContent. Defaults to the first paragraph. */
+              val contentBlockIndex: Int = 0,
+          )''',
+          )
+
+          replace_once(
+              "app/src/main/java/com/neonote/engine/RichContentEngine.kt",
+              '''        val normalizedText = text.normalizePlainTextNewlines()
+              val cell = row[address.columnIndex]
+              val paragraph = (cell.content.blocks.firstOrNull() as? ParagraphNode)?.copy(inlines = listOf(InlineText(normalizedText)))
+                  ?: ParagraphNode(inlines = listOf(InlineText(normalizedText)))
+              val updatedCell = cell.copy(content = RichContent(blocks = listOf(paragraph)))
+              val updatedRow = row.replaceAt(address.columnIndex, updatedCell)
+              val updatedTable = table.copy(rows = table.rows.replaceAt(address.rowIndex, updatedRow))
+              val updatedBlocks = box.content.blocks.replaceAt(address.blockIndex, updatedTable)
+              return RichContentCommandResult.ContentEdited(
+                  box = box.copy(content = RichContent(blocks = updatedBlocks)),
+                  selection = TextSelection.cursor(TextCursorPosition(blockIndex = address.blockIndex, inlineOffset = 0)),
+              )''',
+              '''        val normalizedText = text.normalizePlainTextNewlines()
+              val cell = row[address.columnIndex]
+              val cellBlocks = cell.content.blocks
+              require(address.contentBlockIndex in 0..cellBlocks.size) {
+                  "contentBlockIndex must address an existing block or the append position"
+              }
+
+              val existingBlock = cellBlocks.getOrNull(address.contentBlockIndex)
+              if (existingBlock != null && existingBlock !is ParagraphNode) {
+                  return RichContentCommandResult.ContentEdited(
+                      box = box,
+                      selection = TextSelection.cursor(TextCursorPosition(blockIndex = address.blockIndex, inlineOffset = 0)),
+                  )
+              }
+
+              val paragraph = (existingBlock as? ParagraphNode)
+                  ?.copy(inlines = listOf(InlineText(normalizedText)))
+                  ?: ParagraphNode(inlines = listOf(InlineText(normalizedText)))
+              val updatedCellBlocks = if (address.contentBlockIndex == cellBlocks.size) {
+                  cellBlocks + paragraph
+              } else {
+                  cellBlocks.replaceAt(address.contentBlockIndex, paragraph)
+              }
+              val updatedCell = cell.copy(content = RichContent(blocks = updatedCellBlocks))
+              val updatedRow = row.replaceAt(address.columnIndex, updatedCell)
+              val updatedTable = table.copy(rows = table.rows.replaceAt(address.rowIndex, updatedRow))
+              val updatedBlocks = box.content.blocks.replaceAt(address.blockIndex, updatedTable)
+              return RichContentCommandResult.ContentEdited(
+                  box = box.copy(content = RichContent(blocks = updatedBlocks)),
+                  selection = TextSelection.cursor(TextCursorPosition(blockIndex = address.blockIndex, inlineOffset = 0)),
+              )''',
+          )
+
+          replace_once(
+              "app/src/main/java/com/neonote/engine/RichContentEditorSession.kt",
+              '''    public fun tableCellPlainText(address: TableCellAddress): String =
+              ((box.content.blocks.getOrNull(address.blockIndex) as? TableNode)
+                  ?.rows
+                  ?.getOrNull(address.rowIndex)
+                  ?.getOrNull(address.columnIndex)
+                  ?.content
+                  ?.blocks
+                  ?.firstOrNull() as? ParagraphNode)
+                  ?.plainText()
+                  .orEmpty()''',
+              '''    public fun tableCellPlainText(address: TableCellAddress): String =
+              ((box.content.blocks.getOrNull(address.blockIndex) as? TableNode)
+                  ?.rows
+                  ?.getOrNull(address.rowIndex)
+                  ?.getOrNull(address.columnIndex)
+                  ?.content
+                  ?.blocks
+                  ?.getOrNull(address.contentBlockIndex) as? ParagraphNode)
+                  ?.plainText()
+                  .orEmpty()''',
+          )
+
+          Path("app/src/main/java/com/neonote/TableBlockEditor.kt").write_text(r'''package com.neonote
+
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import com.neonote.engine.ActiveRichContentTarget
+import com.neonote.engine.RichContentMeasurer
+import com.neonote.model.RichContentBox
+import com.neonote.model.TableCell
+import com.neonote.model.TableCellAddress
+import com.neonote.model.TableNode
+
+@Composable
+internal fun TableBlockEditor(
+    box: RichContentBox,
+    blockIndex: Int,
+    table: TableNode,
+    selectionMode: Boolean,
+    selected: Boolean,
+    controller: NeoNoteEditorController,
+    modifier: Modifier = Modifier,
+) {
+    val layout = RichContentMeasurer().measure(box).tableLayouts.firstOrNull { it.blockIndex == blockIndex }
+    val rowCount = layout?.rowHeights?.size ?: table.rows.size
+    val columnCount = layout?.columnWidths?.size ?: (table.rows.maxOfOrNull { it.size } ?: 0)
+    val activeAddress = (controller.activeRichContentTarget(box.id) as? ActiveRichContentTarget.TableCell)?.address
+
+    Column(modifier = modifier) {
+        repeat(rowCount) { rowIndex ->
+            Row {
+                repeat(columnCount) { columnIndex ->
+                    val address = TableCellAddress(blockIndex = blockIndex, rowIndex = rowIndex, columnIndex = columnIndex)
+                    val cell = table.rows.getOrNull(rowIndex)?.getOrNull(columnIndex) ?: TableCell()
+                    val activeContentBlockIndex = activeAddress
+                        ?.takeIf { it.addressesSameCell(address) }
+                        ?.contentBlockIndex
+                    TableCellEditor(
+                        boxId = box.id,
+                        address = address,
+                        cell = cell,
+                        activeContentBlockIndex = activeContentBlockIndex,
+                        selectionMode = selectionMode,
+                        selected = selected,
+                        controller = controller,
+                        modifier = Modifier
+                            .width((layout?.columnWidths?.getOrNull(columnIndex) ?: 80f).dp)
+                            .height((layout?.rowHeights?.getOrNull(rowIndex) ?: 32f).dp)
+                            .border(
+                                width = 1.dp,
+                                color = if (activeContentBlockIndex != null) Color(0xFF7C3AED) else Color(0xFFCBD5E1),
+                            )
+                            .clickable(enabled = !selectionMode && !selected) {
+                                controller.focusRichContentTableCell(
+                                    boxId = box.id,
+                                    address = address.copy(contentBlockIndex = cell.firstEditableParagraphIndex()),
+                                )
+                            },
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun TableCellAddress.addressesSameCell(other: TableCellAddress): Boolean =
+    blockIndex == other.blockIndex && rowIndex == other.rowIndex && columnIndex == other.columnIndex
+''')
+
+          Path("app/src/main/java/com/neonote/TableCellEditor.kt").write_text(r'''package com.neonote
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.neonote.engine.RichContentLayoutDefaults
+import com.neonote.model.BlockFormula
+import com.neonote.model.BlockImage
+import com.neonote.model.InlineFormula
+import com.neonote.model.InlineImage
+import com.neonote.model.InlineLineBreak
+import com.neonote.model.InlineText
+import com.neonote.model.ParagraphNode
+import com.neonote.model.RichContent
+import com.neonote.model.TableCell
+import com.neonote.model.TableCellAddress
+import com.neonote.model.TableNode
+
+@Composable
+internal fun TableCellEditor(
+    boxId: String,
+    address: TableCellAddress,
+    cell: TableCell,
+    activeContentBlockIndex: Int?,
+    selectionMode: Boolean,
+    selected: Boolean,
+    controller: NeoNoteEditorController,
+    modifier: Modifier = Modifier,
+) {
+    val blocks = cell.content.blocks.ifEmpty { listOf(ParagraphNode()) }
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(RichContentLayoutDefaults.BlockSpacing.dp),
+    ) {
+        blocks.forEachIndexed { contentBlockIndex, block ->
+            val blockAddress = address.copy(contentBlockIndex = contentBlockIndex)
+            when (block) {
+                is ParagraphNode -> {
+                    if (block.isPlatformEditable()) {
+                        TableCellParagraphEditor(
+                            boxId = boxId,
+                            address = blockAddress,
+                            paragraph = block,
+                            active = activeContentBlockIndex == contentBlockIndex,
+                            selectionMode = selectionMode,
+                            selected = selected,
+                            controller = controller,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        TableCellStaticBlock(
+                            boxId = boxId,
+                            address = blockAddress,
+                            content = RichContent(blocks = listOf(block)),
+                            selectionMode = selectionMode,
+                            selected = selected,
+                            controller = controller,
+                        )
+                    }
+                }
+
+                is BlockFormula, is BlockImage, is TableNode -> TableCellStaticBlock(
+                    boxId = boxId,
+                    address = blockAddress,
+                    content = RichContent(blocks = listOf(block)),
+                    selectionMode = selectionMode,
+                    selected = selected,
+                    controller = controller,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TableCellParagraphEditor(
+    boxId: String,
+    address: TableCellAddress,
+    paragraph: ParagraphNode,
+    active: Boolean,
+    selectionMode: Boolean,
+    selected: Boolean,
+    controller: NeoNoteEditorController,
+    modifier: Modifier = Modifier,
+) {
+    val enabled = !selectionMode && !selected
+    val focusRequester = remember { FocusRequester() }
+    val modelText = paragraph.plainTextForCellEditor()
+    var platformTextFieldValue by remember(boxId, address) { mutableStateOf(TextFieldValue(modelText)) }
+
+    LaunchedEffect(active, enabled) {
+        if (active && enabled) focusRequester.requestFocus()
+    }
+    LaunchedEffect(modelText) {
+        if (platformTextFieldValue.text != modelText) {
+            platformTextFieldValue = TextFieldValue(modelText, TextRange(modelText.length))
+        }
+    }
+
+    BasicTextField(
+        value = platformTextFieldValue,
+        onValueChange = { nextValue ->
+            platformTextFieldValue = nextValue
+            controller.updateRichContentTableCellFromPlatformInput(
+                boxId = boxId,
+                address = address,
+                nextText = nextValue.text,
+            )
+        },
+        enabled = enabled,
+        singleLine = false,
+        minLines = 1,
+        keyboardOptions = KeyboardOptions(
+            capitalization = KeyboardCapitalization.Sentences,
+            imeAction = ImeAction.Default,
+        ),
+        textStyle = LocalTextStyle.current.copy(
+            color = Color(0xFF0F172A),
+            lineHeight = RichContentLayoutDefaults.LineHeight.sp,
+        ),
+        cursorBrush = SolidColor(Color(0xFF7C3AED)),
+        modifier = modifier
+            .heightIn(min = RichContentLayoutDefaults.LineHeight.dp)
+            .focusRequester(focusRequester)
+            .onFocusChanged { focusState ->
+                if (focusState.isFocused && enabled) {
+                    controller.focusRichContentTableCell(boxId = boxId, address = address)
+                }
+            },
+        decorationBox = { innerTextField ->
+            Box(modifier = Modifier.fillMaxWidth()) {
+                if (platformTextFieldValue.text.isEmpty()) {
+                    Text(
+                        text = " ",
+                        color = Color(0xFF94A3B8),
+                        style = LocalTextStyle.current.copy(lineHeight = RichContentLayoutDefaults.LineHeight.sp),
+                    )
+                }
+                innerTextField()
+            }
+        },
+    )
+}
+
+@Composable
+private fun TableCellStaticBlock(
+    boxId: String,
+    address: TableCellAddress,
+    content: RichContent,
+    selectionMode: Boolean,
+    selected: Boolean,
+    controller: NeoNoteEditorController,
+) {
+    RichContentRenderer(
+        content = content,
+        selectionMode = selectionMode,
+        selected = selected,
+        onFocus = { controller.focusRichContentTableCell(boxId = boxId, address = address) },
+        onToggleTodoChecked = {},
+        modifier = Modifier.fillMaxWidth(),
+        applyContentPadding = false,
+        onObjectBlockFocus = { controller.focusRichContentTableCell(boxId = boxId, address = address) },
+    )
+}
+
+internal fun TableCell.firstEditableParagraphIndex(): Int =
+    content.blocks.indexOfFirst { it is ParagraphNode && it.isPlatformEditable() }.takeIf { it >= 0 } ?: 0
+
+internal fun ParagraphNode.plainTextForCellEditor(): String = inlines.joinToString("") { inline ->
+    when (inline) {
+        is InlineText -> inline.text
+        InlineLineBreak -> "\n"
+        is InlineFormula, is InlineImage -> InlineAtomPlaceholder
+    }
+}
+
+private fun ParagraphNode.isPlatformEditable(): Boolean =
+    inlines.none { it is InlineFormula || it is InlineImage }
+
+internal fun RichContent.previewTextForTableCell(): String = blocks.firstOrNull()?.let { block ->
+    when (block) {
+        is ParagraphNode -> block.plainTextForCellEditor()
+        is BlockFormula -> block.expression.ifBlank { "formula" }
+        is BlockImage -> block.altText?.takeIf { it.isNotBlank() } ?: "image"
+        is TableNode -> "nested table"
+    }
+}.orEmpty()
+
+private const val InlineAtomPlaceholder: String = "\uFFFC"
+''')
+
+          Path("app/src/test/kotlin/com/neonote/RichContentNestedTest.kt").write_text(r'''package com.neonote
+
+import com.neonote.engine.RichContentCommand
+import com.neonote.engine.RichContentCommandResult
+import com.neonote.engine.RichContentEditorSession
+import com.neonote.engine.RichContentEngine
+import com.neonote.model.BlockFormula
+import com.neonote.model.BlockImage
+import com.neonote.model.InlineText
+import com.neonote.model.ParagraphNode
+import com.neonote.model.RichContent
+import com.neonote.model.RichContentBox
+import com.neonote.model.TableCell
+import com.neonote.model.TableCellAddress
+import com.neonote.model.TableNode
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertIs
+
+class RichContentNestedTest {
+    @Test
+    fun `table cell can contain paragraphs block media formulas and another table`() {
+        val nestedTable = nestedTable()
+        val table = TableNode(
+            rows = listOf(
+                listOf(
+                    TableCell(
+                        content = RichContent(
+                            blocks = listOf(
+                                paragraph("cell paragraph"),
+                                BlockImage(assetId = "image-1", altText = "block image"),
+                                BlockFormula(expression = "E = mc^2"),
+                                nestedTable,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val cellBlocks = table.rows.single().single().content.blocks
+        assertIs<ParagraphNode>(cellBlocks[0])
+        assertIs<BlockImage>(cellBlocks[1])
+        assertIs<BlockFormula>(cellBlocks[2])
+        val actualNestedTable = assertIs<TableNode>(cellBlocks[3])
+        val actualNestedParagraph = assertIs<ParagraphNode>(
+            actualNestedTable.rows.single().single().content.blocks.single(),
+        )
+        val actualNestedText = assertIs<InlineText>(actualNestedParagraph.inlines.single())
+        assertEquals("nested", actualNestedText.text)
+    }
+
+    @Test
+    fun `editing a later cell paragraph preserves all sibling rich blocks`() {
+        val address = TableCellAddress(blockIndex = 0, rowIndex = 0, columnIndex = 0, contentBlockIndex = 3)
+        val box = richCellBox()
+
+        val result = RichContentEngine().execute(
+            box,
+            RichContentCommand.ReplaceTableCellParagraphText(address = address, text = "edited second paragraph"),
+        ) as RichContentCommandResult.ContentEdited
+
+        val blocks = cellBlocks(result.box)
+        assertEquals("first paragraph", assertIs<InlineText>(assertIs<ParagraphNode>(blocks[0]).inlines.single()).text)
+        assertIs<BlockImage>(blocks[1])
+        assertIs<BlockFormula>(blocks[2])
+        assertEquals("edited second paragraph", assertIs<InlineText>(assertIs<ParagraphNode>(blocks[3]).inlines.single()).text)
+        assertIs<TableNode>(blocks[4])
+    }
+
+    @Test
+    fun `session reads and edits the addressed paragraph inside a rich cell`() {
+        val address = TableCellAddress(blockIndex = 0, rowIndex = 0, columnIndex = 0, contentBlockIndex = 3)
+        val session = RichContentEditorSession(richCellBox())
+
+        assertEquals("second paragraph", session.tableCellPlainText(address))
+        session.replaceTableCellParagraphFromPlatformInput(address, "session edit")
+
+        val blocks = cellBlocks(session.box)
+        assertEquals("session edit", assertIs<InlineText>(assertIs<ParagraphNode>(blocks[3]).inlines.single()).text)
+        assertIs<BlockImage>(blocks[1])
+        assertIs<BlockFormula>(blocks[2])
+        assertIs<TableNode>(blocks[4])
+    }
+
+    private fun richCellBox(): RichContentBox = RichContentBox(
+        id = "box-rich-cell",
+        content = RichContent(
+            blocks = listOf(
+                TableNode(
+                    rows = listOf(
+                        listOf(
+                            TableCell(
+                                content = RichContent(
+                                    blocks = listOf(
+                                        paragraph("first paragraph"),
+                                        BlockImage(assetId = "image-1", altText = "block image"),
+                                        BlockFormula(expression = "E = mc^2"),
+                                        paragraph("second paragraph"),
+                                        nestedTable(),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    private fun cellBlocks(box: RichContentBox) =
+        assertIs<TableNode>(box.content.blocks.single()).rows.single().single().content.blocks
+
+    private fun nestedTable(): TableNode = TableNode(
+        rows = listOf(
+            listOf(
+                TableCell(
+                    content = RichContent(blocks = listOf(paragraph("nested"))),
+                ),
+            ),
+        ),
+    )
+
+    private fun paragraph(text: String): ParagraphNode =
+        ParagraphNode(inlines = listOf(InlineText(text)))
+}
+''')
+          PY
+
+      - name: Commit migration result
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/neonote/model/RichContent.kt \
+                  app/src/main/java/com/neonote/engine/RichContentEngine.kt \
+                  app/src/main/java/com/neonote/engine/RichContentEditorSession.kt \
+                  app/src/main/java/com/neonote/TableBlockEditor.kt \
+                  app/src/main/java/com/neonote/TableCellEditor.kt \
+                  app/src/test/kotlin/com/neonote/RichContentNestedTest.kt
+          git commit -m "Unify table cell RichContent paragraph editing"
+          git push origin HEAD:codex/unify-table-cell-richcontent-editor
