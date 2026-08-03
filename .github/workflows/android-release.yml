@@ -32,7 +32,7 @@ jobs:
 
       - name: Apply product quality source patches
         if: github.event_name == 'pull_request'
-        run: python3 scripts/product_quality_patch.py
+        run: python3 scripts/product_quality_patch_v2.py
 
       - name: Persist product quality source patches
         if: github.event_name == 'pull_request'
