@@ -49,11 +49,12 @@ jobs:
       - name: Make Gradle executable
         run: chmod +x ./gradlew
 
-      - name: Test and assemble release candidate
+      - name: Test and assemble release packages
         run: |
           ./gradlew clean \
             :app:testDebugUnitTest \
             :app:assembleReleaseCandidate \
+            :app:assembleRelease \
             --stacktrace --no-daemon
 
       - name: Verify and name release candidate
@@ -88,6 +89,32 @@ jobs:
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Prepare unsigned production package for offline signing
+        if: steps.signing.outputs.enabled != 'true'
+        shell: bash
+        run: |
+          apk="$(find app/build/outputs/apk/release -type f -name '*.apk' | head -n 1)"
+          test -n "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | grep -E "package: name='com.neonote'.*versionCode='10000'.*versionName='1.0.0'"
+          if "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$apk"; then
+            echo 'Expected an unsigned production APK when release secrets are absent.' >&2
+            exit 1
+          fi
+          cp "$apk" dist/NeoNote-1.0.0-unsigned.apk
+          cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" dist/apksigner.jar
+          sha256sum dist/NeoNote-1.0.0-unsigned.apk > dist/NeoNote-1.0.0-unsigned.apk.sha256
+
+      - name: Upload unsigned production package
+        if: steps.signing.outputs.enabled != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: neonote-v1-unsigned-release
+          path: |
+            dist/NeoNote-1.0.0-unsigned.apk
+            dist/NeoNote-1.0.0-unsigned.apk.sha256
+            dist/apksigner.jar
+          if-no-files-found: error
 
       - name: Decode production keystore
         if: github.event_name != 'pull_request' && steps.signing.outputs.enabled == 'true'
