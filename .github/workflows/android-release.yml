@@ -17,6 +17,7 @@ permissions:
 jobs:
   build-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       NEONOTE_KEYSTORE_BASE64: ${{ secrets.NEONOTE_KEYSTORE_BASE64 }}
       NEONOTE_KEYSTORE_PASSWORD: ${{ secrets.NEONOTE_KEYSTORE_PASSWORD }}
