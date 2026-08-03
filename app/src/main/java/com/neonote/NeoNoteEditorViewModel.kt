@@ -10,5 +10,9 @@ import androidx.lifecycle.ViewModel
  * viewport, selection, or active editor state.
  */
 public class NeoNoteEditorViewModel : ViewModel() {
-    public val controller: NeoNoteEditorController = NeoNoteEditorController()
+    public val controller: NeoNoteEditorController = NeoNoteEditorController(
+        initialState = createTestEditorState().let { state ->
+            state.copy(document = state.document.copy(title = "Untitled Note"))
+        },
+    )
 }
