@@ -3,7 +3,8 @@ package com.neonote
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +44,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextIndent
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neonote.engine.InlineStyle
 import com.neonote.engine.MathExpressionFormatter
@@ -128,7 +130,8 @@ internal fun UnifiedRichTextEditor(
         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
         visualTransformation = remember(box.content) { UnifiedRichTextVisualTransformation(box.content.blocks.filterIsInstance<ParagraphNode>()) },
         modifier = modifier
-            .fillMaxSize()
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp)
             .focusRequester(requester)
             .onFocusChanged { if (it.isFocused && editable && !box.isFocused) controller.activateRichContentBox(box.id) }
             .onPreviewKeyEvent { event ->
@@ -165,7 +168,7 @@ internal fun UnifiedRichTextEditor(
                 }
             },
         decorationBox = { inner ->
-            Box(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)) {
                 if (value.text.isEmpty()) Text("Start typing…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 inner()
             }

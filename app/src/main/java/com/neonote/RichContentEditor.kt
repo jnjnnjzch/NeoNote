@@ -2,7 +2,7 @@ package com.neonote
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -25,7 +25,7 @@ internal fun RichContentEditor(
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = modifier.fillMaxSize().padding(
+        modifier = modifier.fillMaxWidth().wrapContentHeight().padding(
             horizontal = RichContentLayoutDefaults.RendererHorizontalPadding.dp,
             vertical = RichContentLayoutDefaults.RendererVerticalPadding.dp,
         ),
@@ -37,7 +37,7 @@ internal fun RichContentEditor(
                 selectionMode = selectionMode,
                 selected = selected,
                 controller = controller,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxWidth().wrapContentHeight(),
             )
             return@Column
         }

@@ -8,7 +8,10 @@ import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -22,6 +25,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
@@ -57,6 +62,7 @@ internal fun InfiniteCanvasViewport(
     val router = remember { InputRouter() }
     val inputAdapter = remember { ComposeInputAdapter() }
     val platformSnapshotStore = remember { PlatformSnapshotStore() }
+    val density = LocalDensity.current
     val inputMode = when (controller.state.currentTool) {
         EditorTool.Pen -> InputMode.Navigate
         EditorTool.Text -> InputMode.Write
@@ -67,6 +73,7 @@ internal fun InfiniteCanvasViewport(
     Box(
         modifier = modifier
             .background(Color(0xFFF9F8FC))
+            .onSizeChanged { controller.updateViewportMetrics(it.width, density.density) }
             .pointerInteropFilter { motionEvent ->
                 if (AndroidStylusInputAdapter.isStylusOrEraser(motionEvent)) {
                     val inputEvent = AndroidStylusInputAdapter.toInputEvent(motionEvent)
@@ -122,7 +129,21 @@ internal fun InfiniteCanvasViewport(
             )
         }
 
-        if (controller.currentCanvas.objects.isEmpty() && controller.currentCanvas.inkLayer.strokes.isEmpty()) {
+        val focusedBoxId = controller.state.focusedRichContentBoxId
+    if (controller.state.currentTool == EditorTool.Text && focusedBoxId != null) {
+        RichContentToolbar(
+            boxId = focusedBoxId,
+            controller = controller,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .fillMaxWidth()
+                .widthIn(max = 920.dp)
+                .heightIn(min = 50.dp),
+        )
+    }
+
+    if (controller.currentCanvas.objects.isEmpty() && controller.currentCanvas.inkLayer.strokes.isEmpty()) {
             Text(
                 text = when (controller.state.currentTool) {
                     EditorTool.Text -> "Tap anywhere to start typing"

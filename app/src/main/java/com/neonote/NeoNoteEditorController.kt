@@ -64,8 +64,14 @@ import com.neonote.model.TextSelection
 import com.neonote.model.ViewportState
 import java.util.ArrayDeque
 
-private const val DefaultBoxWidth = 360f
-private const val DefaultBoxHeight = 120f
+private const val DefaultBoxWidth = 960f
+private const val DefaultBoxHeight = 220f
+private const val DefaultViewportWidthPx = 1280f
+private const val MinimumTextBoxWidthDp = 320f
+private const val PreferredTextBoxWidthDp = 520f
+private const val MaximumTextBoxWidthDp = 760f
+private const val MinimumTextBoxHeightDp = 64f
+private const val TextBoxScreenMarginDp = 20f
 private const val DefaultImageWidth = 320f
 private const val DefaultImageHeight = 220f
 private const val MinZoomScale = 0.2f
@@ -122,6 +128,8 @@ public class NeoNoteEditorController(
     private var lastInputDiagnosticsUpdateMillis: Long? = null
     private var pendingInputDiagnostics: InputDiagnostics? = null
     private var richContentInteractionRevision by mutableStateOf(0)
+    private var displayDensity: Float = 2f
+    private var viewportWidthScreenPx: Float = DefaultViewportWidthPx
     private val richContentSessions = mutableMapOf<String, RichContentEditorSession>()
     private val selectedRichContentObjectBlocks = mutableMapOf<String, Int>()
 
@@ -456,31 +464,51 @@ public class NeoNoteEditorController(
         ))
     }
 
-    public fun focusOrCreateRichContentBox(documentPosition: CanvasPoint) {
-        val existing = currentCanvas.topMostObjectAt(documentPosition) as? RichContentBox
-        if (existing != null) {
-            activateRichContentBox(existing.id)
-            return
-        }
-        if (state.currentTool != EditorTool.Text) return
-        val box = RichContentBox(
-            id = nextRichContentBoxId(),
-            position = documentPosition,
-            size = CanvasSize(DefaultBoxWidth, DefaultBoxHeight),
-            zIndex = (currentCanvas.objects.maxOfOrNull { it.zIndex } ?: 0) + 1,
-            content = RichContent(),
-            isFocused = true,
-        )
-        val added = canvasEngine.execute(currentCanvas, CanvasCommand.AddObject(box)) as CanvasCommandResult.ObjectAdded
-        state = state.copy(
-            document = state.document.withCanvas(added.canvas.setFocusedRichContentBox(box.id)),
-            focusedRichContentBoxId = box.id,
-            selection = SelectionState(),
-            currentTool = EditorTool.Text,
-        )
-    }
+    public fun updateViewportMetrics(widthPx: Int, density: Float) {
+    if (widthPx > 0) viewportWidthScreenPx = widthPx.toFloat()
+    if (density.isFinite() && density > 0f) displayDensity = density
+}
 
-    public fun insertFloatingImage(
+public fun focusOrCreateRichContentBox(documentPosition: CanvasPoint) {
+    val existing = currentCanvas.topMostObjectAt(documentPosition) as? RichContentBox
+    if (existing != null) {
+        activateRichContentBox(existing.id)
+        return
+    }
+    if (state.currentTool != EditorTool.Text) return
+    val zoom = state.viewport.zoomScale.coerceAtLeast(MinZoomScale)
+    val minimumWidth = MinimumTextBoxWidthDp * displayDensity / zoom
+    val preferredWidth = PreferredTextBoxWidthDp * displayDensity / zoom
+    val maximumWidth = MaximumTextBoxWidthDp * displayDensity / zoom
+    val availableWidth = (viewportWidthScreenPx - TextBoxScreenMarginDp * 2f * displayDensity) / zoom
+    val width = preferredWidth.coerceIn(minimumWidth, maximumWidth)
+        .coerceAtMost(availableWidth.coerceAtLeast(minimumWidth))
+    val visibleLeft = -state.viewport.panOffsetX / zoom
+    val visibleRight = (viewportWidthScreenPx - state.viewport.panOffsetX) / zoom
+    val margin = TextBoxScreenMarginDp * displayDensity / zoom
+    val maximumLeft = (visibleRight - width - margin).coerceAtLeast(visibleLeft + margin)
+    val position = documentPosition.copy(
+        x = documentPosition.x.coerceIn(visibleLeft + margin, maximumLeft),
+    )
+    val minimumHeight = MinimumTextBoxHeightDp * displayDensity / zoom
+    val box = RichContentBox(
+        id = nextRichContentBoxId(),
+        position = position,
+        size = CanvasSize(width, maxOf(DefaultBoxHeight / zoom, minimumHeight)),
+        zIndex = (currentCanvas.objects.maxOfOrNull { it.zIndex } ?: 0) + 1,
+        content = RichContent(),
+        isFocused = true,
+    )
+    val added = canvasEngine.execute(currentCanvas, CanvasCommand.AddObject(box)) as CanvasCommandResult.ObjectAdded
+    state = state.copy(
+        document = state.document.withCanvas(added.canvas.setFocusedRichContentBox(box.id)),
+        focusedRichContentBoxId = box.id,
+        selection = SelectionState(),
+        currentTool = EditorTool.Text,
+    )
+}
+
+public fun insertFloatingImage(
         assetId: String,
         position: CanvasPoint,
         size: CanvasSize = CanvasSize(DefaultImageWidth, DefaultImageHeight),
@@ -785,7 +813,12 @@ public class NeoNoteEditorController(
         var updatedBox: RichContentBox? = null
         val canvas = currentCanvas.updateRichContentBox(boxId) { box ->
             val result = edit(editorSessionFor(boxId, box))
-            val measured = if (result.box.autoSizeHeight) richContentMeasurer.resizeBoxToMeasuredContent(result.box) else result.box
+            val measured = if (result.box.autoSizeHeight) {
+                val predicted = richContentMeasurer.resizeBoxToMeasuredContent(result.box)
+                predicted.copy(size = predicted.size.copy(
+                    height = maxOf(result.box.size.height, predicted.size.height),
+                ))
+            } else result.box
             updatedBox = measured
             measured
         }
@@ -797,7 +830,19 @@ public class NeoNoteEditorController(
         richContentInteractionRevision++
     }
 
-    private fun editorSessionFor(boxId: String, box: RichContentBox): RichContentEditorSession =
+    public fun updateRichContentBoxMeasuredHeight(boxId: String, measuredHeight: Float) {
+    val targetHeight = measuredHeight.coerceAtLeast(MinimumTextBoxHeightDp * displayDensity)
+    val box = richContentBox(boxId) ?: return
+    if (!box.autoSizeHeight || kotlin.math.abs(box.size.height - targetHeight) < 1f) return
+    val canvas = currentCanvas.updateRichContentBox(boxId) { current ->
+        current.copy(size = current.size.copy(height = targetHeight))
+    }
+    replaceStateWithoutRecordingHistory {
+        state = state.copy(document = state.document.withCanvas(canvas))
+    }
+}
+
+private fun editorSessionFor(boxId: String, box: RichContentBox): RichContentEditorSession =
         richContentSessions.getOrPut(richContentSessionKey(boxId)) {
             RichContentEditorSession(box, engine = richContentEngine)
         }.also { it.focus(box) }
@@ -945,8 +990,12 @@ public class NeoNoteEditorController(
 
     private fun NeoNoteDocument.withMeasuredRichContentBoxHeights(): NeoNoteDocument = copy(pages = pages.map { page ->
         page.copy(canvas = page.canvas.copy(objects = page.canvas.objects.map { objectValue ->
-            if (objectValue is RichContentBox && objectValue.autoSizeHeight) richContentMeasurer.resizeBoxToMeasuredContent(objectValue)
-            else objectValue
+            if (objectValue is RichContentBox && objectValue.autoSizeHeight) {
+                val measured = richContentMeasurer.resizeBoxToMeasuredContent(objectValue)
+                measured.copy(size = measured.size.copy(
+                    height = maxOf(objectValue.size.height, measured.size.height),
+                ))
+            } else objectValue
         }))
     })
 
