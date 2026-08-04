@@ -35,7 +35,7 @@ public class FileDocumentLibrary(
 ) : DocumentLibrary {
     private val documentsDirectory = rootDirectory.resolve("documents")
     private val trashDirectory = rootDirectory.resolve("trash")
-    private val persistence = JsonFilePersistenceStore(documentsDirectory, json)
+    private val persistence = VersionedPersistenceStore(documentsDirectory, json)
 
     override suspend fun list(includeTrash: Boolean): List<DocumentSummary> {
         val active = scan(documentsDirectory, isTrashed = false)
@@ -66,6 +66,7 @@ public class FileDocumentLibrary(
         var deleted = false
         if (active.exists()) deleted = active.delete() || deleted
         if (trash.exists()) deleted = trash.delete() || deleted
+        persistence.deleteBackups(documentId)
         return deleted
     }
 
@@ -120,7 +121,10 @@ public class FileDocumentLibrary(
     private fun documentFile(directory: File, documentId: String): File =
         directory.resolve("${documentId.safeName()}.json")
 
-    private fun String.safeName(): String = map { char ->
-        if (char.isLetterOrDigit() || char in "-_.") char else '_'
-    }.joinToString("").ifBlank { "document" }
+    public fun pruneUnreferencedAssets(assetsDirectory: File): AssetGarbageCollectionResult =
+        FileAssetGarbageCollector(json).collect(
+            documentRoots = listOf(documentsDirectory, trashDirectory, documentsDirectory.resolve(".backups")),
+            assetsDirectory = assetsDirectory,
+        )
+
 }

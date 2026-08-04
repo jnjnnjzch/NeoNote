@@ -1,4 +1,4 @@
-name: NeoNote loop source snapshot
+name: NeoNote product hardening gate
 
 on:
   pull_request:
@@ -8,20 +8,54 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: neonote-hardening-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
-  snapshot:
+  verify:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: JVM product contracts
+        run: chmod +x gradlew && ./gradlew --no-daemon testDebugUnitTest
+      - name: Release lint
+        run: ./gradlew --no-daemon lintRelease
+      - name: Build installable hardening APK
+        run: ./gradlew --no-daemon assembleReleaseCandidate
+      - name: Verify and collect APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=$(find app/build/outputs/apk/releaseCandidate -name '*.apk' -type f | head -1)
+          test -f "$APK"
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+          mkdir -p hardening-artifacts
+          "$AAPT" dump badging "$APK" > hardening-artifacts/badging.txt
+          grep -q "package: name='com.neonote.rc'" hardening-artifacts/badging.txt
+          cp "$APK" hardening-artifacts/NeoNote-hardening.apk
+          sha256sum hardening-artifacts/NeoNote-hardening.apk > hardening-artifacts/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neonote-hardening-apk
+          path: hardening-artifacts/
+          if-no-files-found: error
+          retention-days: 3
       - name: Create source snapshot
         run: |
           rm -rf .git
-          zip -qr neonote-source.zip . -x 'neonote-source.zip'
+          zip -qr neonote-source.zip . -x 'neonote-source.zip' -x 'app/build/**'
       - uses: actions/upload-artifact@v4
         with:
           name: neonote-loop-source

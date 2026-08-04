@@ -18,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -82,6 +83,7 @@ internal fun RichContentBoxView(
             .offset { IntOffset(box.position.x.roundToInt(), box.position.y.roundToInt()) }
             .width(boxWidth)
             .then(sizingModifier)
+            .graphicsLayer(rotationZ = box.rotationDegrees)
             .clip(shape)
             .background(Color.White)
             .border(if (selected || box.isFocused) 2.dp else 1.dp, borderColor, shape)

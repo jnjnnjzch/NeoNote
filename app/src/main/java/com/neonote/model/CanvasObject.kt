@@ -43,6 +43,9 @@ data class CanvasRect(
         bottom = bottom + amount,
     )
 
+    fun intersects(other: CanvasRect): Boolean =
+        right >= other.left && left <= other.right && bottom >= other.top && top <= other.bottom
+
     companion object {
         fun from(position: CanvasPoint, size: CanvasSize): CanvasRect = CanvasRect(
             left = position.x,
@@ -75,6 +78,7 @@ data class RichContentBox(
     /** Height follows content unless the user explicitly resizes the box. */
     val autoSizeHeight: Boolean = true,
     val isLocked: Boolean = false,
+    val rotationDegrees: Float = 0f,
 ) : CanvasObject
 
 @Serializable
