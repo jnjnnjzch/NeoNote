@@ -1,0 +1,68 @@
+workflow_run_id=30880940249
+feature_head=ff6dbd7252dc4fef97001a40bcd38bafaa01847a
+===== build-logs/01-unit-tests.log =====
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.4.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:processDebugNavigationResources
+> Task :app:javaPreCompileDebug
+> Task :app:parseDebugLocalResources
+> Task :app:checkDebugAarMetadata
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugRFile
+> Task :app:compileDebugNavigationResources
+> Task :app:mergeDebugResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:processDebugManifestForPackage
+> Task :app:processDebugResources
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest
+> Task :app:compileDebugKotlin
+> Task :app:compileDebugJavaWithJavac
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:processDebugJavaRes
+> Task :app:compileDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes
+
+> Task :app:testDebugUnitTest
+
+NeoNoteEditorControllerTest > selection mode can move a selected rich content box in document coordinates under zoom() FAILED
+    org.opentest4j.AssertionFailedError at NeoNoteEditorControllerTest.kt:571
+
+NeoNoteEditorControllerTest > routed selection mode tap on text box selects without focusing() FAILED
+    org.opentest4j.AssertionFailedError at NeoNoteEditorControllerTest.kt:828
+
+NeoNoteEditorControllerTest > multiline rich content input expands height conservatively and delete keeps minimum height() FAILED
+    org.opentest4j.AssertionFailedError at NeoNoteEditorControllerTest.kt:1105
+
+NeoNoteEditorControllerTest > routed selection mode stylus tap selects without inking() FAILED
+    org.opentest4j.AssertionFailedError at NeoNoteEditorControllerTest.kt:862
+
+PersistenceStoreTest > controllerSaveAndLoadUpdateStateAndStatusWithoutPersistingViewportAsPosition() FAILED
+    org.opentest4j.AssertionFailedError at PersistenceStoreTest.kt:495
+
+201 tests completed, 5 failed
+
+> Task :app:testDebugUnitTest FAILED
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_3-1785821525303.json
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:testDebugUnitTest'.
+> There were failing tests. See the report at: file:///home/runner/work/NeoNote/NeoNote/app/build/reports/tests/testDebugUnitTest/index.html
+
+* Try:
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+BUILD FAILED in 49s
+26 actionable tasks: 26 executed
