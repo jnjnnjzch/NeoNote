@@ -3,8 +3,9 @@ package com.neonote
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
@@ -57,6 +58,8 @@ import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContentBox
 import com.neonote.model.TextAlignment
 
+private val MinimumUnifiedEditorHeight = 72.dp
+
 /** One platform text field for a paragraph-only box, enabling native cross-paragraph selection. */
 @Composable
 internal fun UnifiedRichTextEditor(
@@ -96,7 +99,10 @@ internal fun UnifiedRichTextEditor(
             selected = selected,
             onFocus = { controller.activateRichContentBox(box.id) },
             onToggleTodoChecked = { controller.toggleRichContentTodoCheckedState(box.id, it) },
-            modifier = modifier,
+            modifier = modifier
+                .fillMaxWidth()
+                .wrapContentHeight(unbounded = true)
+                .heightIn(min = MinimumUnifiedEditorHeight),
             applyContentPadding = false,
         )
         return
@@ -118,7 +124,8 @@ internal fun UnifiedRichTextEditor(
         },
         enabled = editable,
         singleLine = false,
-        minLines = 1,
+        minLines = 3,
+        maxLines = Int.MAX_VALUE,
         keyboardOptions = KeyboardOptions(
             capitalization = KeyboardCapitalization.Sentences,
             imeAction = ImeAction.Default,
@@ -128,12 +135,17 @@ internal fun UnifiedRichTextEditor(
             lineHeight = 22.sp,
         ),
         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-        visualTransformation = remember(box.content) { UnifiedRichTextVisualTransformation(box.content.blocks.filterIsInstance<ParagraphNode>()) },
+        visualTransformation = remember(box.content) {
+            UnifiedRichTextVisualTransformation(box.content.blocks.filterIsInstance<ParagraphNode>())
+        },
         modifier = modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = 48.dp)
+            .wrapContentHeight(unbounded = true)
+            .heightIn(min = MinimumUnifiedEditorHeight)
             .focusRequester(requester)
-            .onFocusChanged { if (it.isFocused && editable && !box.isFocused) controller.activateRichContentBox(box.id) }
+            .onFocusChanged {
+                if (it.isFocused && editable && !box.isFocused) controller.activateRichContentBox(box.id)
+            }
             .onPreviewKeyEvent { event ->
                 val style = event.unifiedStyleShortcut()
                 val list = event.unifiedListShortcut()
@@ -168,8 +180,19 @@ internal fun UnifiedRichTextEditor(
                 }
             },
         decorationBox = { inner ->
-            Box(Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)) {
-                if (value.text.isEmpty()) Text("Start typing…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight(unbounded = true)
+                    .heightIn(min = MinimumUnifiedEditorHeight),
+            ) {
+                if (value.text.isEmpty()) {
+                    Text(
+                        "Start typing…",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+                    )
+                }
                 inner()
             }
         },
@@ -230,9 +253,10 @@ private class UnifiedRichTextVisualTransformation(
             }
             if (paragraphIndex < paragraphs.lastIndex) offset = (offset + 1).coerceAtMost(text.length)
         }
+        val source = builder.toAnnotatedString()
         val styled = AnnotatedString.Builder(visible.concatToString()).also { target ->
-            builder.toAnnotatedString().spanStyles.forEach { target.addStyle(it.item, it.start, it.end) }
-            builder.toAnnotatedString().paragraphStyles.forEach { target.addStyle(it.item, it.start, it.end) }
+            source.spanStyles.forEach { target.addStyle(it.item, it.start, it.end) }
+            source.paragraphStyles.forEach { target.addStyle(it.item, it.start, it.end) }
         }.toAnnotatedString()
         return TransformedText(styled, OffsetMapping.Identity)
     }
@@ -244,7 +268,10 @@ private fun ParagraphNode.toUnifiedParagraphStyle(): ParagraphStyle = ParagraphS
         TextAlignment.Center -> TextAlign.Center
         TextAlignment.End -> TextAlign.End
     },
-    textIndent = TextIndent(firstLine = (style.indentLevel * 20).sp, restLine = (style.indentLevel * 20).sp),
+    textIndent = TextIndent(
+        firstLine = (style.indentLevel * 20).sp,
+        restLine = (style.indentLevel * 20).sp,
+    ),
     lineHeight = 22.sp,
 )
 
@@ -271,11 +298,13 @@ private val UnifiedAtomStyle = SpanStyle(
 
 private fun com.neonote.model.RichContent.toUnifiedPlatformText(): String =
     blocks.filterIsInstance<ParagraphNode>().joinToString("\n") { paragraph ->
-        paragraph.inlines.joinToString("") { inline -> when (inline) {
-            is InlineText -> inline.text
-            InlineLineBreak -> "\n"
-            is InlineFormula, is InlineImage -> "\uFFFC"
-        } }
+        paragraph.inlines.joinToString("") { inline ->
+            when (inline) {
+                is InlineText -> inline.text
+                InlineLineBreak -> "\n"
+                is InlineFormula, is InlineImage -> "\uFFFC"
+            }
+        }
     }
 
 private fun androidx.compose.ui.input.key.KeyEvent.unifiedPlainTextPaste(
