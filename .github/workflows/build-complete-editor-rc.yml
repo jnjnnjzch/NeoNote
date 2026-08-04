@@ -26,7 +26,7 @@ jobs:
           ref: feature/complete-editor-rc
           fetch-depth: 0
 
-      - name: Rewrite malformed test functions
+      - name: Fix product command semantics and search normalization
         shell: bash
         run: |
           set -euo pipefail
@@ -34,188 +34,139 @@ jobs:
           from pathlib import Path
           import re
 
-          path = Path('app/src/test/kotlin/com/neonote/CompleteRichContentEngineTest.kt')
-          text = path.read_text()
-          pattern = re.compile(
-              r'    @Test\n    fun `recursive table cell address edits nested content without touching siblings`\(\) \{.*?\n    \}\n\n    @Test\n    fun `nested table supports row column insertion deletion and manual width`',
-              re.S,
+          p = Path('app/src/main/java/com/neonote/NeoNoteEditorController.kt')
+          text = p.read_text()
+          anchor = '''    public fun focusOrCreateRichContentBox(documentPosition: CanvasPoint) {
+              val existing = currentCanvas.topMostObjectAt(documentPosition) as? RichContentBox
+              if (existing != null) {
+                  activateRichContentBox(existing.id)
+                  return
+              }
+              if (state.currentTool != EditorTool.Text) return
+              val zoom = state.viewport.zoomScale.coerceAtLeast(MinZoomScale)
+          '''
+          replacement = '''    public fun focusOrCreateRichContentBox(documentPosition: CanvasPoint) {
+              val existing = currentCanvas.topMostObjectAt(documentPosition) as? RichContentBox
+              if (existing != null) {
+                  activateRichContentBox(existing.id)
+                  return
+              }
+              val zoom = state.viewport.zoomScale.coerceAtLeast(MinZoomScale)
+          '''
+          if text.count(anchor) != 1:
+              raise SystemExit('focusOrCreate gate anchor mismatch')
+          text = text.replace(anchor, replacement)
+          text = text.replace('firstPageId = "page-1",', 'firstPageId = "page-initial",')
+          text = text.replace('assetStoreId = "local-assets",\n        documentId = "default-document",\n        firstPageId = "page-initial",', 'assetStoreId = "local-assets",\n        documentId = "default-document",\n        firstPageId = "page-initial",\n        firstSectionId = "section-initial",')
+          p.write_text(text)
+
+          p = Path('app/src/main/java/com/neonote/engine/DocumentSearch.kt')
+          text = p.read_text()
+          text = text.replace(
+              '''    val normalizedCorpus: String = listOf(documentTitle, sectionTitle, pageTitle, body)
+                  .joinToString("\\n")
+                  .lowercase()
+          ''',
+              '''    val normalizedCorpus: String = listOf(documentTitle, sectionTitle, pageTitle, body)
+                  .joinToString("\\n")
+                  .normalizedSearchText()
+          ''',
           )
+          text = text.replace('    val normalized = lowercase()\n', '    val normalized = normalizedSearchText()\n')
+          old_terms = '''private fun String.normalizedTerms(): List<String> = trim()
+              .lowercase()
+              .split(Regex("\\\\s+"))
+              .map(String::trim)
+              .filter(String::isNotEmpty)
+              .distinct()
+              .take(MaximumSearchTerms)
+          '''
+          new_terms = '''private fun String.normalizedTerms(): List<String> = normalizedSearchText()
+              .split(Regex("\\\\s+"))
+              .map(String::trim)
+              .filter(String::isNotEmpty)
+              .distinct()
+              .take(MaximumSearchTerms)
+
+          private fun String.normalizedSearchText(): String = lowercase()
+              .replace(Regex("[\\\\{}_]+"), " ")
+              .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+              .replace(Regex("\\\\s+"), " ")
+              .trim()
+          '''
+          if old_terms not in text:
+              raise SystemExit('search normalization anchor mismatch')
+          text = text.replace(old_terms, new_terms)
+          p.write_text(text)
+
+          p = Path('app/src/test/kotlin/com/neonote/RichContentRendererTest.kt')
+          text = p.read_text()
+          pattern = re.compile(r'    @Test\n    fun `paragraph renderer emits visible chips for inline formula and image`\(\) \{.*?\n    \}\n\n    @Test', re.S)
           replacement = '''    @Test
-          fun `recursive table cell address edits nested content without touching siblings`() {
-              val nested = TableNode(rows = listOf(listOf(TableCell())))
-              val outer = TableNode(
-                  rows = listOf(
-                      listOf(
-                          TableCell(content = RichContent(listOf(nested))),
-                          TableCell(
-                              content = RichContent(
-                                  listOf(ParagraphNode(listOf(InlineText("sibling")))),
-                              ),
-                          ),
-                      ),
+          fun `paragraph renderer emits visible chips for inline formula and image`() {
+              val paragraph = ParagraphNode(
+                  inlines = listOf(
+                      InlineText("before"),
+                      InlineFormula("x^2"),
+                      InlineLineBreak,
+                      InlineImage(assetId = "asset-42", altText = "diagram"),
                   ),
               )
-              val box = RichContentBox(id = "box", content = RichContent(listOf(outer)))
-              val address = TableCellAddress(0, 0, 0).child(0, 0, 0)
 
-              val result = engine.execute(
-                  box,
-                  RichContentCommand.ReplaceTableCellParagraphText(address, "nested text"),
-              ) as RichContentCommandResult.ContentEdited
-
-              val paragraph = assertIs<ParagraphNode>(RichContentTree.block(result.box.content, address))
-              assertEquals("nested text", assertIs<InlineText>(paragraph.inlines.single()).text)
-              val outerResult = assertIs<TableNode>(result.box.content.blocks.single())
-              val sibling = assertIs<ParagraphNode>(outerResult.rows[0][1].content.blocks.single())
-              assertEquals("sibling", assertIs<InlineText>(sibling.inlines.single()).text)
+              val annotated = paragraph.toDisplayAnnotatedString()
+              val chipSpans = annotated.spanStyles.filter { it.item.background != Color.Unspecified }
+              assertEquals(2, chipSpans.size)
+              assertTrue(annotated.text.startsWith("before"))
+              assertTrue(annotated.text.contains("x"))
+              assertTrue(annotated.text.contains("Image: diagram"))
           }
 
-          @Test
-          fun `nested table supports row column insertion deletion and manual width`'''
+          @Test'''
           text, count = pattern.subn(replacement, text)
           if count != 1:
-              raise SystemExit(f'CompleteRichContentEngineTest target count={count}')
-          path.write_text(text)
+              raise SystemExit(f'renderer test replacement count={count}')
+          p.write_text(text)
           PY
-
-          cat > app/src/test/kotlin/com/neonote/NeoNoteArchiveTest.kt <<'KOTLIN'
-          package com.neonote
-
-          import com.neonote.engine.AssetDraft
-          import com.neonote.engine.FileAssetStore
-          import com.neonote.engine.NeoNoteArchiveCodec
-          import com.neonote.engine.referencedAssetIds
-          import com.neonote.model.BlockImage
-          import com.neonote.model.CanvasPoint
-          import com.neonote.model.CanvasSize
-          import com.neonote.model.FloatingImage
-          import com.neonote.model.InfiniteCanvas
-          import com.neonote.model.NeoNoteDocument
-          import com.neonote.model.NotePage
-          import com.neonote.model.RichContent
-          import com.neonote.model.RichContentBox
-          import com.neonote.model.TableCell
-          import com.neonote.model.TableNode
-          import java.io.File
-          import java.nio.file.Files
-          import kotlinx.coroutines.runBlocking
-          import kotlin.test.Test
-          import kotlin.test.assertEquals
-          import kotlin.test.assertNotEquals
-          import kotlin.test.assertNotNull
-
-          class NeoNoteArchiveTest {
-              @Test
-              fun `archive exports imports and remaps recursively referenced assets`() = runBlocking<Unit> {
-                  val sourceRoot = Files.createTempDirectory("neonote-archive-source").toFile()
-                  val targetRoot = Files.createTempDirectory("neonote-archive-target").toFile()
-                  try {
-                      val sourceStore = FileAssetStore(sourceRoot)
-                      val firstBytes = byteArrayOf(1, 2, 3, 4)
-                      val secondBytes = byteArrayOf(5, 6, 7)
-                      val first = sourceStore.put(AssetDraft("image/png", firstBytes, "nested.png"))
-                      val second = sourceStore.put(AssetDraft("image/jpeg", secondBytes, "floating.jpg"))
-                      val nestedTable = TableNode(
-                          rows = listOf(
-                              listOf(
-                                  TableCell(content = RichContent(listOf(BlockImage(first.id)))),
-                              ),
-                          ),
-                      )
-                      val document = NeoNoteDocument(
-                          id = "source-document",
-                          title = "Archive test",
-                          assetStoreId = "assets",
-                          pages = listOf(
-                              NotePage(
-                                  id = "page",
-                                  canvas = InfiniteCanvas(
-                                      objects = listOf(
-                                          RichContentBox(
-                                              id = "box",
-                                              content = RichContent(listOf(nestedTable)),
-                                          ),
-                                          FloatingImage(
-                                              id = "floating",
-                                              position = CanvasPoint(10f, 20f),
-                                              size = CanvasSize(100f, 80f),
-                                              assetId = second.id,
-                                          ),
-                                      ),
-                                  ),
-                              ),
-                          ),
-                      )
-
-                      val archive = NeoNoteArchiveCodec(sourceStore).export(document)
-                      val targetStore = FileAssetStore(targetRoot)
-                      val imported = NeoNoteArchiveCodec(targetStore).import(archive, "imported-document")
-
-                      assertEquals("imported-document", imported.document.id)
-                      assertEquals(2, imported.importedAssetCount)
-                      val importedIds = imported.document.referencedAssetIds()
-                      assertEquals(2, importedIds.size)
-                      assertNotEquals(document.referencedAssetIds(), importedIds)
-                      val actualBytes: Set<List<Byte>> = importedIds.map { assetId ->
-                          val reference = assertNotNull(targetStore.get(assetId))
-                          File(assertNotNull(reference.uri)).readBytes().toList()
-                      }.toSet()
-                      val expectedBytes: Set<List<Byte>> = setOf(firstBytes.toList(), secondBytes.toList())
-                      assertEquals(expectedBytes, actualBytes)
-                  } finally {
-                      sourceRoot.deleteRecursively()
-                      targetRoot.deleteRecursively()
-                  }
-              }
-          }
-          KOTLIN
 
           rm -f ci/last-rc-failure.log
           rmdir ci 2>/dev/null || true
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m 'fix: rewrite malformed complete-editor tests'
+          git commit -m 'fix: restore explicit text creation and unique initial page ids'
           git push origin HEAD:${FEATURE_BRANCH}
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
       - uses: android-actions/setup-android@v3
-
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Prepare logs
         run: mkdir -p build-logs build-artifacts && chmod +x gradlew
-
       - name: JVM unit tests
         shell: bash
         run: |
           set -o pipefail
           ./gradlew --no-daemon testDebugUnitTest 2>&1 | tee build-logs/01-unit-tests.log
-
       - name: Android release lint
         shell: bash
         run: |
           set -o pipefail
           ./gradlew --no-daemon lintRelease 2>&1 | tee build-logs/02-lint.log
-
       - name: Assemble installable RC and unsigned production APK
         shell: bash
         run: |
           set -o pipefail
           ./gradlew --no-daemon assembleReleaseCandidate assembleRelease 2>&1 | tee build-logs/03-assemble.log
-
       - name: Verify package identity
         shell: bash
         run: |
           set -euo pipefail
           RC_APK=$(find app/build/outputs/apk/releaseCandidate -name '*.apk' | head -1)
           RELEASE_APK=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
-          test -n "$RC_APK" && test -f "$RC_APK"
-          test -n "$RELEASE_APK" && test -f "$RELEASE_APK"
+          test -f "$RC_APK" && test -f "$RELEASE_APK"
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
           "$AAPT" dump badging "$RC_APK" | tee build-artifacts/rc-badging.txt
           "$AAPT" dump badging "$RELEASE_APK" | tee build-artifacts/release-badging.txt
@@ -226,7 +177,6 @@ jobs:
           cp "$RC_APK" build-artifacts/NeoNote-1.0.0-rc.1.apk
           cp "$RELEASE_APK" build-artifacts/NeoNote-1.0.0-unsigned.apk
           sha256sum build-artifacts/*.apk > build-artifacts/SHA256SUMS.txt
-
       - name: Upload APK artifacts
         if: success()
         uses: actions/upload-artifact@v4
@@ -235,7 +185,6 @@ jobs:
           path: build-artifacts/
           if-no-files-found: error
           retention-days: 14
-
       - name: Upload reports and logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -248,7 +197,6 @@ jobs:
             app/build/reports/lint-results-*.xml
           if-no-files-found: ignore
           retention-days: 14
-
       - name: Commit actionable failure log
         if: failure()
         shell: bash
@@ -257,12 +205,10 @@ jobs:
           mkdir -p ci
           {
             echo "RC build failed for feature head $(git rev-parse HEAD)"
-            echo
             for file in build-logs/*.log; do
               test -f "$file" || continue
               echo "===== $file ====="
-              tail -n 800 "$file"
-              echo
+              tail -n 1000 "$file"
             done
           } > ci/last-rc-failure.log
           git config user.name github-actions[bot]
@@ -270,20 +216,28 @@ jobs:
           git add ci/last-rc-failure.log
           git commit -m 'ci: record complete editor RC failure' || true
           git push origin HEAD:${FEATURE_BRANCH}
-
-      - name: Remove successful one-shot workflow
+      - name: Record successful artifact metadata
         if: success()
         shell: bash
         run: |
           set -euo pipefail
           rm -f ci/last-rc-failure.log
-          if ! git diff --quiet || ! git diff --cached --quiet; then
-            git config user.name github-actions[bot]
-            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git add -A
-            git commit -m 'ci: clear previous RC failure diagnostics'
-            git push origin HEAD:${FEATURE_BRANCH}
-          fi
+          mkdir -p ci
+          cat > ci/last-rc-success.txt <<EOF
+          feature_head=$(git rev-parse HEAD)
+          workflow_run_id=${GITHUB_RUN_ID}
+          artifact_name=neonote-complete-editor-rc
+          EOF
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'ci: record successful complete-editor RC artifact'
+          git push origin HEAD:${FEATURE_BRANCH}
+      - name: Remove successful one-shot workflow
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
           git fetch origin ${DEFAULT_BRANCH}
           git checkout -B ${DEFAULT_BRANCH} origin/${DEFAULT_BRANCH}
           git rm .github/workflows/build-complete-editor-rc.yml
