@@ -1,4 +1,4 @@
-triggered_at=2026-08-04T05:53:00Z
+triggered_at=2026-08-04T06:00:00Z
 pr=76
 branch=feature/complete-editor-rc
-purpose=exact-coordinate-fix-and-device-apk
+purpose=observable-final-device-build
