@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -25,8 +26,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
@@ -34,7 +33,11 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import com.neonote.engine.InputAction
 import com.neonote.engine.InputMode
 import com.neonote.engine.InputRouter
 import com.neonote.engine.PointerEventType
@@ -64,7 +67,9 @@ internal fun InfiniteCanvasViewport(
     val platformSnapshotStore = remember { PlatformSnapshotStore() }
     val density = LocalDensity.current
     val inputMode = when (controller.state.currentTool) {
-        EditorTool.Pen -> InputMode.Navigate
+        // Unified OneNote-like surface: the stylus writes, a finger drag pans,
+        // and a finger tap creates or focuses text without switching tools first.
+        EditorTool.Pen -> InputMode.Write
         EditorTool.Text -> InputMode.Write
         EditorTool.Selection -> InputMode.Selection
         EditorTool.Eraser -> InputMode.Erase
@@ -91,22 +96,24 @@ internal fun InfiniteCanvasViewport(
             }
             .pointerInput(inputMode) {
                 handleCanvasPointerInput(
-                    router,
-                    inputAdapter,
-                    { platformSnapshotStore.latest },
-                    controller,
-                    inputMode,
+                    router = router,
+                    inputAdapter = inputAdapter,
+                    platformSnapshotProvider = { platformSnapshotStore.latest },
+                    controller = controller,
+                    mode = inputMode,
                 )
             },
     ) {
         Box(
-            modifier = Modifier.fillMaxSize().graphicsLayer {
-                translationX = controller.state.viewport.panOffsetX
-                translationY = controller.state.viewport.panOffsetY
-                scaleX = controller.state.viewport.zoomScale
-                scaleY = controller.state.viewport.zoomScale
-                transformOrigin = TransformOrigin(0f, 0f)
-            },
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationX = controller.state.viewport.panOffsetX
+                    translationY = controller.state.viewport.panOffsetY
+                    scaleX = controller.state.viewport.zoomScale
+                    scaleY = controller.state.viewport.zoomScale
+                    transformOrigin = TransformOrigin(0f, 0f)
+                },
         ) {
             InkLayerView(
                 pageId = controller.state.currentPageId,
@@ -116,7 +123,7 @@ internal fun InfiniteCanvasViewport(
             )
             controller.currentCanvas.objects.sortedBy(CanvasObject::zIndex).forEach { canvasObject ->
                 CanvasObjectView(
-                    canvasObject,
+                    canvasObject = canvasObject,
                     selected = controller.state.selection.isObjectSelected(canvasObject.id),
                     selectionMode = selectionMode,
                     controller = controller,
@@ -130,29 +137,34 @@ internal fun InfiniteCanvasViewport(
         }
 
         val focusedBoxId = controller.state.focusedRichContentBoxId
-    if (controller.state.currentTool == EditorTool.Text && focusedBoxId != null) {
-        RichContentToolbar(
-            boxId = focusedBoxId,
-            controller = controller,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(horizontal = 12.dp, vertical = 10.dp)
-                .fillMaxWidth()
-                .widthIn(max = 920.dp)
-                .heightIn(min = 50.dp),
-        )
-    }
+        if (controller.state.currentTool == EditorTool.Text && focusedBoxId != null) {
+            RichContentToolbar(
+                boxId = focusedBoxId,
+                controller = controller,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .fillMaxWidth()
+                    .widthIn(max = 960.dp)
+                    .wrapContentHeight()
+                    .heightIn(min = 106.dp)
+                    .zIndex(50f),
+            )
+        }
 
-    if (controller.currentCanvas.objects.isEmpty() && controller.currentCanvas.inkLayer.strokes.isEmpty()) {
+        if (controller.currentCanvas.objects.isEmpty() && controller.currentCanvas.inkLayer.strokes.isEmpty()) {
             Text(
                 text = when (controller.state.currentTool) {
                     EditorTool.Text -> "Tap anywhere to start typing"
-                    EditorTool.Pen -> "Write with S Pen · Drag with one finger · Pinch to zoom"
+                    EditorTool.Pen -> "S Pen writes · Tap to type · Drag with one finger · Pinch to zoom"
                     EditorTool.Selection -> "Draw around ink or objects to select them"
                     EditorTool.Eraser -> "Erase with S Pen or the pen eraser"
                 },
-                modifier = Modifier.align(Alignment.Center).clip(RoundedCornerShape(14.dp))
-                    .background(Color.White.copy(alpha = 0.92f)).padding(horizontal = 18.dp, vertical = 12.dp),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.White.copy(alpha = 0.92f))
+                    .padding(horizontal = 18.dp, vertical = 12.dp),
                 color = Color(0xFF746D82),
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -160,7 +172,9 @@ internal fun InfiniteCanvasViewport(
     }
 }
 
-private class PlatformSnapshotStore { var latest: AndroidPointerSnapshot? = null }
+private class PlatformSnapshotStore {
+    var latest: AndroidPointerSnapshot? = null
+}
 
 @Composable
 private fun CanvasObjectView(
@@ -185,7 +199,15 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
         if (down.isConsumed) return@awaitEachGesture
-        routePointerEvent(router, inputAdapter, controller, PointerEventType.Down, listOf(down), platformSnapshotProvider(), mode)
+        routePointerEvent(
+            router,
+            inputAdapter,
+            controller,
+            PointerEventType.Down,
+            listOf(down),
+            platformSnapshotProvider(),
+            mode,
+        )
 
         while (true) {
             val event = awaitPointerEvent(pass = PointerEventPass.Final)
@@ -195,18 +217,42 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
             if (pressed.size >= 2) {
                 val zoom = event.calculateZoom()
                 val centroid = event.calculateCentroid(useCurrent = true)
-                routePointerEvent(router, inputAdapter, controller, PointerEventType.Move, pressed, platformSnapshot, mode)
+                routePointerEvent(
+                    router,
+                    inputAdapter,
+                    controller,
+                    PointerEventType.Move,
+                    pressed,
+                    platformSnapshot,
+                    mode,
+                )
                 controller.zoomViewportBy(zoom, CanvasPoint(centroid.x, centroid.y))
                 event.changes.forEach { it.consume() }
                 continue
             }
             val primary = event.changes.firstOrNull() ?: return@awaitEachGesture
             if (primary.changedToUpIgnoreConsumed()) {
-                routePointerEvent(router, inputAdapter, controller, PointerEventType.Up, listOf(primary), platformSnapshot, mode)
+                routePointerEvent(
+                    router,
+                    inputAdapter,
+                    controller,
+                    PointerEventType.Up,
+                    listOf(primary),
+                    platformSnapshot,
+                    mode,
+                )
                 return@awaitEachGesture
             }
             if (primary.pressed && primary.positionChange() != Offset.Zero) {
-                routePointerEvent(router, inputAdapter, controller, PointerEventType.Move, listOf(primary), platformSnapshot, mode)
+                routePointerEvent(
+                    router,
+                    inputAdapter,
+                    controller,
+                    PointerEventType.Move,
+                    listOf(primary),
+                    platformSnapshot,
+                    mode,
+                )
             }
         }
     }
@@ -237,5 +283,13 @@ private fun routePointerEvent(
         ).withPressureSamples(inputEvent.primaryInkSamples),
         force = type != PointerEventType.Move,
     )
-    controller.routeInputEvent(router, inputEvent, mode)
+    val result = controller.routeInputEvent(router, inputEvent, mode)
+
+    // In unified Pen mode a finger tap on an existing text box should enter
+    // editing just like a blank-canvas tap creates a new text box.
+    val focus = result.action as? InputAction.FocusExisting
+    if (focus?.objectId != null && controller.state.currentTool == EditorTool.Pen) {
+        controller.setTool(EditorTool.Text)
+        controller.activateRichContentBox(focus.objectId)
+    }
 }
