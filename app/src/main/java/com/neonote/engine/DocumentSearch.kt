@@ -182,7 +182,7 @@ private fun String.normalizedTerms(): List<String> = normalizedSearchText()
 
 private fun String.normalizedSearchText(): String = lowercase()
     .replace(Regex("[\\{}_]+"), " ")
-    .replace(Regex("[^\p{L}\p{N}]+"), " ")
+    .replace(Regex("""[^\p{L}\p{N}]+"""), " ")
     .replace(Regex("\\s+"), " ")
     .trim()
 
