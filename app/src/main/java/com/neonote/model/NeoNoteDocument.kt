@@ -2,9 +2,7 @@ package com.neonote.model
 
 import kotlinx.serialization.Serializable
 
-/**
- * Root document aggregate for the v2 NeoNote model.
- */
+/** Root document aggregate persisted by NeoNote. */
 @Serializable
 data class NeoNoteDocument(
     val id: String,
@@ -12,4 +10,10 @@ data class NeoNoteDocument(
     val pages: List<NotePage> = emptyList(),
     val assetStoreId: String,
     val revision: Long = 0L,
+    val schemaVersion: Int = CurrentDocumentSchemaVersion,
+    val createdAtEpochMillis: Long = 0L,
+    val updatedAtEpochMillis: Long = 0L,
+    val isFavorite: Boolean = false,
 )
+
+public const val CurrentDocumentSchemaVersion: Int = 3
