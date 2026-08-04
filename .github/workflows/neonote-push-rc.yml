@@ -26,42 +26,39 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Apply remaining UI sizing fixes
+      - name: Preserve exact document coordinates and update sizing contract
         shell: bash
         run: |
           set -euo pipefail
           python3 <<'PY'
           from pathlib import Path
 
-          def replace_optional(path, old, new):
+          def replace_optional(path: str, old: str, new: str) -> None:
               p = Path(path)
               text = p.read_text()
               count = text.count(old)
               if count > 1:
-                  raise SystemExit(f'{path}: ambiguous replacement count={count}')
+                  raise SystemExit(f"{path}: ambiguous replacement count={count}")
               if count == 1:
                   p.write_text(text.replace(old, new))
 
           replace_optional(
               'app/src/main/java/com/neonote/NeoNoteEditorController.kt',
-              '''    val maximumLeft = (visibleRight - width - margin).coerceAtLeast(visibleLeft + margin)
-              val position = documentPosition.copy(
-                  x = documentPosition.x.coerceIn(visibleLeft + margin, maximumLeft),
-              )
-              val minimumHeight = MinimumTextBoxHeightDp * displayDensity / zoom
-          ''',
-              '''    val maximumRight = visibleRight - margin
+              '''    val visibleLeft = -state.viewport.panOffsetX / zoom
+              val visibleRight = (viewportWidthScreenPx - state.viewport.panOffsetX) / zoom
+              val margin = TextBoxScreenMarginDp * displayDensity / zoom
+              val maximumRight = visibleRight - margin
               val overflow = (documentPosition.x + width - maximumRight).coerceAtLeast(0f)
               val position = documentPosition.copy(
                   x = (documentPosition.x - overflow).coerceAtLeast(visibleLeft + margin),
               )
               val minimumHeight = MinimumTextBoxHeightDp * displayDensity / zoom
           ''',
-          )
-          replace_optional(
-              'app/src/main/java/com/neonote/NeoNoteEditorController.kt',
-              '        size = CanvasSize(width, maxOf(DefaultBoxHeight / zoom, minimumHeight)),',
-              '        size = CanvasSize(width, minimumHeight),',
+              '''    // Canvas commands preserve document coordinates exactly. Viewport fitting belongs
+              // to the screen/UI layer and must never rewrite persisted object positions.
+              val position = documentPosition
+              val minimumHeight = MinimumTextBoxHeightDp * displayDensity / zoom
+          ''',
           )
           replace_optional(
               'app/src/test/kotlin/com/neonote/NeoNoteEditorControllerTest.kt',
@@ -82,12 +79,13 @@ jobs:
           ''',
           )
           PY
+
           rm -rf ci
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m 'fix: preserve text anchor and enable visible auto-growth'
+            git commit -m 'fix: preserve exact canvas coordinates for text containers'
             git push origin HEAD:${FEATURE_BRANCH}
           fi
 
@@ -95,58 +93,62 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+
       - uses: android-actions/setup-android@v3
+
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Prepare logs
+      - name: Prepare outputs
         run: mkdir -p build-logs build-artifacts && chmod +x gradlew
+
       - name: JVM unit tests
         shell: bash
         run: |
           set -o pipefail
           ./gradlew --no-daemon testDebugUnitTest 2>&1 | tee build-logs/01-unit-tests.log
+
       - name: Android release lint
         shell: bash
         run: |
           set -o pipefail
           ./gradlew --no-daemon lintRelease 2>&1 | tee build-logs/02-lint.log
-      - name: Assemble RC and production APK
+
+      - name: Assemble installable device APK
         shell: bash
         run: |
           set -o pipefail
-          ./gradlew --no-daemon assembleReleaseCandidate assembleRelease 2>&1 | tee build-logs/03-assemble.log
+          ./gradlew --no-daemon assembleReleaseCandidate 2>&1 | tee build-logs/03-assemble.log
 
-      - name: Verify and collect APKs
+      - name: Verify APK and collect outputs
         shell: bash
         run: |
           set -euo pipefail
-          RC_APK=$(find app/build/outputs/apk/releaseCandidate -name '*.apk' | head -1)
-          RELEASE_APK=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
-          test -f "$RC_APK" && test -f "$RELEASE_APK"
+          APK=$(find app/build/outputs/apk/releaseCandidate -name '*.apk' | head -1)
+          test -f "$APK"
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
-          "$AAPT" dump badging "$RC_APK" | tee build-artifacts/rc-badging.txt
-          "$AAPT" dump badging "$RELEASE_APK" | tee build-artifacts/release-badging.txt
-          grep -q "package: name='com.neonote.rc'" build-artifacts/rc-badging.txt
-          grep -q "versionName='1.0.0-rc.1'" build-artifacts/rc-badging.txt
-          grep -q "package: name='com.neonote'" build-artifacts/release-badging.txt
-          grep -q "versionName='1.0.0'" build-artifacts/release-badging.txt
-          cp "$RC_APK" build-artifacts/NeoNote-1.0.0-rc.1.apk
-          cp "$RELEASE_APK" build-artifacts/NeoNote-1.0.0-unsigned.apk
-          sha256sum build-artifacts/*.apk > build-artifacts/SHA256SUMS.txt
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          "$AAPT" dump badging "$APK" | tee build-artifacts/badging.txt
+          grep -q "package: name='com.neonote.rc'" build-artifacts/badging.txt
+          grep -q "versionName='1.0.0-rc.1'" build-artifacts/badging.txt
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee build-artifacts/signature.txt
+          unzip -t "$APK" > build-artifacts/unzip-test.txt
+          cp "$APK" build-artifacts/NeoNote-device-test.apk
+          sha256sum build-artifacts/NeoNote-device-test.apk > build-artifacts/SHA256SUMS.txt
+          printf 'feature_head=%s\nworkflow_run_id=%s\n' "$(git rev-parse HEAD)" "$GITHUB_RUN_ID" > build-artifacts/build-metadata.txt
 
-      - name: Upload APK artifacts
+      - name: Upload device APK
         uses: actions/upload-artifact@v4
         with:
-          name: neonote-complete-editor-rc
+          name: neonote-device-apk
           path: build-artifacts/
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload reports
+      - name: Upload validation reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: neonote-complete-editor-reports
+          name: neonote-device-validation-reports
           path: |
             build-logs/
             app/build/reports/tests/
@@ -154,37 +156,3 @@ jobs:
             app/build/reports/lint-results-*.xml
           if-no-files-found: ignore
           retention-days: 14
-
-      - name: Record failure diagnostics
-        if: failure()
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p ci
-          {
-            echo "workflow_run_id=${GITHUB_RUN_ID}"
-            echo "feature_head=$(git rev-parse HEAD)"
-            for file in build-logs/*.log; do
-              test -f "$file" || continue
-              echo "===== $file ====="
-              tail -n 1200 "$file"
-            done
-          } > ci/last-rc-failure.log
-          git add ci/last-rc-failure.log
-          git commit -m 'ci: record RC failure diagnostics' || true
-          git push origin HEAD:${FEATURE_BRANCH}
-
-      - name: Record success metadata
-        if: success()
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p ci
-          cat > ci/last-rc-success.txt <<EOF
-          workflow_run_id=${GITHUB_RUN_ID}
-          feature_head=$(git rev-parse HEAD)
-          artifact_name=neonote-complete-editor-rc
-          EOF
-          git add ci/last-rc-success.txt
-          git commit -m 'ci: record successful RC artifact'
-          git push origin HEAD:${FEATURE_BRANCH}
