@@ -1,7 +1,7 @@
 name: NeoNote RC PR gate
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [codex/neonote-v2-blank-architecture]
     types: [opened, synchronize, reopened]
 
@@ -9,18 +9,21 @@ permissions:
   contents: write
 
 concurrency:
-  group: neonote-rc-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}
+  group: neonote-rc-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
   validate:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
+          persist-credentials: true
 
       - name: Apply remaining product fixes
         id: fix
