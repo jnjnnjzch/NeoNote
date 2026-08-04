@@ -3,9 +3,6 @@ package com.neonote.model
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/**
- * A point in the shared infinite canvas coordinate system.
- */
 @Serializable
 data class CanvasPoint(
     val x: Float,
@@ -16,9 +13,6 @@ data class CanvasPoint(
     }
 }
 
-/**
- * A two-dimensional size in infinite canvas units.
- */
 @Serializable
 data class CanvasSize(
     val width: Float,
@@ -29,17 +23,25 @@ data class CanvasSize(
     }
 }
 
-/**
- * Rectangle bounds in the shared infinite canvas coordinate system.
- */
 data class CanvasRect(
     val left: Float,
     val top: Float,
     val right: Float,
     val bottom: Float,
 ) {
+    val width: Float get() = right - left
+    val height: Float get() = bottom - top
+    val center: CanvasPoint get() = CanvasPoint((left + right) / 2f, (top + bottom) / 2f)
+
     fun contains(point: CanvasPoint): Boolean =
         point.x in left..right && point.y in top..bottom
+
+    fun expanded(amount: Float): CanvasRect = CanvasRect(
+        left = left - amount,
+        top = top - amount,
+        right = right + amount,
+        bottom = bottom + amount,
+    )
 
     companion object {
         fun from(position: CanvasPoint, size: CanvasSize): CanvasRect = CanvasRect(
@@ -51,13 +53,6 @@ data class CanvasRect(
     }
 }
 
-/**
- * Top-level floating items that can be placed on an infinite canvas.
- *
- * Geometry values are expressed only as [CanvasPoint] plus [CanvasSize] in a
- * shared infinite-canvas coordinate system. Canvas objects deliberately do not
- * expose any parallel coordinate state.
- */
 @Serializable
 sealed interface CanvasObject {
     val id: String
@@ -68,9 +63,6 @@ sealed interface CanvasObject {
         get() = CanvasRect.from(position = position, size = size)
 }
 
-/**
- * Rich text/content container placed on the canvas.
- */
 @Serializable
 @SerialName("richContentBox")
 data class RichContentBox(
@@ -80,15 +72,11 @@ data class RichContentBox(
     override val zIndex: Int = 0,
     val content: RichContent = RichContent(),
     val isFocused: Boolean = false,
+    /** Height follows content unless the user explicitly resizes the box. */
+    val autoSizeHeight: Boolean = true,
+    val isLocked: Boolean = false,
 ) : CanvasObject
 
-/**
- * Floating image object placed directly on the canvas.
- *
- * This is a top-level, movable/resizable canvas object. It is deliberately
- * separate from [InlineImage] and [BlockImage], which are placeholders inside a
- * RichContent document flow and do not carry independent canvas geometry.
- */
 @Serializable
 @SerialName("floatingImage")
 data class FloatingImage(
@@ -98,4 +86,8 @@ data class FloatingImage(
     override val zIndex: Int = 0,
     val assetId: String,
     val altText: String? = null,
+    val rotationDegrees: Float = 0f,
+    val crop: ImageCrop = ImageCrop(),
+    val lockAspectRatio: Boolean = true,
+    val isLocked: Boolean = false,
 ) : CanvasObject
