@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: complete-editor-rc
+  cancel-in-progress: true
+
 env:
   FEATURE_BRANCH: feature/complete-editor-rc
   DEFAULT_BRANCH: codex/neonote-v2-blank-architecture
@@ -31,17 +35,26 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Make Gradle executable
-        run: chmod +x gradlew
+      - name: Prepare logs
+        run: mkdir -p build-logs build-artifacts && chmod +x gradlew
 
       - name: JVM unit tests
-        run: ./gradlew --no-daemon testDebugUnitTest
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon testDebugUnitTest 2>&1 | tee build-logs/01-unit-tests.log
 
       - name: Android release lint
-        run: ./gradlew --no-daemon lintRelease
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon lintRelease 2>&1 | tee build-logs/02-lint.log
 
       - name: Assemble installable RC and unsigned production APK
-        run: ./gradlew --no-daemon assembleReleaseCandidate assembleRelease
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon assembleReleaseCandidate assembleRelease 2>&1 | tee build-logs/03-assemble.log
 
       - name: Verify package identity
         shell: bash
@@ -52,19 +65,18 @@ jobs:
           test -n "$RC_APK" && test -f "$RC_APK"
           test -n "$RELEASE_APK" && test -f "$RELEASE_APK"
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
-          "$AAPT" dump badging "$RC_APK" | tee /tmp/rc-badging.txt
-          "$AAPT" dump badging "$RELEASE_APK" | tee /tmp/release-badging.txt
-          grep -q "package: name='com.neonote.rc'" /tmp/rc-badging.txt
-          grep -q "versionName='1.0.0-rc.1'" /tmp/rc-badging.txt
-          grep -q "package: name='com.neonote'" /tmp/release-badging.txt
-          grep -q "versionName='1.0.0'" /tmp/release-badging.txt
-          mkdir -p build-artifacts
+          "$AAPT" dump badging "$RC_APK" | tee build-artifacts/rc-badging.txt
+          "$AAPT" dump badging "$RELEASE_APK" | tee build-artifacts/release-badging.txt
+          grep -q "package: name='com.neonote.rc'" build-artifacts/rc-badging.txt
+          grep -q "versionName='1.0.0-rc.1'" build-artifacts/rc-badging.txt
+          grep -q "package: name='com.neonote'" build-artifacts/release-badging.txt
+          grep -q "versionName='1.0.0'" build-artifacts/release-badging.txt
           cp "$RC_APK" build-artifacts/NeoNote-1.0.0-rc.1.apk
           cp "$RELEASE_APK" build-artifacts/NeoNote-1.0.0-unsigned.apk
-          cp /tmp/rc-badging.txt /tmp/release-badging.txt build-artifacts/
           sha256sum build-artifacts/*.apk > build-artifacts/SHA256SUMS.txt
 
       - name: Upload APK artifacts
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: neonote-complete-editor-rc
@@ -72,23 +84,54 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload reports
+      - name: Upload reports and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: neonote-complete-editor-reports
           path: |
+            build-logs/
             app/build/reports/tests/
             app/build/reports/lint-results-*.html
             app/build/reports/lint-results-*.xml
           if-no-files-found: ignore
           retention-days: 14
 
+      - name: Commit actionable failure log
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci
+          {
+            echo "RC build failed for feature head $(git rev-parse HEAD)"
+            echo
+            for file in build-logs/*.log; do
+              test -f "$file" || continue
+              echo "===== $file ====="
+              tail -n 800 "$file"
+              echo
+            done
+          } > ci/last-rc-failure.log
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ci/last-rc-failure.log
+          git commit -m 'ci: record complete editor RC failure' || true
+          git push origin HEAD:${FEATURE_BRANCH}
+
       - name: Remove successful one-shot workflow
         if: success()
         shell: bash
         run: |
           set -euo pipefail
+          rm -f ci/last-rc-failure.log
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add -A
+            git commit -m 'ci: clear previous RC failure diagnostics'
+            git push origin HEAD:${FEATURE_BRANCH}
+          fi
           git fetch origin ${DEFAULT_BRANCH}
           git checkout -B ${DEFAULT_BRANCH} origin/${DEFAULT_BRANCH}
           git rm .github/workflows/build-complete-editor-rc.yml
