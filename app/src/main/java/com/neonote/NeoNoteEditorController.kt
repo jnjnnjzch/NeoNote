@@ -64,13 +64,13 @@ import com.neonote.model.TextSelection
 import com.neonote.model.ViewportState
 import java.util.ArrayDeque
 
-private const val DefaultBoxWidth = 960f
-private const val DefaultBoxHeight = 220f
+private const val DefaultBoxWidth = 320f
+private const val DefaultBoxHeight = 96f
 private const val DefaultViewportWidthPx = 1280f
 private const val MinimumTextBoxWidthDp = 320f
 private const val PreferredTextBoxWidthDp = 520f
 private const val MaximumTextBoxWidthDp = 760f
-private const val MinimumTextBoxHeightDp = 64f
+private const val MinimumTextBoxHeightDp = 96f
 private const val TextBoxScreenMarginDp = 20f
 private const val DefaultImageWidth = 320f
 private const val DefaultImageHeight = 220f
@@ -128,8 +128,9 @@ public class NeoNoteEditorController(
     private var lastInputDiagnosticsUpdateMillis: Long? = null
     private var pendingInputDiagnostics: InputDiagnostics? = null
     private var richContentInteractionRevision by mutableStateOf(0)
-    private var displayDensity: Float = 2f
+    private var displayDensity: Float = 1f
     private var viewportWidthScreenPx: Float = DefaultViewportWidthPx
+    private var hasViewportMetrics: Boolean = false
     private val richContentSessions = mutableMapOf<String, RichContentEditorSession>()
     private val selectedRichContentObjectBlocks = mutableMapOf<String, Int>()
 
@@ -329,11 +330,17 @@ public class NeoNoteEditorController(
             persistenceStatus = "No local document found for $documentId"
             return loaded
         }
-        replaceDocument(document.withMeasuredRichContentBoxHeights(), recordHistory = false)
+        val rebuildStartNanos = System.nanoTime()
+        val measuredDocument = document.withMeasuredRichContentBoxHeights()
+        replaceDocument(measuredDocument, recordHistory = false)
+        val diagnostics = loaded.diagnostics?.copy(
+            cacheRebuildTimeMillis = (System.nanoTime() - rebuildStartNanos) / 1_000_000.0,
+        )
+        val result = loaded.copy(diagnostics = diagnostics)
         lastPersistedRevision = document.revision
-        persistenceDiagnostics = loaded.diagnostics
-        persistenceStatus = "Loaded ${document.id} at revision ${document.revision}" + loaded.diagnostics.toStatusSuffix()
-        return loaded
+        persistenceDiagnostics = diagnostics
+        persistenceStatus = "Loaded ${document.id} at revision ${document.revision}" + diagnostics.toStatusSuffix()
+        return result
     }
 
     public fun replaceDocument(document: NeoNoteDocument, recordHistory: Boolean = true) {
@@ -465,45 +472,51 @@ public class NeoNoteEditorController(
     }
 
     public fun updateViewportMetrics(widthPx: Int, density: Float) {
-    if (widthPx > 0) viewportWidthScreenPx = widthPx.toFloat()
-    if (density.isFinite() && density > 0f) displayDensity = density
-}
-
-public fun focusOrCreateRichContentBox(documentPosition: CanvasPoint) {
-    val existing = currentCanvas.topMostObjectAt(documentPosition) as? RichContentBox
-    if (existing != null) {
-        activateRichContentBox(existing.id)
-        return
+        if (widthPx > 0) viewportWidthScreenPx = widthPx.toFloat()
+        if (density.isFinite() && density > 0f) displayDensity = density
+        hasViewportMetrics = widthPx > 0 && density.isFinite() && density > 0f
     }
-    val zoom = state.viewport.zoomScale.coerceAtLeast(MinZoomScale)
-    val minimumWidth = MinimumTextBoxWidthDp * displayDensity / zoom
-    val preferredWidth = PreferredTextBoxWidthDp * displayDensity / zoom
-    val maximumWidth = MaximumTextBoxWidthDp * displayDensity / zoom
-    val availableWidth = (viewportWidthScreenPx - TextBoxScreenMarginDp * 2f * displayDensity) / zoom
-    val width = preferredWidth.coerceIn(minimumWidth, maximumWidth)
-        .coerceAtMost(availableWidth.coerceAtLeast(minimumWidth))
-    // Canvas commands preserve document coordinates exactly. Viewport fitting belongs
-    // to the screen/UI layer and must never rewrite persisted object positions.
-    val position = documentPosition
-    val minimumHeight = MinimumTextBoxHeightDp * displayDensity / zoom
-    val box = RichContentBox(
-        id = nextRichContentBoxId(),
-        position = position,
-        size = CanvasSize(width, minimumHeight),
-        zIndex = (currentCanvas.objects.maxOfOrNull { it.zIndex } ?: 0) + 1,
-        content = RichContent(),
-        isFocused = true,
-    )
-    val added = canvasEngine.execute(currentCanvas, CanvasCommand.AddObject(box)) as CanvasCommandResult.ObjectAdded
-    state = state.copy(
-        document = state.document.withCanvas(added.canvas.setFocusedRichContentBox(box.id)),
-        focusedRichContentBoxId = box.id,
-        selection = SelectionState(),
-        currentTool = EditorTool.Text,
-    )
-}
 
-public fun insertFloatingImage(
+    public fun focusOrCreateRichContentBox(documentPosition: CanvasPoint) {
+        val existing = currentCanvas.topMostObjectAt(documentPosition) as? RichContentBox
+        if (existing != null) {
+            activateRichContentBox(existing.id)
+            return
+        }
+        val zoom = state.viewport.zoomScale.coerceAtLeast(MinZoomScale)
+        val width = if (hasViewportMetrics) {
+            val minimumWidth = MinimumTextBoxWidthDp * displayDensity / zoom
+            val preferredWidth = PreferredTextBoxWidthDp * displayDensity / zoom
+            val maximumWidth = MaximumTextBoxWidthDp * displayDensity / zoom
+            val availableWidth = (viewportWidthScreenPx - TextBoxScreenMarginDp * 2f * displayDensity) / zoom
+            preferredWidth.coerceIn(minimumWidth, maximumWidth)
+                .coerceAtMost(availableWidth.coerceAtLeast(minimumWidth))
+        } else {
+            DefaultBoxWidth
+        }
+        val height = if (hasViewportMetrics) {
+            MinimumTextBoxHeightDp * displayDensity / zoom
+        } else {
+            DefaultBoxHeight
+        }
+        val box = RichContentBox(
+            id = nextRichContentBoxId(),
+            position = documentPosition,
+            size = CanvasSize(width, height),
+            zIndex = (currentCanvas.objects.maxOfOrNull { it.zIndex } ?: 0) + 1,
+            content = RichContent(),
+            isFocused = true,
+        )
+        val added = canvasEngine.execute(currentCanvas, CanvasCommand.AddObject(box)) as CanvasCommandResult.ObjectAdded
+        state = state.copy(
+            document = state.document.withCanvas(added.canvas.setFocusedRichContentBox(box.id)),
+            focusedRichContentBoxId = box.id,
+            selection = SelectionState(),
+            currentTool = EditorTool.Text,
+        )
+    }
+
+    public fun insertFloatingImage(
         assetId: String,
         position: CanvasPoint,
         size: CanvasSize = CanvasSize(DefaultImageWidth, DefaultImageHeight),
@@ -826,18 +839,18 @@ public fun insertFloatingImage(
     }
 
     public fun updateRichContentBoxMeasuredHeight(boxId: String, measuredHeight: Float) {
-    val targetHeight = measuredHeight.coerceAtLeast(MinimumTextBoxHeightDp * displayDensity)
-    val box = richContentBox(boxId) ?: return
-    if (!box.autoSizeHeight || kotlin.math.abs(box.size.height - targetHeight) < 1f) return
-    val canvas = currentCanvas.updateRichContentBox(boxId) { current ->
-        current.copy(size = current.size.copy(height = targetHeight))
+        val targetHeight = measuredHeight.coerceAtLeast(MinimumTextBoxHeightDp * displayDensity)
+        val box = richContentBox(boxId) ?: return
+        if (!box.autoSizeHeight || kotlin.math.abs(box.size.height - targetHeight) < 1f) return
+        val canvas = currentCanvas.updateRichContentBox(boxId) { current ->
+            current.copy(size = current.size.copy(height = targetHeight))
+        }
+        replaceStateWithoutRecordingHistory {
+            state = state.copy(document = state.document.withCanvas(canvas))
+        }
     }
-    replaceStateWithoutRecordingHistory {
-        state = state.copy(document = state.document.withCanvas(canvas))
-    }
-}
 
-private fun editorSessionFor(boxId: String, box: RichContentBox): RichContentEditorSession =
+    private fun editorSessionFor(boxId: String, box: RichContentBox): RichContentEditorSession =
         richContentSessions.getOrPut(richContentSessionKey(boxId)) {
             RichContentEditorSession(box, engine = richContentEngine)
         }.also { it.focus(box) }
