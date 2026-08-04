@@ -28,12 +28,28 @@ jobs:
           java-version: '17'
       - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
+
+      - name: Prepare diagnostics
+        run: mkdir -p hardening-logs hardening-artifacts && chmod +x gradlew
+
       - name: JVM product contracts
-        run: chmod +x gradlew && ./gradlew --no-daemon testDebugUnitTest
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon testDebugUnitTest 2>&1 | tee hardening-logs/01-unit-tests.log
+
       - name: Release lint
-        run: ./gradlew --no-daemon lintRelease
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon lintRelease 2>&1 | tee hardening-logs/02-lint.log
+
       - name: Build installable hardening APK
-        run: ./gradlew --no-daemon assembleReleaseCandidate
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon assembleReleaseCandidate 2>&1 | tee hardening-logs/03-assemble.log
+
       - name: Verify and collect APK
         shell: bash
         run: |
@@ -41,22 +57,39 @@ jobs:
           APK=$(find app/build/outputs/apk/releaseCandidate -name '*.apk' -type f | head -1)
           test -f "$APK"
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
-          mkdir -p hardening-artifacts
           "$AAPT" dump badging "$APK" > hardening-artifacts/badging.txt
           grep -q "package: name='com.neonote.rc'" hardening-artifacts/badging.txt
           cp "$APK" hardening-artifacts/NeoNote-hardening.apk
           sha256sum hardening-artifacts/NeoNote-hardening.apk > hardening-artifacts/SHA256SUMS.txt
-      - uses: actions/upload-artifact@v4
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: neonote-hardening-apk
           path: hardening-artifacts/
           if-no-files-found: error
           retention-days: 3
+
+      - name: Upload hardening diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: neonote-hardening-diagnostics
+          path: |
+            hardening-logs/
+            app/build/reports/tests/
+            app/build/reports/lint-results-*.html
+            app/build/reports/lint-results-*.xml
+          if-no-files-found: warn
+          retention-days: 3
+
       - name: Create source snapshot
+        if: always()
         run: |
-          rm -rf .git
-          zip -qr neonote-source.zip . -x 'neonote-source.zip' -x 'app/build/**'
+          rm -rf .git app/build
+          zip -qr neonote-source.zip . -x 'neonote-source.zip'
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: neonote-loop-source
           path: neonote-source.zip
