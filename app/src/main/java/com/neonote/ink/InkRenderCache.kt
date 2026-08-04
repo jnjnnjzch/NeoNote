@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import com.neonote.engine.InkStrokeWidthMapper
+import com.neonote.model.InkBrush
 import com.neonote.model.InkPoint
 import com.neonote.model.InkStroke
 import kotlin.math.ceil
@@ -18,10 +19,8 @@ import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 
-/** Identifies a document-space ink cache tile. */
 public data class TileKey(val tileX: Int, val tileY: Int)
 
-/** Rasterized committed ink for a single document-space tile. */
 public data class InkRenderTile(
     val key: TileKey,
     val originX: Float,
@@ -29,7 +28,6 @@ public data class InkRenderTile(
     val imageBitmap: ImageBitmap,
 )
 
-/** Document-space bounds for an [InkStroke]. */
 public data class InkStrokeBounds(
     val left: Float,
     val top: Float,
@@ -37,43 +35,28 @@ public data class InkStrokeBounds(
     val bottom: Float,
 )
 
-/**
- * Document-space tile bitmap cache for committed ink strokes.
- *
- * The vector [InkStroke] list remains the source of truth. This cache only keeps
- * rasterized copies of committed strokes in fixed-size document tiles so active
- * in-progress strokes can be drawn without replaying the complete stroke history
- * on every frame. Because tiles live in document coordinates, far-away strokes
- * are not clipped by the current layer size and continue to align with document
- * content after pan/zoom transforms.
- */
+/** Document-space tile cache. Vector strokes remain the source of truth. */
 public class InkRenderCache(
     private val strokeRenderer: InkStrokeBitmapRenderer = AndroidInkStrokeBitmapRenderer(),
     public val tileSize: Float = DEFAULT_TILE_SIZE,
 ) {
-    private val tileBitmaps: MutableMap<TileKey, Bitmap> = linkedMapOf()
+    private val tileBitmaps = linkedMapOf<TileKey, Bitmap>()
     private var cachedStrokes: List<InkStroke> = emptyList()
 
     public var tiles: List<InkRenderTile> by mutableStateOf(emptyList())
         private set
-
-    /** Monotonic counter that Compose can observe to redraw reused bitmap memory. */
     public var version: Int by mutableIntStateOf(0)
         private set
 
     public fun sync(strokes: List<InkStroke>): InkRenderCacheUpdate {
-        val update = planInkRenderCacheUpdate(
-            cachedStrokes = cachedStrokes,
-            nextStrokes = strokes,
-        )
-
+        val update = planInkRenderCacheUpdate(cachedStrokes, strokes)
         when (update) {
             is InkRenderCacheUpdate.Appended -> {
                 renderStrokes(update.strokes)
                 cachedStrokes = strokes.toList()
                 publish()
             }
-            is InkRenderCacheUpdate.Rebuilt -> {
+            InkRenderCacheUpdate.Rebuilt -> {
                 clearTiles()
                 renderStrokes(strokes)
                 cachedStrokes = strokes.toList()
@@ -86,7 +69,6 @@ public class InkRenderCache(
             }
             InkRenderCacheUpdate.Unchanged -> Unit
         }
-
         return update
     }
 
@@ -101,41 +83,34 @@ public class InkRenderCache(
         strokes.forEach { stroke ->
             intersectingTileKeys(stroke, tileSize).forEach { key ->
                 val bitmap = tileBitmaps.getOrPut(key) { createTileBitmap() }
-                strokeRenderer.render(
-                    bitmap = bitmap,
-                    strokes = listOf(stroke.toTileLocal(key, tileSize)),
-                )
+                strokeRenderer.render(bitmap, listOf(stroke.toTileLocal(key, tileSize)))
             }
         }
     }
 
     private fun createTileBitmap(): Bitmap =
-        Bitmap.createBitmap(tileSize.toInt(), tileSize.toInt(), Bitmap.Config.ARGB_8888).also { bitmap ->
-            bitmap.eraseColor(AndroidColor.TRANSPARENT)
+        Bitmap.createBitmap(tileSize.toInt(), tileSize.toInt(), Bitmap.Config.ARGB_8888).also {
+            it.eraseColor(AndroidColor.TRANSPARENT)
         }
 
     private fun clearTiles() {
-        tileBitmaps.values.forEach { bitmap -> bitmap.recycle() }
+        tileBitmaps.values.forEach(Bitmap::recycle)
         tileBitmaps.clear()
     }
 
     private fun publish() {
         tiles = tileBitmaps
             .toSortedMap(compareBy<TileKey> { it.tileY }.thenBy { it.tileX })
-            .map { (key, bitmap) ->
-                InkRenderTile(
-                    key = key,
-                    originX = key.originX(tileSize),
-                    originY = key.originY(tileSize),
-                    imageBitmap = bitmap.asImageBitmap(),
-                )
-            }
+            .map { (key, bitmap) -> InkRenderTile(
+                key = key,
+                originX = key.originX(tileSize),
+                originY = key.originY(tileSize),
+                imageBitmap = bitmap.asImageBitmap(),
+            ) }
         version++
     }
 
-    public companion object {
-        public const val DEFAULT_TILE_SIZE: Float = 1024f
-    }
+    public companion object { public const val DEFAULT_TILE_SIZE: Float = 1024f }
 }
 
 public sealed interface InkRenderCacheUpdate {
@@ -149,9 +124,7 @@ public fun planInkRenderCacheUpdate(
     cachedStrokes: List<InkStroke>,
     nextStrokes: List<InkStroke>,
 ): InkRenderCacheUpdate {
-    if (nextStrokes.isEmpty()) {
-        return if (cachedStrokes.isEmpty()) InkRenderCacheUpdate.Unchanged else InkRenderCacheUpdate.Cleared
-    }
+    if (nextStrokes.isEmpty()) return if (cachedStrokes.isEmpty()) InkRenderCacheUpdate.Unchanged else InkRenderCacheUpdate.Cleared
     if (cachedStrokes.isEmpty()) return InkRenderCacheUpdate.Rebuilt
     if (cachedStrokes == nextStrokes) return InkRenderCacheUpdate.Unchanged
     if (cachedStrokes.size < nextStrokes.size && nextStrokes.subList(0, cachedStrokes.size) == cachedStrokes) {
@@ -161,10 +134,9 @@ public fun planInkRenderCacheUpdate(
 }
 
 public fun tileKeyForPoint(x: Float, y: Float, tileSize: Float = InkRenderCache.DEFAULT_TILE_SIZE): TileKey =
-    TileKey(tileX = floor(x / tileSize).toInt(), tileY = floor(y / tileSize).toInt())
+    TileKey(floor(x / tileSize).toInt(), floor(y / tileSize).toInt())
 
 public fun TileKey.originX(tileSize: Float = InkRenderCache.DEFAULT_TILE_SIZE): Float = tileX * tileSize
-
 public fun TileKey.originY(tileSize: Float = InkRenderCache.DEFAULT_TILE_SIZE): Float = tileY * tileSize
 
 public fun InkStroke.bounds(): InkStrokeBounds? {
@@ -180,12 +152,7 @@ public fun InkStroke.bounds(): InkStrokeBounds? {
         bottom = max(bottom, point.y)
     }
     val radius = maxStrokeRadius()
-    return InkStrokeBounds(
-        left = left - radius,
-        top = top - radius,
-        right = right + radius,
-        bottom = bottom + radius,
-    )
+    return InkStrokeBounds(left - radius, top - radius, right + radius, bottom + radius)
 }
 
 public fun intersectingTileKeys(
@@ -193,42 +160,28 @@ public fun intersectingTileKeys(
     tileSize: Float = InkRenderCache.DEFAULT_TILE_SIZE,
 ): Set<TileKey> {
     val bounds = stroke.bounds() ?: return emptySet()
-    val minTileX = floor(bounds.left / tileSize).toInt()
-    val maxTileX = floor(bounds.right / tileSize).toInt()
-    val minTileY = floor(bounds.top / tileSize).toInt()
-    val maxTileY = floor(bounds.bottom / tileSize).toInt()
+    val minX = floor(bounds.left / tileSize).toInt()
+    val maxX = floor(bounds.right / tileSize).toInt()
+    val minY = floor(bounds.top / tileSize).toInt()
+    val maxY = floor(bounds.bottom / tileSize).toInt()
     return buildSet {
-        for (tileY in minTileY..maxTileY) {
-            for (tileX in minTileX..maxTileX) {
-                add(TileKey(tileX, tileY))
-            }
-        }
+        for (tileY in minY..maxY) for (tileX in minX..maxX) add(TileKey(tileX, tileY))
     }
 }
 
 public fun InkStroke.toTileLocal(
     key: TileKey,
     tileSize: Float = InkRenderCache.DEFAULT_TILE_SIZE,
-): InkStroke {
-    val tileOriginX = key.originX(tileSize)
-    val tileOriginY = key.originY(tileSize)
-    return copy(
-        points = points.map { point ->
-            InkPoint(
-                x = point.x - tileOriginX,
-                y = point.y - tileOriginY,
-                pressure = point.pressure,
-                rawPressure = point.rawPressure,
-            )
-        },
-    )
-}
+): InkStroke = copy(points = points.map { point ->
+    point.copy(x = point.x - key.originX(tileSize), y = point.y - key.originY(tileSize))
+})
 
 private fun InkStroke.maxStrokeRadius(): Float {
-    if (points.size < 2) return 0f
+    val normalized = style.normalized()
+    if (points.size < 2) return ceil(normalized.baseWidth / 2f)
     var maxWidth = 0f
     points.zipWithNext { start, end ->
-        maxWidth = max(maxWidth, InkStrokeWidthMapper.widthForSegment(start, end))
+        maxWidth = max(maxWidth, InkStrokeWidthMapper.widthForSegment(start, end, normalized))
     }
     return ceil(maxWidth / 2f)
 }
@@ -237,22 +190,40 @@ public interface InkStrokeBitmapRenderer {
     public fun render(bitmap: Bitmap, strokes: List<InkStroke>)
 }
 
-public class AndroidInkStrokeBitmapRenderer(
-    private val color: Int = AndroidColor.rgb(0x0F, 0x17, 0x2A),
-) : InkStrokeBitmapRenderer {
+/** Android bitmap renderer matching the live Compose renderer's style contract. */
+public class AndroidInkStrokeBitmapRenderer : InkStrokeBitmapRenderer {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
-        this.color = this@AndroidInkStrokeBitmapRenderer.color
     }
 
     override fun render(bitmap: Bitmap, strokes: List<InkStroke>) {
         val canvas = Canvas(bitmap)
         strokes.forEach { stroke ->
-            stroke.points.zipWithNext { start, end ->
-                paint.strokeWidth = InkStrokeWidthMapper.widthForSegment(start, end)
-                canvas.drawLine(start.x, start.y, end.x, end.y, paint)
+            val style = stroke.style.normalized()
+            paint.color = style.colorArgb
+            val sourceAlpha = AndroidColor.alpha(style.colorArgb)
+            val brushOpacity = when (style.brush) {
+                InkBrush.Pen -> style.opacity
+                InkBrush.Highlighter -> style.opacity.coerceAtMost(0.45f)
+            }
+            paint.alpha = (sourceAlpha * brushOpacity).toInt().coerceIn(0, 255)
+            if (stroke.points.size == 1) {
+                val point = stroke.points.single()
+                paint.style = Paint.Style.FILL
+                canvas.drawCircle(
+                    point.x,
+                    point.y,
+                    InkStrokeWidthMapper.widthForPressure(point.pressure, style) / 2f,
+                    paint,
+                )
+                paint.style = Paint.Style.STROKE
+            } else {
+                stroke.points.zipWithNext { start, end ->
+                    paint.strokeWidth = InkStrokeWidthMapper.widthForSegment(start, end, style)
+                    canvas.drawLine(start.x, start.y, end.x, end.y, paint)
+                }
             }
         }
     }
