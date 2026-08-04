@@ -1,13 +1,6 @@
 package com.neonote.engine
 
-import com.neonote.model.BlockImage
-import com.neonote.model.BlockNode
-import com.neonote.model.FloatingImage
-import com.neonote.model.InlineImage
 import com.neonote.model.NeoNoteDocument
-import com.neonote.model.ParagraphNode
-import com.neonote.model.RichContent
-import com.neonote.model.TableNode
 import java.io.File
 import kotlinx.serialization.json.Json
 
@@ -56,25 +49,3 @@ public class FileAssetGarbageCollector(
     }
 }
 
-public fun NeoNoteDocument.referencedAssetIds(): Set<String> = buildSet {
-    pages.forEach { page ->
-        page.canvas.objects.forEach { objectValue ->
-            when (objectValue) {
-                is FloatingImage -> add(objectValue.assetId)
-                else -> Unit
-            }
-            if (objectValue is com.neonote.model.RichContentBox) addAll(objectValue.content.referencedAssetIds())
-        }
-    }
-}
-
-private fun RichContent.referencedAssetIds(): Set<String> = buildSet {
-    blocks.forEach { block ->
-        when (block) {
-            is ParagraphNode -> block.inlines.filterIsInstance<InlineImage>().forEach { add(it.assetId) }
-            is BlockImage -> add(block.assetId)
-            is TableNode -> block.rows.flatten().forEach { addAll(it.content.referencedAssetIds()) }
-            else -> Unit
-        }
-    }
-}
