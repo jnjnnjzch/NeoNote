@@ -37,8 +37,14 @@ internal fun RichContentEditor(
     ) {
         if (box.content.blocks.isEmpty()) {
             RichParagraphEditor(
-                box, 0, ParagraphNode(), active = true, selectionMode, selected, controller,
-                Modifier.fillMaxWidth(),
+                box = box,
+                blockIndex = 0,
+                paragraph = ParagraphNode(),
+                active = true,
+                selectionMode = selectionMode,
+                selected = selected,
+                controller = controller,
+                modifier = Modifier.fillMaxWidth(),
             )
             return@Column
         }
@@ -57,12 +63,23 @@ internal fun RichContentEditor(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 is BlockFormula -> FormulaBlockEditor(
-                    box, blockIndex, block,
+                    box = box,
+                    blockIndex = blockIndex,
+                    formula = block,
                     active = activeTarget == ActiveRichContentTarget.FormulaBlock(blockIndex),
-                    selectionMode, selected, controller, Modifier.fillMaxWidth(),
+                    selectionMode = selectionMode,
+                    selected = selected,
+                    controller = controller,
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 is TableNode -> TableBlockEditor(
-                    box, blockIndex, block, selectionMode, selected, controller, Modifier.fillMaxWidth(),
+                    box = box,
+                    blockIndex = blockIndex,
+                    table = block,
+                    selectionMode = selectionMode,
+                    selected = selected,
+                    controller = controller,
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 is BlockImage -> ImageBlockView(
                     box = box,
