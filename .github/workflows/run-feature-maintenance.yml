@@ -22,196 +22,157 @@ jobs:
           ref: feature/complete-editor-rc
           fetch-depth: 0
 
-      - name: Apply contextual toolbar and auto-size patch
+      - name: Apply guarded source transforms
         shell: bash
         run: |
           set -euo pipefail
-          cat > /tmp/editor-sizing.patch <<'PATCH'
-          diff --git a/app/src/main/java/com/neonote/NeoNoteEditorController.kt b/app/src/main/java/com/neonote/NeoNoteEditorController.kt
-          --- a/app/src/main/java/com/neonote/NeoNoteEditorController.kt
-          +++ b/app/src/main/java/com/neonote/NeoNoteEditorController.kt
-          @@
-          -private const val DefaultBoxWidth = 360f
-          -private const val DefaultBoxHeight = 120f
-          +private const val DefaultBoxWidth = 960f
-          +private const val DefaultBoxHeight = 220f
-          +private const val DefaultViewportWidthPx = 1280f
-          +private const val MinimumTextBoxWidthDp = 320f
-          +private const val PreferredTextBoxWidthDp = 520f
-          +private const val MaximumTextBoxWidthDp = 760f
-          +private const val MinimumTextBoxHeightDp = 64f
-          +private const val TextBoxScreenMarginDp = 20f
-          @@
-               private var pendingInputDiagnostics: InputDiagnostics? = null
-               private var richContentInteractionRevision by mutableStateOf(0)
-          +    private var displayDensity: Float = 2f
-          +    private var viewportWidthScreenPx: Float = DefaultViewportWidthPx
-               private val richContentSessions = mutableMapOf<String, RichContentEditorSession>()
-          @@
-          -    public fun focusOrCreateRichContentBox(documentPosition: CanvasPoint) {
-          +    public fun updateViewportMetrics(widthPx: Int, density: Float) {
-          +        if (widthPx > 0) viewportWidthScreenPx = widthPx.toFloat()
-          +        if (density.isFinite() && density > 0f) displayDensity = density
-          +    }
-          +
-          +    public fun focusOrCreateRichContentBox(documentPosition: CanvasPoint) {
-                   val existing = currentCanvas.topMostObjectAt(documentPosition) as? RichContentBox
-                   if (existing != null) {
-                       activateRichContentBox(existing.id)
-                       return
-                   }
-                   if (state.currentTool != EditorTool.Text) return
-          +        val zoom = state.viewport.zoomScale.coerceAtLeast(MinZoomScale)
-          +        val minimumWidth = MinimumTextBoxWidthDp * displayDensity / zoom
-          +        val preferredWidth = PreferredTextBoxWidthDp * displayDensity / zoom
-          +        val maximumWidth = MaximumTextBoxWidthDp * displayDensity / zoom
-          +        val availableWidth = (viewportWidthScreenPx - TextBoxScreenMarginDp * 2f * displayDensity) / zoom
-          +        val width = preferredWidth.coerceIn(minimumWidth, maximumWidth)
-          +            .coerceAtMost(availableWidth.coerceAtLeast(minimumWidth))
-          +        val visibleLeft = -state.viewport.panOffsetX / zoom
-          +        val visibleRight = (viewportWidthScreenPx - state.viewport.panOffsetX) / zoom
-          +        val margin = TextBoxScreenMarginDp * displayDensity / zoom
-          +        val maximumLeft = (visibleRight - width - margin).coerceAtLeast(visibleLeft + margin)
-          +        val position = documentPosition.copy(
-          +            x = documentPosition.x.coerceIn(visibleLeft + margin, maximumLeft),
-          +        )
-          +        val minimumHeight = MinimumTextBoxHeightDp * displayDensity / zoom
-                   val box = RichContentBox(
-                       id = nextRichContentBoxId(),
-          -            position = documentPosition,
-          -            size = CanvasSize(DefaultBoxWidth, DefaultBoxHeight),
-          +            position = position,
-          +            size = CanvasSize(width, maxOf(DefaultBoxHeight / zoom, minimumHeight)),
-                       zIndex = (currentCanvas.objects.maxOfOrNull { it.zIndex } ?: 0) + 1,
-          @@
-                   val canvas = currentCanvas.updateRichContentBox(boxId) { box ->
-                       val result = edit(editorSessionFor(boxId, box))
-          -            val measured = if (result.box.autoSizeHeight) richContentMeasurer.resizeBoxToMeasuredContent(result.box) else result.box
-          +            val measured = if (result.box.autoSizeHeight) {
-          +                val predicted = richContentMeasurer.resizeBoxToMeasuredContent(result.box)
-          +                predicted.copy(size = predicted.size.copy(
-          +                    height = maxOf(result.box.size.height, predicted.size.height),
-          +                ))
-          +            } else result.box
-                       updatedBox = measured
-          @@
-               }
-          
-          +    public fun updateRichContentBoxMeasuredHeight(boxId: String, measuredHeight: Float) {
-          +        val minimumHeight = MinimumTextBoxHeightDp * displayDensity
-          +        val targetHeight = measuredHeight.coerceAtLeast(minimumHeight)
-          +        val box = richContentBox(boxId) ?: return
-          +        if (!box.autoSizeHeight || kotlin.math.abs(box.size.height - targetHeight) < 1f) return
-          +        val canvas = currentCanvas.updateRichContentBox(boxId) { current ->
-          +            current.copy(size = current.size.copy(height = targetHeight))
-          +        }
-          +        replaceStateWithoutRecordingHistory {
-          +            state = state.copy(document = state.document.withCanvas(canvas))
-          +        }
-          +    }
-          +
-               private fun editorSessionFor(boxId: String, box: RichContentBox): RichContentEditorSession =
-          @@
-               private fun NeoNoteDocument.withMeasuredRichContentBoxHeights(): NeoNoteDocument = copy(pages = pages.map { page ->
-                   page.copy(canvas = page.canvas.copy(objects = page.canvas.objects.map { objectValue ->
-          -            if (objectValue is RichContentBox && objectValue.autoSizeHeight) richContentMeasurer.resizeBoxToMeasuredContent(objectValue)
-          -            else objectValue
-          +            if (objectValue is RichContentBox && objectValue.autoSizeHeight) {
-          +                val measured = richContentMeasurer.resizeBoxToMeasuredContent(objectValue)
-          +                measured.copy(size = measured.size.copy(
-          +                    height = maxOf(objectValue.size.height, measured.size.height),
-          +                ))
-          +            } else objectValue
-                   }))
-          diff --git a/app/src/main/java/com/neonote/RichContentEditor.kt b/app/src/main/java/com/neonote/RichContentEditor.kt
-          --- a/app/src/main/java/com/neonote/RichContentEditor.kt
-          +++ b/app/src/main/java/com/neonote/RichContentEditor.kt
-          @@
-          -import androidx.compose.foundation.layout.fillMaxSize
-           import androidx.compose.foundation.layout.fillMaxWidth
-           import androidx.compose.foundation.layout.padding
-          +import androidx.compose.foundation.layout.wrapContentHeight
-          @@
-          -        modifier = modifier.fillMaxSize().padding(
-          +        modifier = modifier.fillMaxWidth().wrapContentHeight().padding(
-          @@
-          -                modifier = Modifier.fillMaxSize(),
-          +                modifier = Modifier.fillMaxWidth().wrapContentHeight(),
-          diff --git a/app/src/main/java/com/neonote/UnifiedRichTextEditor.kt b/app/src/main/java/com/neonote/UnifiedRichTextEditor.kt
-          --- a/app/src/main/java/com/neonote/UnifiedRichTextEditor.kt
-          +++ b/app/src/main/java/com/neonote/UnifiedRichTextEditor.kt
-          @@
-           import android.content.ClipboardManager
-           import androidx.compose.foundation.layout.Box
-          -import androidx.compose.foundation.layout.fillMaxSize
-          +import androidx.compose.foundation.layout.defaultMinSize
-          +import androidx.compose.foundation.layout.fillMaxWidth
-          @@
-           import androidx.compose.ui.unit.sp
-          +import androidx.compose.ui.unit.dp
-          @@
-                   modifier = modifier
-          -            .fillMaxSize()
-          +            .fillMaxWidth()
-          +            .defaultMinSize(minHeight = 48.dp)
-                       .focusRequester(requester)
-          @@
-          -            Box(Modifier.fillMaxSize()) {
-          +            Box(Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)) {
-          diff --git a/app/src/main/java/com/neonote/InfiniteCanvasViewport.kt b/app/src/main/java/com/neonote/InfiniteCanvasViewport.kt
-          --- a/app/src/main/java/com/neonote/InfiniteCanvasViewport.kt
-          +++ b/app/src/main/java/com/neonote/InfiniteCanvasViewport.kt
-          @@
-           import androidx.compose.foundation.layout.Box
-           import androidx.compose.foundation.layout.fillMaxSize
-          +import androidx.compose.foundation.layout.fillMaxWidth
-          +import androidx.compose.foundation.layout.heightIn
-           import androidx.compose.foundation.layout.padding
-          +import androidx.compose.foundation.layout.widthIn
-          @@
-           import androidx.compose.ui.graphics.TransformOrigin
-           import androidx.compose.ui.graphics.graphicsLayer
-          +import androidx.compose.ui.layout.onSizeChanged
-          +import androidx.compose.ui.platform.LocalDensity
-          @@
-               val inputAdapter = remember { ComposeInputAdapter() }
-               val platformSnapshotStore = remember { PlatformSnapshotStore() }
-          +    val density = LocalDensity.current
-          @@
-                   modifier = modifier
-                       .background(Color(0xFFF9F8FC))
-          +            .onSizeChanged { controller.updateViewportMetrics(it.width, density.density) }
-                       .pointerInteropFilter { motionEvent ->
-          @@
-          -        if (controller.currentCanvas.objects.isEmpty() && controller.currentCanvas.inkLayer.strokes.isEmpty()) {
-          +        val focusedBoxId = controller.state.focusedRichContentBoxId
-          +        if (controller.state.currentTool == EditorTool.Text && focusedBoxId != null) {
-          +            RichContentToolbar(
-          +                boxId = focusedBoxId,
-          +                controller = controller,
-          +                modifier = Modifier
-          +                    .align(Alignment.TopCenter)
-          +                    .padding(horizontal = 12.dp, vertical = 10.dp)
-          +                    .fillMaxWidth()
-          +                    .widthIn(max = 920.dp)
-          +                    .heightIn(min = 50.dp),
-          +            )
-          +        }
-          +
-          +        if (controller.currentCanvas.objects.isEmpty() && controller.currentCanvas.inkLayer.strokes.isEmpty()) {
-          diff --git a/app/src/main/java/com/neonote/RichContentToolbar.kt b/app/src/main/java/com/neonote/RichContentToolbar.kt
-          --- a/app/src/main/java/com/neonote/RichContentToolbar.kt
-          +++ b/app/src/main/java/com/neonote/RichContentToolbar.kt
-          @@
-           import androidx.compose.foundation.layout.Box
-          +import androidx.compose.foundation.layout.fillMaxWidth
-           import androidx.compose.foundation.layout.Row
-          @@
-          -        modifier = modifier.focusProperties { canFocus = false },
-          +        modifier = modifier.fillMaxWidth().focusProperties { canFocus = false },
-          PATCH
-          git apply --check /tmp/editor-sizing.patch
-          git apply /tmp/editor-sizing.patch
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          def once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected 1 match, found {count}")
+              return text.replace(old, new)
+
+          p = Path('app/src/main/java/com/neonote/NeoNoteEditorController.kt')
+          text = p.read_text()
+          text = once(text,
+              'private const val DefaultBoxWidth = 360f\nprivate const val DefaultBoxHeight = 120f',
+              'private const val DefaultBoxWidth = 960f\nprivate const val DefaultBoxHeight = 220f\nprivate const val DefaultViewportWidthPx = 1280f\nprivate const val MinimumTextBoxWidthDp = 320f\nprivate const val PreferredTextBoxWidthDp = 520f\nprivate const val MaximumTextBoxWidthDp = 760f\nprivate const val MinimumTextBoxHeightDp = 64f\nprivate const val TextBoxScreenMarginDp = 20f',
+              'controller constants')
+          text = once(text,
+              '    private var richContentInteractionRevision by mutableStateOf(0)\n',
+              '    private var richContentInteractionRevision by mutableStateOf(0)\n    private var displayDensity: Float = 2f\n    private var viewportWidthScreenPx: Float = DefaultViewportWidthPx\n',
+              'controller display metrics fields')
+
+          pattern = re.compile(r'    public fun focusOrCreateRichContentBox\(documentPosition: CanvasPoint\) \{.*?\n    \}\n\n    public fun insertFloatingImage', re.S)
+          replacement = '''    public fun updateViewportMetrics(widthPx: Int, density: Float) {
+              if (widthPx > 0) viewportWidthScreenPx = widthPx.toFloat()
+              if (density.isFinite() && density > 0f) displayDensity = density
+          }
+
+          public fun focusOrCreateRichContentBox(documentPosition: CanvasPoint) {
+              val existing = currentCanvas.topMostObjectAt(documentPosition) as? RichContentBox
+              if (existing != null) {
+                  activateRichContentBox(existing.id)
+                  return
+              }
+              if (state.currentTool != EditorTool.Text) return
+              val zoom = state.viewport.zoomScale.coerceAtLeast(MinZoomScale)
+              val minimumWidth = MinimumTextBoxWidthDp * displayDensity / zoom
+              val preferredWidth = PreferredTextBoxWidthDp * displayDensity / zoom
+              val maximumWidth = MaximumTextBoxWidthDp * displayDensity / zoom
+              val availableWidth = (viewportWidthScreenPx - TextBoxScreenMarginDp * 2f * displayDensity) / zoom
+              val width = preferredWidth.coerceIn(minimumWidth, maximumWidth)
+                  .coerceAtMost(availableWidth.coerceAtLeast(minimumWidth))
+              val visibleLeft = -state.viewport.panOffsetX / zoom
+              val visibleRight = (viewportWidthScreenPx - state.viewport.panOffsetX) / zoom
+              val margin = TextBoxScreenMarginDp * displayDensity / zoom
+              val maximumLeft = (visibleRight - width - margin).coerceAtLeast(visibleLeft + margin)
+              val position = documentPosition.copy(
+                  x = documentPosition.x.coerceIn(visibleLeft + margin, maximumLeft),
+              )
+              val minimumHeight = MinimumTextBoxHeightDp * displayDensity / zoom
+              val box = RichContentBox(
+                  id = nextRichContentBoxId(),
+                  position = position,
+                  size = CanvasSize(width, maxOf(DefaultBoxHeight / zoom, minimumHeight)),
+                  zIndex = (currentCanvas.objects.maxOfOrNull { it.zIndex } ?: 0) + 1,
+                  content = RichContent(),
+                  isFocused = true,
+              )
+              val added = canvasEngine.execute(currentCanvas, CanvasCommand.AddObject(box)) as CanvasCommandResult.ObjectAdded
+              state = state.copy(
+                  document = state.document.withCanvas(added.canvas.setFocusedRichContentBox(box.id)),
+                  focusedRichContentBoxId = box.id,
+                  selection = SelectionState(),
+                  currentTool = EditorTool.Text,
+              )
+          }
+
+          public fun insertFloatingImage'''
+          text, count = pattern.subn(replacement, text)
+          if count != 1:
+              raise SystemExit(f'focus/create function: expected 1 match, found {count}')
+
+          text = once(text,
+              '            val measured = if (result.box.autoSizeHeight) richContentMeasurer.resizeBoxToMeasuredContent(result.box) else result.box\n',
+              '            val measured = if (result.box.autoSizeHeight) {\n                val predicted = richContentMeasurer.resizeBoxToMeasuredContent(result.box)\n                predicted.copy(size = predicted.size.copy(\n                    height = maxOf(result.box.size.height, predicted.size.height),\n                ))\n            } else result.box\n',
+              'editBox predicted size')
+          text = once(text,
+              '    private fun editorSessionFor(boxId: String, box: RichContentBox): RichContentEditorSession =\n',
+              '''    public fun updateRichContentBoxMeasuredHeight(boxId: String, measuredHeight: Float) {
+              val targetHeight = measuredHeight.coerceAtLeast(MinimumTextBoxHeightDp * displayDensity)
+              val box = richContentBox(boxId) ?: return
+              if (!box.autoSizeHeight || kotlin.math.abs(box.size.height - targetHeight) < 1f) return
+              val canvas = currentCanvas.updateRichContentBox(boxId) { current ->
+                  current.copy(size = current.size.copy(height = targetHeight))
+              }
+              replaceStateWithoutRecordingHistory {
+                  state = state.copy(document = state.document.withCanvas(canvas))
+              }
+          }
+
+          private fun editorSessionFor(boxId: String, box: RichContentBox): RichContentEditorSession =
+          ''',
+              'measured height method')
+          text = once(text,
+              '            if (objectValue is RichContentBox && objectValue.autoSizeHeight) richContentMeasurer.resizeBoxToMeasuredContent(objectValue)\n            else objectValue\n',
+              '            if (objectValue is RichContentBox && objectValue.autoSizeHeight) {\n                val measured = richContentMeasurer.resizeBoxToMeasuredContent(objectValue)\n                measured.copy(size = measured.size.copy(\n                    height = maxOf(objectValue.size.height, measured.size.height),\n                ))\n            } else objectValue\n',
+              'load measured height')
+          p.write_text(text)
+
+          p = Path('app/src/main/java/com/neonote/RichContentEditor.kt')
+          text = p.read_text()
+          text = once(text, 'import androidx.compose.foundation.layout.fillMaxSize\n', 'import androidx.compose.foundation.layout.wrapContentHeight\n', 'editor import')
+          text = once(text, 'modifier = modifier.fillMaxSize().padding(', 'modifier = modifier.fillMaxWidth().wrapContentHeight().padding(', 'editor column')
+          text = once(text, 'modifier = Modifier.fillMaxSize(),', 'modifier = Modifier.fillMaxWidth().wrapContentHeight(),', 'unified editor modifier')
+          p.write_text(text)
+
+          p = Path('app/src/main/java/com/neonote/UnifiedRichTextEditor.kt')
+          text = p.read_text()
+          text = once(text, 'import androidx.compose.foundation.layout.fillMaxSize\n', 'import androidx.compose.foundation.layout.defaultMinSize\nimport androidx.compose.foundation.layout.fillMaxWidth\n', 'unified imports')
+          text = once(text, 'import androidx.compose.ui.unit.sp\n', 'import androidx.compose.ui.unit.dp\nimport androidx.compose.ui.unit.sp\n', 'unified dp import')
+          text = once(text, '            .fillMaxSize()\n            .focusRequester(requester)', '            .fillMaxWidth()\n            .defaultMinSize(minHeight = 48.dp)\n            .focusRequester(requester)', 'unified field size')
+          text = once(text, '            Box(Modifier.fillMaxSize()) {', '            Box(Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)) {', 'unified decoration size')
+          p.write_text(text)
+
+          p = Path('app/src/main/java/com/neonote/InfiniteCanvasViewport.kt')
+          text = p.read_text()
+          text = once(text, 'import androidx.compose.foundation.layout.fillMaxSize\n', 'import androidx.compose.foundation.layout.fillMaxSize\nimport androidx.compose.foundation.layout.fillMaxWidth\nimport androidx.compose.foundation.layout.heightIn\n', 'viewport layout imports')
+          text = once(text, 'import androidx.compose.foundation.layout.padding\n', 'import androidx.compose.foundation.layout.padding\nimport androidx.compose.foundation.layout.widthIn\n', 'viewport width import')
+          text = once(text, 'import androidx.compose.ui.graphics.graphicsLayer\n', 'import androidx.compose.ui.graphics.graphicsLayer\nimport androidx.compose.ui.layout.onSizeChanged\nimport androidx.compose.ui.platform.LocalDensity\n', 'viewport density imports')
+          text = once(text, '    val platformSnapshotStore = remember { PlatformSnapshotStore() }\n', '    val platformSnapshotStore = remember { PlatformSnapshotStore() }\n    val density = LocalDensity.current\n', 'viewport density')
+          text = once(text, '        modifier = modifier\n            .background(Color(0xFFF9F8FC))\n', '        modifier = modifier\n            .background(Color(0xFFF9F8FC))\n            .onSizeChanged { controller.updateViewportMetrics(it.width, density.density) }\n', 'viewport size report')
+          text = once(text,
+              '        if (controller.currentCanvas.objects.isEmpty() && controller.currentCanvas.inkLayer.strokes.isEmpty()) {\n',
+              '''        val focusedBoxId = controller.state.focusedRichContentBoxId
+              if (controller.state.currentTool == EditorTool.Text && focusedBoxId != null) {
+                  RichContentToolbar(
+                      boxId = focusedBoxId,
+                      controller = controller,
+                      modifier = Modifier
+                          .align(Alignment.TopCenter)
+                          .padding(horizontal = 12.dp, vertical = 10.dp)
+                          .fillMaxWidth()
+                          .widthIn(max = 920.dp)
+                          .heightIn(min = 50.dp),
+                  )
+              }
+
+              if (controller.currentCanvas.objects.isEmpty() && controller.currentCanvas.inkLayer.strokes.isEmpty()) {
+          ''',
+              'screen-space toolbar')
+          p.write_text(text)
+
+          p = Path('app/src/main/java/com/neonote/RichContentToolbar.kt')
+          text = p.read_text()
+          text = once(text, 'import androidx.compose.foundation.layout.Box\n', 'import androidx.compose.foundation.layout.Box\nimport androidx.compose.foundation.layout.fillMaxWidth\n', 'toolbar import')
+          text = once(text, '        modifier = modifier.focusProperties { canFocus = false },', '        modifier = modifier.fillMaxWidth().focusProperties { canFocus = false },', 'toolbar width')
+          p.write_text(text)
+          PY
 
           cat > app/src/main/java/com/neonote/RichContentBoxView.kt <<'KOTLIN'
           package com.neonote
@@ -258,7 +219,6 @@ jobs:
               LaunchedEffect(selectionMode, selected) {
                   if (selectionMode || selected) focusManager.clearFocus()
               }
-
               val borderColor = when {
                   selected -> Color(0xFF2563EB)
                   box.isFocused -> Color(0xFF7C3AED)
@@ -276,8 +236,8 @@ jobs:
                   }
               } else Modifier
               val sizingModifier = if (box.autoSizeHeight) {
-                  Modifier.defaultMinSize(minHeight = 64.dp).wrapContentHeight().onSizeChanged { measured ->
-                      controller.updateRichContentBoxMeasuredHeight(box.id, measured.height.toFloat())
+                  Modifier.defaultMinSize(minHeight = 64.dp).wrapContentHeight().onSizeChanged {
+                      controller.updateRichContentBoxMeasuredHeight(box.id, it.height.toFloat())
                   }
               } else Modifier.height(persistedHeight)
 
@@ -351,7 +311,7 @@ jobs:
           }
           KOTLIN
 
-      - name: Commit feature repair and remove temporary feature workflow
+      - name: Commit repaired feature and remove temporary feature workflow
         shell: bash
         run: |
           set -euo pipefail
