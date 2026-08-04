@@ -1,0 +1,31 @@
+name: Cleanup merged development branch
+
+on:
+  push:
+    branches:
+      - codex/neonote-v2-blank-architecture
+    paths:
+      - .github/workflows/cleanup-merged-branch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/neonote-v2-blank-architecture
+          fetch-depth: 0
+
+      - name: Delete merged branch and remove this workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git push origin --delete agent/product-quality-loop || true
+          git rm -f .github/workflows/cleanup-merged-branch.yml
+          git commit -m 'Remove merged branch cleanup workflow'
+          git push origin HEAD:codex/neonote-v2-blank-architecture
