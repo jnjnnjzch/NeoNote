@@ -1,4 +1,4 @@
-triggered_at=2026-08-04T06:00:00Z
+triggered_at=2026-08-04T06:07:00Z
 pr=76
 branch=feature/complete-editor-rc
-purpose=observable-final-device-build
+purpose=final-green-device-build
