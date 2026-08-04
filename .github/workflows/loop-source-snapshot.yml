@@ -1,19 +1,22 @@
 name: NeoNote loop source snapshot
 
 on:
-  push:
-    branches: [loop/product-hardening]
+  pull_request:
+    branches: [codex/neonote-v2-blank-architecture]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
 
 jobs:
   snapshot:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
       - name: Create source snapshot
         run: |
