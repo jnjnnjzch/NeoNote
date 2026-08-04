@@ -485,15 +485,16 @@ public fun focusOrCreateRichContentBox(documentPosition: CanvasPoint) {
     val visibleLeft = -state.viewport.panOffsetX / zoom
     val visibleRight = (viewportWidthScreenPx - state.viewport.panOffsetX) / zoom
     val margin = TextBoxScreenMarginDp * displayDensity / zoom
-    val maximumLeft = (visibleRight - width - margin).coerceAtLeast(visibleLeft + margin)
+    val maximumRight = visibleRight - margin
+    val overflow = (documentPosition.x + width - maximumRight).coerceAtLeast(0f)
     val position = documentPosition.copy(
-        x = documentPosition.x.coerceIn(visibleLeft + margin, maximumLeft),
+        x = (documentPosition.x - overflow).coerceAtLeast(visibleLeft + margin),
     )
     val minimumHeight = MinimumTextBoxHeightDp * displayDensity / zoom
     val box = RichContentBox(
         id = nextRichContentBoxId(),
         position = position,
-        size = CanvasSize(width, maxOf(DefaultBoxHeight / zoom, minimumHeight)),
+        size = CanvasSize(width, minimumHeight),
         zIndex = (currentCanvas.objects.maxOfOrNull { it.zIndex } ?: 0) + 1,
         content = RichContent(),
         isFocused = true,
