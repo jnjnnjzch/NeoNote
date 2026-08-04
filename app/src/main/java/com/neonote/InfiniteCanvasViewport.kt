@@ -44,6 +44,7 @@ import com.neonote.input.withPressureSamples
 import com.neonote.model.CanvasObject
 import com.neonote.model.CanvasPoint
 import com.neonote.model.EditorTool
+import com.neonote.model.FloatingImage
 import com.neonote.model.RichContentBox
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -70,17 +71,11 @@ internal fun InfiniteCanvasViewport(
                 if (AndroidStylusInputAdapter.isStylusOrEraser(motionEvent)) {
                     val inputEvent = AndroidStylusInputAdapter.toInputEvent(motionEvent)
                     controller.updateInputDiagnostics(
-                        diagnostics = AndroidStylusInputAdapter.toDiagnostics(motionEvent),
+                        AndroidStylusInputAdapter.toDiagnostics(motionEvent),
                         eventTimeMillis = motionEvent.eventTime,
                         force = motionEvent.actionMasked != MotionEvent.ACTION_MOVE,
                     )
-                    if (inputEvent != null) {
-                        controller.routeInputEvent(
-                            router = router,
-                            event = inputEvent,
-                            mode = inputMode,
-                        )
-                    }
+                    inputEvent?.let { controller.routeInputEvent(router, it, inputMode) }
                     true
                 } else {
                     platformSnapshotStore.latest = motionEvent.toAndroidPointerSnapshot()
@@ -89,24 +84,22 @@ internal fun InfiniteCanvasViewport(
             }
             .pointerInput(inputMode) {
                 handleCanvasPointerInput(
-                    router = router,
-                    inputAdapter = inputAdapter,
-                    platformSnapshotProvider = { platformSnapshotStore.latest },
-                    controller = controller,
-                    mode = inputMode,
+                    router,
+                    inputAdapter,
+                    { platformSnapshotStore.latest },
+                    controller,
+                    inputMode,
                 )
             },
     ) {
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    translationX = controller.state.viewport.panOffsetX
-                    translationY = controller.state.viewport.panOffsetY
-                    scaleX = controller.state.viewport.zoomScale
-                    scaleY = controller.state.viewport.zoomScale
-                    transformOrigin = TransformOrigin(0f, 0f)
-                },
+            modifier = Modifier.fillMaxSize().graphicsLayer {
+                translationX = controller.state.viewport.panOffsetX
+                translationY = controller.state.viewport.panOffsetY
+                scaleX = controller.state.viewport.zoomScale
+                scaleY = controller.state.viewport.zoomScale
+                transformOrigin = TransformOrigin(0f, 0f)
+            },
         ) {
             InkLayerView(
                 pageId = controller.state.currentPageId,
@@ -114,9 +107,9 @@ internal fun InfiniteCanvasViewport(
                 activeStroke = controller.activeInkStroke,
                 modifier = Modifier.fillMaxSize(),
             )
-            controller.currentCanvas.objects.forEach { canvasObject ->
+            controller.currentCanvas.objects.sortedBy(CanvasObject::zIndex).forEach { canvasObject ->
                 CanvasObjectView(
-                    canvasObject = canvasObject,
+                    canvasObject,
                     selected = controller.state.selection.isObjectSelected(canvasObject.id),
                     selectionMode = selectionMode,
                     controller = controller,
@@ -137,11 +130,8 @@ internal fun InfiniteCanvasViewport(
                     EditorTool.Selection -> "Draw around ink or objects to select them"
                     EditorTool.Eraser -> "Erase with S Pen or the pen eraser"
                 },
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color.White.copy(alpha = 0.92f))
-                    .padding(horizontal = 18.dp, vertical = 12.dp),
+                modifier = Modifier.align(Alignment.Center).clip(RoundedCornerShape(14.dp))
+                    .background(Color.White.copy(alpha = 0.92f)).padding(horizontal = 18.dp, vertical = 12.dp),
                 color = Color(0xFF746D82),
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -149,9 +139,7 @@ internal fun InfiniteCanvasViewport(
     }
 }
 
-private class PlatformSnapshotStore {
-    var latest: AndroidPointerSnapshot? = null
-}
+private class PlatformSnapshotStore { var latest: AndroidPointerSnapshot? = null }
 
 @Composable
 private fun CanvasObjectView(
@@ -161,13 +149,8 @@ private fun CanvasObjectView(
     controller: NeoNoteEditorController,
 ) {
     when (canvasObject) {
-        is RichContentBox -> RichContentBoxView(
-            box = canvasObject,
-            selected = selected,
-            selectionMode = selectionMode,
-            controller = controller,
-        )
-        else -> Unit
+        is RichContentBox -> RichContentBoxView(canvasObject, selected, selectionMode, controller)
+        is FloatingImage -> FloatingImageView(canvasObject, selected, selectionMode, controller)
     }
 }
 
@@ -181,64 +164,28 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
         if (down.isConsumed) return@awaitEachGesture
-
-        routePointerEvent(
-            router = router,
-            inputAdapter = inputAdapter,
-            controller = controller,
-            type = PointerEventType.Down,
-            changes = listOf(down),
-            platformSnapshot = platformSnapshotProvider(),
-            mode = mode,
-        )
+        routePointerEvent(router, inputAdapter, controller, PointerEventType.Down, listOf(down), platformSnapshotProvider(), mode)
 
         while (true) {
             val event = awaitPointerEvent(pass = PointerEventPass.Final)
             val platformSnapshot = platformSnapshotProvider()
             if (event.changes.any { it.isConsumed }) return@awaitEachGesture
-
-            val pressedChanges = event.changes.filter { it.pressed }
-            if (pressedChanges.size >= 2) {
-                val zoomChange = event.calculateZoom()
+            val pressed = event.changes.filter { it.pressed }
+            if (pressed.size >= 2) {
+                val zoom = event.calculateZoom()
                 val centroid = event.calculateCentroid(useCurrent = true)
-                routePointerEvent(
-                    router = router,
-                    inputAdapter = inputAdapter,
-                    controller = controller,
-                    type = PointerEventType.Move,
-                    changes = pressedChanges,
-                    platformSnapshot = platformSnapshot,
-                    mode = mode,
-                )
-                controller.zoomViewportBy(zoomChange, CanvasPoint(centroid.x, centroid.y))
+                routePointerEvent(router, inputAdapter, controller, PointerEventType.Move, pressed, platformSnapshot, mode)
+                controller.zoomViewportBy(zoom, CanvasPoint(centroid.x, centroid.y))
                 event.changes.forEach { it.consume() }
                 continue
             }
-
             val primary = event.changes.firstOrNull() ?: return@awaitEachGesture
             if (primary.changedToUpIgnoreConsumed()) {
-                routePointerEvent(
-                    router = router,
-                    inputAdapter = inputAdapter,
-                    controller = controller,
-                    type = PointerEventType.Up,
-                    changes = listOf(primary),
-                    platformSnapshot = platformSnapshot,
-                    mode = mode,
-                )
+                routePointerEvent(router, inputAdapter, controller, PointerEventType.Up, listOf(primary), platformSnapshot, mode)
                 return@awaitEachGesture
             }
-
             if (primary.pressed && primary.positionChange() != Offset.Zero) {
-                routePointerEvent(
-                    router = router,
-                    inputAdapter = inputAdapter,
-                    controller = controller,
-                    type = PointerEventType.Move,
-                    changes = listOf(primary),
-                    platformSnapshot = platformSnapshot,
-                    mode = mode,
-                )
+                routePointerEvent(router, inputAdapter, controller, PointerEventType.Move, listOf(primary), platformSnapshot, mode)
             }
         }
     }
@@ -253,11 +200,7 @@ private fun routePointerEvent(
     platformSnapshot: AndroidPointerSnapshot?,
     mode: InputMode,
 ) {
-    val inputEvent = inputAdapter.toInputEvent(
-        type = type,
-        changes = changes,
-        platformSnapshot = platformSnapshot,
-    ) ?: return
+    val inputEvent = inputAdapter.toInputEvent(type, changes, platformSnapshot) ?: return
     controller.updateInputDiagnostics(
         InputDiagnostics(
             tool = inputEvent.pointers.first().tool,
@@ -273,9 +216,5 @@ private fun routePointerEvent(
         ).withPressureSamples(inputEvent.primaryInkSamples),
         force = type != PointerEventType.Move,
     )
-    controller.routeInputEvent(
-        router = router,
-        event = inputEvent,
-        mode = mode,
-    )
+    controller.routeInputEvent(router, inputEvent, mode)
 }
