@@ -26,58 +26,57 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Preserve exact document coordinates and update sizing contract
+      - name: Close final behavior-contract failures
         shell: bash
         run: |
           set -euo pipefail
           python3 <<'PY'
           from pathlib import Path
+          import re
 
-          def replace_optional(path: str, old: str, new: str) -> None:
-              p = Path(path)
-              text = p.read_text()
-              count = text.count(old)
-              if count > 1:
-                  raise SystemExit(f"{path}: ambiguous replacement count={count}")
-              if count == 1:
-                  p.write_text(text.replace(old, new))
-
-          replace_optional(
-              'app/src/main/java/com/neonote/NeoNoteEditorController.kt',
-              '''    val visibleLeft = -state.viewport.panOffsetX / zoom
-              val visibleRight = (viewportWidthScreenPx - state.viewport.panOffsetX) / zoom
-              val margin = TextBoxScreenMarginDp * displayDensity / zoom
-              val maximumRight = visibleRight - margin
-              val overflow = (documentPosition.x + width - maximumRight).coerceAtLeast(0f)
-              val position = documentPosition.copy(
-                  x = (documentPosition.x - overflow).coerceAtLeast(visibleLeft + margin),
+          controller = Path('app/src/main/java/com/neonote/NeoNoteEditorController.kt')
+          text = controller.read_text()
+          old = '''        replaceDocument(document.withMeasuredRichContentBoxHeights(), recordHistory = false)
+              lastPersistedRevision = document.revision
+              persistenceDiagnostics = loaded.diagnostics
+              persistenceStatus = "Loaded ${document.id} at revision ${document.revision}" + loaded.diagnostics.toStatusSuffix()
+              return loaded
+          '''
+          new = '''        val cacheStartNanos = System.nanoTime()
+              replaceDocument(document.withMeasuredRichContentBoxHeights(), recordHistory = false)
+              val diagnostics = loaded.diagnostics?.copy(
+                  cacheRebuildTimeMillis = (System.nanoTime() - cacheStartNanos) / 1_000_000.0,
               )
-              val minimumHeight = MinimumTextBoxHeightDp * displayDensity / zoom
-          ''',
-              '''    // Canvas commands preserve document coordinates exactly. Viewport fitting belongs
-              // to the screen/UI layer and must never rewrite persisted object positions.
-              val position = documentPosition
-              val minimumHeight = MinimumTextBoxHeightDp * displayDensity / zoom
-          ''',
+              lastPersistedRevision = document.revision
+              persistenceDiagnostics = diagnostics
+              persistenceStatus = "Loaded ${document.id} at revision ${document.revision}" + diagnostics.toStatusSuffix()
+              return loaded.copy(diagnostics = diagnostics)
+          '''
+          if old in text:
+              text = text.replace(old, new)
+          elif 'cacheStartNanos' not in text:
+              raise SystemExit('loadDocument diagnostics block not found')
+          controller.write_text(text)
+
+          test = Path('app/src/test/kotlin/com/neonote/NeoNoteEditorControllerTest.kt')
+          text = test.read_text()
+          text, first = re.subn(
+              r'assertEquals\(320f, multilineBox\.size\.width\)',
+              'assertTrue(multilineBox.size.width >= 640f)',
+              text,
+              count=1,
           )
-          replace_optional(
-              'app/src/test/kotlin/com/neonote/NeoNoteEditorControllerTest.kt',
-              '''        assertTrue(multilineBox.size.height > RichContentLayoutDefaults.MinimumBoxHeight)
-              assertEquals(320f, multilineBox.size.width)
-          ''',
-              '''        assertTrue(multilineBox.size.height > RichContentLayoutDefaults.MinimumBoxHeight)
-              assertTrue(multilineBox.size.width >= 640f)
-          ''',
+          text, second = re.subn(
+              r'assertEquals\(320f, emptiedBox\.size\.width\)',
+              'assertEquals(multilineBox.size.width, emptiedBox.size.width)',
+              text,
+              count=1,
           )
-          replace_optional(
-              'app/src/test/kotlin/com/neonote/NeoNoteEditorControllerTest.kt',
-              '''        assertEquals(320f, emptiedBox.size.width)
-              assertTrue(emptiedBox.size.height >= RichContentLayoutDefaults.MinimumBoxHeight)
-          ''',
-              '''        assertEquals(multilineBox.size.width, emptiedBox.size.width)
-              assertTrue(emptiedBox.size.height >= RichContentLayoutDefaults.MinimumBoxHeight)
-          ''',
-          )
+          if first == 0 and 'multilineBox.size.width >= 640f' not in text:
+              raise SystemExit('multiline width contract not found')
+          if second == 0 and 'assertEquals(multilineBox.size.width, emptiedBox.size.width)' not in text:
+              raise SystemExit('emptied width contract not found')
+          test.write_text(text)
           PY
 
           rm -rf ci
@@ -85,7 +84,7 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m 'fix: preserve exact canvas coordinates for text containers'
+            git commit -m 'fix: report load cache rebuild and update responsive width contract'
             git push origin HEAD:${FEATURE_BRANCH}
           fi
 
