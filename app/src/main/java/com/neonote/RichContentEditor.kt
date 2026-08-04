@@ -11,9 +11,8 @@ import androidx.compose.ui.unit.dp
 import com.neonote.engine.ActiveRichContentTarget
 import com.neonote.engine.RichContentLayoutDefaults
 import com.neonote.model.BlockFormula
-import com.neonote.model.BlockNode
+import com.neonote.model.BlockImage
 import com.neonote.model.ParagraphNode
-import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
 import com.neonote.model.TableNode
 
@@ -30,110 +29,59 @@ internal fun RichContentEditor(
         ?: box.content.blocks.indexOfFirst { it is ParagraphNode }.coerceAtLeast(0)
 
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(
-                horizontal = RichContentLayoutDefaults.RendererHorizontalPadding.dp,
-                vertical = RichContentLayoutDefaults.RendererVerticalPadding.dp,
-            ),
+        modifier = modifier.fillMaxSize().padding(
+            horizontal = RichContentLayoutDefaults.RendererHorizontalPadding.dp,
+            vertical = RichContentLayoutDefaults.RendererVerticalPadding.dp,
+        ),
         verticalArrangement = Arrangement.spacedBy(RichContentLayoutDefaults.BlockSpacing.dp),
     ) {
         if (box.content.blocks.isEmpty()) {
             RichParagraphEditor(
-                box = box,
-                blockIndex = 0,
-                paragraph = ParagraphNode(),
-                active = true,
-                selectionMode = selectionMode,
-                selected = selected,
-                controller = controller,
-                modifier = Modifier.fillMaxWidth(),
+                box, 0, ParagraphNode(), active = true, selectionMode, selected, controller,
+                Modifier.fillMaxWidth(),
             )
             return@Column
         }
 
         box.content.blocks.forEachIndexed { blockIndex, block ->
             when (block) {
-                is ParagraphNode -> {
-                    RichParagraphEditor(
-                        box = box,
-                        blockIndex = blockIndex,
-                        paragraph = block,
-                        active = activeTarget == ActiveRichContentTarget.Paragraph(blockIndex) ||
-                            (activeTarget == null && blockIndex == activeBlockIndex),
-                        selectionMode = selectionMode,
-                        selected = selected,
-                        controller = controller,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-
-                is BlockFormula -> {
-                    FormulaBlockEditor(
-                        box = box,
-                        blockIndex = blockIndex,
-                        formula = block,
-                        active = activeTarget == ActiveRichContentTarget.FormulaBlock(blockIndex),
-                        selectionMode = selectionMode,
-                        selected = selected,
-                        controller = controller,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-
-                is TableNode -> {
-                    TableBlockEditor(
-                        box = box,
-                        blockIndex = blockIndex,
-                        table = block,
-                        selectionMode = selectionMode,
-                        selected = selected,
-                        controller = controller,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-
-                else -> {
-                    RichStaticEditorBlock(
-                        block = block,
-                        blockIndex = blockIndex,
-                        selectionMode = selectionMode,
-                        selected = selected,
-                        controller = controller,
-                        boxId = box.id,
-                    )
-                }
+                is ParagraphNode -> RichParagraphEditor(
+                    box = box,
+                    blockIndex = blockIndex,
+                    paragraph = block,
+                    active = activeTarget == ActiveRichContentTarget.Paragraph(blockIndex) ||
+                        (activeTarget == null && blockIndex == activeBlockIndex),
+                    selectionMode = selectionMode,
+                    selected = selected,
+                    controller = controller,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                is BlockFormula -> FormulaBlockEditor(
+                    box, blockIndex, block,
+                    active = activeTarget == ActiveRichContentTarget.FormulaBlock(blockIndex),
+                    selectionMode, selected, controller, Modifier.fillMaxWidth(),
+                )
+                is TableNode -> TableBlockEditor(
+                    box, blockIndex, block, selectionMode, selected, controller, Modifier.fillMaxWidth(),
+                )
+                is BlockImage -> ImageBlockView(
+                    box = box,
+                    blockIndex = blockIndex,
+                    block = block,
+                    selected = activeTarget == ActiveRichContentTarget.ImageBlock(blockIndex) ||
+                        controller.selectedRichContentObjectBlockIndex(box.id) == blockIndex,
+                    enabled = !selectionMode && !selected,
+                    controller = controller,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
-}
-
-@Composable
-private fun RichStaticEditorBlock(
-    block: BlockNode,
-    blockIndex: Int,
-    selectionMode: Boolean,
-    selected: Boolean,
-    controller: NeoNoteEditorController,
-    boxId: String,
-) {
-    RichContentRenderer(
-        content = RichContent(blocks = listOf(block)),
-        selectionMode = selectionMode,
-        selected = selected,
-        onFocus = { controller.focusRichContentParagraph(boxId = boxId, blockIndex = blockIndex) },
-        onToggleTodoChecked = { localBlockIndex ->
-            controller.toggleRichContentTodoCheckedState(boxId = boxId, blockIndex = blockIndex + localBlockIndex)
-        },
-        modifier = Modifier.fillMaxWidth(),
-        applyContentPadding = false,
-        selectedObjectBlockIndex = if (controller.selectedRichContentObjectBlockIndex(boxId) == blockIndex) 0 else null,
-        onObjectBlockFocus = { controller.selectRichContentObjectBlock(boxId = boxId, blockIndex = blockIndex) },
-    )
 }
 
 private fun ActiveRichContentTarget.blockIndexForEditor(): Int = when (this) {
     is ActiveRichContentTarget.Paragraph -> blockIndex
     is ActiveRichContentTarget.TableCell -> address.blockIndex
     is ActiveRichContentTarget.FormulaBlock -> blockIndex
+    is ActiveRichContentTarget.ImageBlock -> blockIndex
 }
