@@ -475,7 +475,6 @@ public fun focusOrCreateRichContentBox(documentPosition: CanvasPoint) {
         activateRichContentBox(existing.id)
         return
     }
-    if (state.currentTool != EditorTool.Text) return
     val zoom = state.viewport.zoomScale.coerceAtLeast(MinZoomScale)
     val minimumWidth = MinimumTextBoxWidthDp * displayDensity / zoom
     val preferredWidth = PreferredTextBoxWidthDp * displayDensity / zoom
@@ -1042,7 +1041,8 @@ public fun createInitialEditorState(): EditorState {
         title = "Untitled Note",
         assetStoreId = "local-assets",
         documentId = "default-document",
-        firstPageId = "page-1",
+        firstPageId = "page-initial",
+        firstSectionId = "section-initial",
     )
     return EditorState(document = document, currentTool = EditorTool.Pen)
 }

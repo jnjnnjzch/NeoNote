@@ -109,7 +109,7 @@ private data class SearchFields(
 ) {
     val normalizedCorpus: String = listOf(documentTitle, sectionTitle, pageTitle, body)
         .joinToString("\n")
-        .lowercase()
+        .normalizedSearchText()
 
     fun score(terms: List<String>): Int = terms.sumOf { term ->
         documentTitle.matchWeight(term, 80) +
@@ -120,7 +120,7 @@ private data class SearchFields(
 }
 
 private fun String.matchWeight(term: String, weight: Int): Int {
-    val normalized = lowercase()
+    val normalized = normalizedSearchText()
     if (term !in normalized) return 0
     val exactBonus = if (normalized.trim() == term) weight else 0
     var count = 0
@@ -173,13 +173,18 @@ private fun String.bestSnippet(terms: List<String>): String {
     }
 }
 
-private fun String.normalizedTerms(): List<String> = trim()
-    .lowercase()
+private fun String.normalizedTerms(): List<String> = normalizedSearchText()
     .split(Regex("\\s+"))
     .map(String::trim)
     .filter(String::isNotEmpty)
     .distinct()
     .take(MaximumSearchTerms)
+
+private fun String.normalizedSearchText(): String = lowercase()
+    .replace(Regex("[\\{}_]+"), " ")
+    .replace(Regex("[^\p{L}\p{N}]+"), " ")
+    .replace(Regex("\\s+"), " ")
+    .trim()
 
 private const val MaximumSearchResults = 200
 private const val MaximumSearchTerms = 12
