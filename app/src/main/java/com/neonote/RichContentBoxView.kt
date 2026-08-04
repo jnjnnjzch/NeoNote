@@ -5,9 +5,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -29,6 +29,8 @@ import com.neonote.model.EditorTool
 import com.neonote.model.RichContentBox
 import kotlin.math.roundToInt
 
+private val MinimumRichContentBoxHeight = 96.dp
+
 @Composable
 internal fun RichContentBoxView(
     box: RichContentBox,
@@ -42,6 +44,7 @@ internal fun RichContentBoxView(
     LaunchedEffect(selectionMode, selected) {
         if (selectionMode || selected) focusManager.clearFocus()
     }
+
     val borderColor = when {
         selected -> Color(0xFF2563EB)
         box.isFocused -> Color(0xFF7C3AED)
@@ -57,12 +60,22 @@ internal fun RichContentBoxView(
                 controller.activateRichContentBox(box.id)
             }
         }
-    } else Modifier
+    } else {
+        Modifier
+    }
+
     val sizingModifier = if (box.autoSizeHeight) {
-        Modifier.defaultMinSize(minHeight = 64.dp).wrapContentHeight().onSizeChanged {
-            controller.updateRichContentBoxMeasuredHeight(box.id, it.height.toFloat())
-        }
-    } else Modifier.height(persistedHeight)
+        Modifier
+            .wrapContentHeight(unbounded = true)
+            .heightIn(min = MinimumRichContentBoxHeight)
+            .onSizeChanged { measured ->
+                if (measured.height > 0) {
+                    controller.updateRichContentBoxMeasuredHeight(box.id, measured.height.toFloat())
+                }
+            }
+    } else {
+        Modifier.height(maxOf(persistedHeight, MinimumRichContentBoxHeight))
+    }
 
     Box(
         modifier = Modifier
@@ -72,9 +85,16 @@ internal fun RichContentBoxView(
             .clip(shape)
             .background(Color.White)
             .border(if (selected || box.isFocused) 2.dp else 1.dp, borderColor, shape)
-            .padding(RichContentLayoutDefaults.BoxChromePadding.dp)
+            .padding(
+                horizontal = RichContentLayoutDefaults.BoxChromePadding.dp.coerceAtLeast(12.dp),
+                vertical = RichContentLayoutDefaults.BoxChromePadding.dp.coerceAtLeast(10.dp),
+            )
             .then(interactionModifier),
     ) {
+        val contentModifier = Modifier
+            .fillMaxWidth()
+            .wrapContentHeight(unbounded = true)
+
         if (!box.isFocused) {
             RichContentRenderer(
                 content = box.content,
@@ -82,7 +102,7 @@ internal fun RichContentBoxView(
                 selected = selected,
                 onFocus = { controller.activateRichContentBox(box.id) },
                 onToggleTodoChecked = { controller.toggleRichContentTodoCheckedState(box.id, it) },
-                modifier = Modifier.fillMaxWidth().wrapContentHeight(),
+                modifier = contentModifier,
                 selectedObjectBlockIndex = controller.selectedRichContentObjectBlockIndex(box.id),
                 onObjectBlockFocus = { controller.selectRichContentObjectBlock(box.id, it) },
             )
@@ -92,7 +112,7 @@ internal fun RichContentBoxView(
                 selectionMode = selectionMode,
                 selected = selected,
                 controller = controller,
-                modifier = Modifier.fillMaxWidth().wrapContentHeight(),
+                modifier = contentModifier,
             )
         }
     }
