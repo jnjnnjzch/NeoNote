@@ -17,10 +17,10 @@ public data class DocumentSummary(
     val isTrashed: Boolean = false,
 )
 
-public interface DocumentLibrary {
+public interface DocumentLibrary : PersistenceStore {
     public suspend fun list(includeTrash: Boolean = false): List<DocumentSummary>
-    public suspend fun save(document: NeoNoteDocument): PersistenceResult.Saved
-    public suspend fun load(documentId: String): PersistenceResult.Loaded
+    override public suspend fun save(document: NeoNoteDocument): PersistenceResult.Saved
+    override public suspend fun load(documentId: String): PersistenceResult.Loaded
     public suspend fun moveToTrash(documentId: String): Boolean
     public suspend fun restore(documentId: String): Boolean
     public suspend fun permanentlyDelete(documentId: String): Boolean
@@ -48,17 +48,16 @@ public class FileDocumentLibrary(
     }
 
     override suspend fun save(document: NeoNoteDocument): PersistenceResult.Saved = persistence.save(document)
-
     override suspend fun load(documentId: String): PersistenceResult.Loaded = persistence.load(documentId)
 
     override suspend fun moveToTrash(documentId: String): Boolean = move(
-        source = documentFile(documentsDirectory, documentId),
-        destination = documentFile(trashDirectory, documentId),
+        documentFile(documentsDirectory, documentId),
+        documentFile(trashDirectory, documentId),
     )
 
     override suspend fun restore(documentId: String): Boolean = move(
-        source = documentFile(trashDirectory, documentId),
-        destination = documentFile(documentsDirectory, documentId),
+        documentFile(trashDirectory, documentId),
+        documentFile(documentsDirectory, documentId),
     )
 
     override suspend fun permanentlyDelete(documentId: String): Boolean {
