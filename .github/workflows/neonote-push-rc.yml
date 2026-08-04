@@ -93,9 +93,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-
       - uses: android-actions/setup-android@v3
-
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Prepare outputs
@@ -156,3 +154,43 @@ jobs:
             app/build/reports/lint-results-*.xml
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Record successful build
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci
+          cat > ci/last-device-build.txt <<EOF
+          status=success
+          workflow_run_id=${GITHUB_RUN_ID}
+          feature_head=$(git rev-parse HEAD)
+          artifact_name=neonote-device-apk
+          tests=passed
+          lint=passed
+          package=com.neonote.rc
+          version=1.0.0-rc.1
+          EOF
+          git add ci/last-device-build.txt
+          git commit -m 'ci: record successful device APK build'
+          git push origin HEAD:${FEATURE_BRANCH}
+
+      - name: Record failed build
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci
+          {
+            echo 'status=failure'
+            echo "workflow_run_id=${GITHUB_RUN_ID}"
+            echo "feature_head=$(git rev-parse HEAD)"
+            for log in build-logs/*.log; do
+              test -f "$log" || continue
+              echo "===== $log ====="
+              tail -n 1200 "$log"
+            done
+          } > ci/last-device-build.txt
+          git add ci/last-device-build.txt
+          git commit -m 'ci: record failed device APK build' || true
+          git push origin HEAD:${FEATURE_BRANCH}
