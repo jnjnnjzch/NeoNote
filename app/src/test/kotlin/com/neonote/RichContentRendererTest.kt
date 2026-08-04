@@ -57,8 +57,13 @@ class RichContentRendererTest {
     }
 
     @Test
-    fun `inline placeholder helpers fall back to stable labels`() {
-        assertEquals(" ƒ empty ", InlineFormula("").formulaChipText())
-        assertEquals(" Image: asset:asset-42 ", InlineImage(assetId = "asset-42").imageChipText())
+    fun `inline placeholders fall back to stable labels`() {
+        val annotated = ParagraphNode(
+            inlines = listOf(
+                InlineFormula(""),
+                InlineImage(assetId = "asset-42"),
+            ),
+        ).toDisplayAnnotatedString()
+        assertEquals(" ƒ empty  Image: asset:asset-42 ", annotated.text)
     }
 }
