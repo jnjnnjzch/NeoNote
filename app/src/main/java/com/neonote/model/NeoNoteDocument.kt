@@ -9,6 +9,7 @@ data class NeoNoteDocument(
     val title: String,
     val pages: List<NotePage> = emptyList(),
     val assetStoreId: String,
+    val sections: List<NoteSection> = emptyList(),
     val revision: Long = 0L,
     val schemaVersion: Int = CurrentDocumentSchemaVersion,
     val createdAtEpochMillis: Long = 0L,
@@ -16,4 +17,4 @@ data class NeoNoteDocument(
     val isFavorite: Boolean = false,
 )
 
-public const val CurrentDocumentSchemaVersion: Int = 3
+public const val CurrentDocumentSchemaVersion: Int = 4
