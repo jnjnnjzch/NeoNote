@@ -257,8 +257,8 @@ private fun InlineText.toUnifiedSpanStyle(): SpanStyle {
         fontWeight = if (bold) FontWeight.Bold else null,
         fontStyle = if (italic) FontStyle.Italic else null,
         textDecoration = if (decorations.isEmpty()) null else TextDecoration.combine(decorations),
-        color = textColorArgb?.let(::androidx.compose.ui.graphics.Color) ?: Color.Unspecified,
-        background = highlightColorArgb?.let(::androidx.compose.ui.graphics.Color) ?: Color.Unspecified,
+        color = textColorArgb?.let(::Color) ?: Color.Unspecified,
+        background = highlightColorArgb?.let(::Color) ?: Color.Unspecified,
         fontSize = (14f * fontScale.coerceIn(0.5f, 4f)).sp,
     )
 }

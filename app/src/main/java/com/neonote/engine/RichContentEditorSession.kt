@@ -440,7 +440,7 @@ public class RichContentEditorSession(
     public fun tableCellPlainText(address: TableCellAddress): String =
         (RichContentTree.block(box.content, address) as? ParagraphNode)?.plainText().orEmpty()
 
-    public fun drainPendingCommands(): List<RichContentCommand> = pendingCommands.also(mutablePendingCommands::clear)
+    public fun drainPendingCommands(): List<RichContentCommand> = pendingCommands.also { mutablePendingCommands.clear() }
 
     public fun activeBlockInsertionIndex(): Int =
         (activeTarget.blockIndexForSession() + 1).coerceIn(0, box.content.blocks.size)

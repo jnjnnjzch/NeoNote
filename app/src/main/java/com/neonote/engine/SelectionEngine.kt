@@ -84,7 +84,7 @@ public class SelectionEngine {
 
     public fun selectedBounds(canvas: InfiniteCanvas, selection: SelectionState): CanvasRect? {
         val objectBounds = canvas.objects.filter { selection.isObjectSelected(it.id) }.map(CanvasObject::bounds)
-        val strokeBounds = canvas.inkLayer.strokes.filter { selection.isStrokeSelected(it.id) }.mapNotNull(InkStroke::boundsOrNull)
+        val strokeBounds = canvas.inkLayer.strokes.filter { selection.isStrokeSelected(it.id) }.mapNotNull { it.boundsOrNull() }
         return (objectBounds + strokeBounds).unionOrNull()
     }
 
@@ -233,7 +233,7 @@ public class SelectionEngine {
     }
 
     private fun lassoIntersectsStroke(lassoPath: List<CanvasPoint>, stroke: InkStroke, tolerance: Float): Boolean {
-        val points = stroke.points.map(InkPoint::toCanvasPoint)
+        val points = stroke.points.map { it.toCanvasPoint() }
         if (points.isEmpty()) return false
         if (points.any { it.isInsidePolygon(lassoPath) || nearPolyline(it, lassoPath, tolerance) }) return true
         return points.zipWithNext().any { (start, end) ->
