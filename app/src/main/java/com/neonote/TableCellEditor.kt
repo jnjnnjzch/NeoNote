@@ -3,7 +3,6 @@ package com.neonote
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -29,6 +28,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.neonote.engine.ActiveRichContentTarget
 import com.neonote.engine.RichContentLayoutDefaults
 import com.neonote.model.BlockFormula
 import com.neonote.model.BlockImage
@@ -45,6 +45,7 @@ import com.neonote.model.TableNode
 @Composable
 internal fun TableCellEditor(
     boxId: String,
+    rootBlockIndex: Int,
     address: TableCellAddress,
     cell: TableCell,
     activeContentBlockIndex: Int?,
@@ -54,47 +55,43 @@ internal fun TableCellEditor(
     modifier: Modifier = Modifier,
 ) {
     val blocks = cell.content.blocks.ifEmpty { listOf(ParagraphNode()) }
-
+    val activeAddress = (controller.activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell)?.address
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 6.dp, vertical = 4.dp),
+        modifier = modifier.padding(horizontal = 6.dp, vertical = 5.dp),
         verticalArrangement = Arrangement.spacedBy(RichContentLayoutDefaults.BlockSpacing.dp),
     ) {
         blocks.forEachIndexed { contentBlockIndex, block ->
-            val blockAddress = address.copy(contentBlockIndex = contentBlockIndex)
+            val blockAddress = address.withContentBlock(contentBlockIndex)
             when (block) {
-                is ParagraphNode -> {
-                    if (block.isPlatformEditable()) {
-                        TableCellParagraphEditor(
-                            boxId = boxId,
-                            address = blockAddress,
-                            paragraph = block,
-                            active = activeContentBlockIndex == contentBlockIndex,
-                            selectionMode = selectionMode,
-                            selected = selected,
-                            controller = controller,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    } else {
-                        TableCellStaticBlock(
-                            boxId = boxId,
-                            address = blockAddress,
-                            content = RichContent(blocks = listOf(block)),
-                            selectionMode = selectionMode,
-                            selected = selected,
-                            controller = controller,
-                        )
-                    }
+                is ParagraphNode -> if (block.isPlatformEditable()) {
+                    TableCellParagraphEditor(
+                        boxId = boxId,
+                        address = blockAddress,
+                        paragraph = block,
+                        active = activeContentBlockIndex == contentBlockIndex,
+                        selectionMode = selectionMode,
+                        selected = selected,
+                        controller = controller,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    TableCellStaticBlock(boxId, blockAddress, RichContent(listOf(block)), selectionMode, selected, controller)
                 }
-
-                is BlockFormula, is BlockImage, is TableNode -> TableCellStaticBlock(
-                    boxId = boxId,
-                    address = blockAddress,
-                    content = RichContent(blocks = listOf(block)),
+                is TableNode -> EditableTableGrid(
+                    box = controller.currentCanvas.objects.filterIsInstance<com.neonote.model.RichContentBox>()
+                        .firstOrNull { it.id == boxId } ?: return@forEachIndexed,
+                    rootBlockIndex = rootBlockIndex,
+                    table = block,
+                    parentCellAddress = blockAddress,
+                    tableBlockIndexInParent = contentBlockIndex,
+                    activeAddress = activeAddress,
                     selectionMode = selectionMode,
                     selected = selected,
                     controller = controller,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                is BlockFormula, is BlockImage -> TableCellStaticBlock(
+                    boxId, blockAddress, RichContent(listOf(block)), selectionMode, selected, controller,
                 )
             }
         }
@@ -113,30 +110,18 @@ private fun TableCellParagraphEditor(
     modifier: Modifier = Modifier,
 ) {
     val enabled = !selectionMode && !selected
-    val focusRequester = remember { FocusRequester() }
+    val requester = remember { FocusRequester() }
     val modelText = paragraph.plainTextForCellEditor()
-    var platformTextFieldValue by remember(boxId, address) {
-        mutableStateOf(TextFieldValue(modelText))
-    }
-
-    LaunchedEffect(active, enabled) {
-        if (active && enabled) focusRequester.requestFocus()
-    }
+    var value by remember(boxId, address) { mutableStateOf(TextFieldValue(modelText)) }
+    LaunchedEffect(active, enabled) { if (active && enabled) requester.requestFocus() }
     LaunchedEffect(modelText) {
-        if (platformTextFieldValue.text != modelText) {
-            platformTextFieldValue = TextFieldValue(modelText, TextRange(modelText.length))
-        }
+        if (value.text != modelText) value = TextFieldValue(modelText, TextRange(modelText.length))
     }
-
     BasicTextField(
-        value = platformTextFieldValue,
-        onValueChange = { nextValue ->
-            platformTextFieldValue = nextValue
-            controller.updateRichContentTableCellFromPlatformInput(
-                boxId = boxId,
-                address = address,
-                nextText = nextValue.text,
-            )
+        value = value,
+        onValueChange = { next ->
+            value = next
+            controller.updateRichContentTableCellFromPlatformInput(boxId, address, next.text)
         },
         enabled = enabled,
         singleLine = false,
@@ -149,27 +134,15 @@ private fun TableCellParagraphEditor(
             color = Color(0xFF0F172A),
             lineHeight = RichContentLayoutDefaults.LineHeight.sp,
         ),
-        cursorBrush = SolidColor(Color(0xFF7C3AED)),
+        cursorBrush = SolidColor(Color(0xFF6D4AFF)),
         modifier = modifier
             .heightIn(min = RichContentLayoutDefaults.LineHeight.dp)
-            .focusRequester(focusRequester)
-            .onFocusChanged { focusState ->
-                if (focusState.isFocused && enabled) {
-                    controller.focusRichContentTableCell(boxId = boxId, address = address)
-                }
-            },
-        decorationBox = { innerTextField ->
+            .focusRequester(requester)
+            .onFocusChanged { if (it.isFocused && enabled) controller.focusRichContentTableCell(boxId, address) },
+        decorationBox = { inner ->
             Box(modifier = Modifier.fillMaxWidth()) {
-                if (platformTextFieldValue.text.isEmpty()) {
-                    Text(
-                        text = " ",
-                        color = Color(0xFF94A3B8),
-                        style = LocalTextStyle.current.copy(
-                            lineHeight = RichContentLayoutDefaults.LineHeight.sp,
-                        ),
-                    )
-                }
-                innerTextField()
+                if (value.text.isEmpty()) Text(" ", color = Color(0xFF94A3B8))
+                inner()
             }
         },
     )
@@ -188,41 +161,30 @@ private fun TableCellStaticBlock(
         content = content,
         selectionMode = selectionMode,
         selected = selected,
-        onFocus = {
-            controller.focusRichContentTableCell(boxId = boxId, address = address)
-        },
+        onFocus = { controller.focusRichContentTableCell(boxId, address) },
         onToggleTodoChecked = {},
         modifier = Modifier.fillMaxWidth(),
         applyContentPadding = false,
-        onObjectBlockFocus = {
-            controller.focusRichContentTableCell(boxId = boxId, address = address)
-        },
+        onObjectBlockFocus = { controller.focusRichContentTableCell(boxId, address) },
     )
 }
 
 internal fun TableCell.firstEditableParagraphIndex(): Int =
-    content.blocks.indexOfFirst { block ->
-        block is ParagraphNode && block.isPlatformEditable()
-    }.takeIf { it >= 0 } ?: 0
+    content.blocks.indexOfFirst { it is ParagraphNode && it.isPlatformEditable() }.takeIf { it >= 0 } ?: 0
 
-internal fun ParagraphNode.plainTextForCellEditor(): String = inlines.joinToString("") { inline ->
-    when (inline) {
-        is InlineText -> inline.text
-        InlineLineBreak -> "\n"
-        is InlineFormula, is InlineImage -> InlineAtomPlaceholder
-    }
-}
+internal fun ParagraphNode.plainTextForCellEditor(): String = inlines.joinToString("") { inline -> when (inline) {
+    is InlineText -> inline.text
+    InlineLineBreak -> "\n"
+    is InlineFormula, is InlineImage -> InlineAtomPlaceholder
+} }
 
-private fun ParagraphNode.isPlatformEditable(): Boolean =
-    inlines.none { it is InlineFormula || it is InlineImage }
+private fun ParagraphNode.isPlatformEditable(): Boolean = inlines.none { it is InlineFormula || it is InlineImage }
 
-internal fun RichContent.previewTextForTableCell(): String = blocks.firstOrNull()?.let { block ->
-    when (block) {
-        is ParagraphNode -> block.plainTextForCellEditor()
-        is BlockFormula -> block.expression.ifBlank { "formula" }
-        is BlockImage -> block.altText?.takeIf { it.isNotBlank() } ?: "image"
-        is TableNode -> "nested table"
-    }
-}.orEmpty()
+internal fun RichContent.previewTextForTableCell(): String = blocks.firstOrNull()?.let { block -> when (block) {
+    is ParagraphNode -> block.plainTextForCellEditor()
+    is BlockFormula -> block.expression.ifBlank { "formula" }
+    is BlockImage -> block.altText?.takeIf(String::isNotBlank) ?: "image"
+    is TableNode -> "nested table"
+} }.orEmpty()
 
 private const val InlineAtomPlaceholder: String = "\uFFFC"
