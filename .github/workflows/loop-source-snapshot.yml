@@ -1,0 +1,27 @@
+name: NeoNote loop source snapshot
+
+on:
+  push:
+    branches: [loop/product-hardening]
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Create source snapshot
+        run: |
+          rm -rf .git
+          zip -qr neonote-source.zip . -x 'neonote-source.zip'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neonote-loop-source
+          path: neonote-source.zip
+          if-no-files-found: error
+          retention-days: 1
