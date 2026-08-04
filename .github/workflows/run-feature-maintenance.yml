@@ -1,0 +1,77 @@
+name: Run feature maintenance once
+
+on:
+  push:
+    branches: [codex/neonote-v2-blank-architecture]
+    paths: [.github/workflows/run-feature-maintenance.yml]
+
+permissions:
+  contents: write
+
+env:
+  FEATURE_BRANCH: feature/complete-editor-rc
+  DEFAULT_BRANCH: codex/neonote-v2-blank-architecture
+
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/complete-editor-rc
+          fetch-depth: 0
+
+      - name: Delete stale branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
+          git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin/ | while read -r branch; do
+            case "$branch" in
+              HEAD|"$DEFAULT_BRANCH"|"$FEATURE_BRANCH") continue ;;
+            esac
+            git push origin --delete "$branch" || true
+          done
+
+      - name: Run repair embedded in feature workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/one-shot-maintenance.yml').read_text().splitlines()
+          start = next(i for i, line in enumerate(source) if line.strip() == '- name: Repair text container sizing and contextual toolbar')
+          run_line = next(i for i in range(start + 1, len(source)) if source[i].strip() == 'run: |')
+          end = next((i for i in range(run_line + 1, len(source)) if source[i].startswith('      - name:')), len(source))
+          body = []
+          for line in source[run_line + 1:end]:
+              body.append(line[10:] if line.startswith('          ') else line)
+          Path('/tmp/repair.sh').write_text('\n'.join(body) + '\n')
+          PY
+          bash /tmp/repair.sh
+
+      - name: Commit repaired feature and remove feature workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/one-shot-maintenance.yml
+          rmdir .github/workflows 2>/dev/null || true
+          rmdir .github 2>/dev/null || true
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'fix: make rich content containers grow with real UI content'
+          git push origin HEAD:${FEATURE_BRANCH}
+
+      - name: Remove bootstrap workflow from default branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin ${DEFAULT_BRANCH}
+          git checkout -B ${DEFAULT_BRANCH} origin/${DEFAULT_BRANCH}
+          git rm .github/workflows/run-feature-maintenance.yml
+          rmdir .github/workflows 2>/dev/null || true
+          rmdir .github 2>/dev/null || true
+          git commit -m 'chore: remove one-shot maintenance bootstrap'
+          git push origin HEAD:${DEFAULT_BRANCH}
