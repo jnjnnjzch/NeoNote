@@ -26,26 +26,67 @@ jobs:
           ref: feature/complete-editor-rc
           fetch-depth: 0
 
-      - name: Fix Kotlin search regex
+      - name: Fix text-box anchor and first-line height
         shell: bash
         run: |
           set -euo pipefail
           python3 <<'PY'
           from pathlib import Path
-          p = Path('app/src/main/java/com/neonote/engine/DocumentSearch.kt')
-          text = p.read_text()
-          old = '.replace(Regex("[^\\p{L}\\p{N}]+"), " ")'
-          new = '.replace(Regex("""[^\\p{L}\\p{N}]+"""), " ")'
-          if old not in text:
-              raise SystemExit('invalid regex source not found')
-          p.write_text(text.replace(old, new))
+
+          def once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, got {count}')
+              p.write_text(text.replace(old, new))
+
+          once(
+              'app/src/main/java/com/neonote/NeoNoteEditorController.kt',
+              '''    val maximumLeft = (visibleRight - width - margin).coerceAtLeast(visibleLeft + margin)
+              val position = documentPosition.copy(
+                  x = documentPosition.x.coerceIn(visibleLeft + margin, maximumLeft),
+              )
+              val minimumHeight = MinimumTextBoxHeightDp * displayDensity / zoom
+          ''',
+              '''    val maximumRight = visibleRight - margin
+              val overflow = (documentPosition.x + width - maximumRight).coerceAtLeast(0f)
+              val position = documentPosition.copy(
+                  x = (documentPosition.x - overflow).coerceAtLeast(visibleLeft + margin),
+              )
+              val minimumHeight = MinimumTextBoxHeightDp * displayDensity / zoom
+          ''',
+          )
+          once(
+              'app/src/main/java/com/neonote/NeoNoteEditorController.kt',
+              '        size = CanvasSize(width, maxOf(DefaultBoxHeight / zoom, minimumHeight)),',
+              '        size = CanvasSize(width, minimumHeight),',
+          )
+          once(
+              'app/src/test/kotlin/com/neonote/NeoNoteEditorControllerTest.kt',
+              '''        assertTrue(multilineBox.size.height > RichContentLayoutDefaults.MinimumBoxHeight)
+              assertEquals(320f, multilineBox.size.width)
+          ''',
+              '''        assertTrue(multilineBox.size.height > RichContentLayoutDefaults.MinimumBoxHeight)
+              assertTrue(multilineBox.size.width >= 640f)
+          ''',
+          )
+          once(
+              'app/src/test/kotlin/com/neonote/NeoNoteEditorControllerTest.kt',
+              '''        assertEquals(320f, emptiedBox.size.width)
+              assertTrue(emptiedBox.size.height >= RichContentLayoutDefaults.MinimumBoxHeight)
+          ''',
+              '''        assertEquals(multilineBox.size.width, emptiedBox.size.width)
+              assertTrue(emptiedBox.size.height >= RichContentLayoutDefaults.MinimumBoxHeight)
+          ''',
+          )
           PY
           rm -f ci/last-rc-failure.log
           rmdir ci 2>/dev/null || true
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m 'fix: use raw Kotlin regex for Unicode search normalization'
+          git commit -m 'fix: preserve tapped text anchor and allow visible auto-growth'
           git push origin HEAD:${FEATURE_BRANCH}
 
       - uses: actions/setup-java@v4
