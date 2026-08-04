@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.LocalTextStyle
@@ -34,16 +35,18 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neonote.engine.InlineStyle
+import com.neonote.engine.MathExpressionFormatter
 import com.neonote.engine.RichContentLayoutDefaults
 import com.neonote.model.InlineFormula
 import com.neonote.model.InlineImage
@@ -53,6 +56,7 @@ import com.neonote.model.ListKind
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
+import com.neonote.model.TextAlignment
 
 @Composable
 internal fun RichParagraphEditor(
@@ -82,22 +86,42 @@ internal fun RichParagraphEditor(
     val clipboardManager = remember(context) { context.getSystemService(ClipboardManager::class.java) }
     val focusRequester = remember { FocusRequester() }
     val modelText = paragraph.plainTextForEditor()
-    var platformTextFieldValue by remember(box.id, blockIndex) { mutableStateOf(TextFieldValue(modelText)) }
+    var platformValue by remember(box.id, blockIndex) { mutableStateOf(TextFieldValue(modelText)) }
 
     LaunchedEffect(active, selectionMode, selected) {
         if (active && !selectionMode && !selected) focusRequester.requestFocus()
     }
     LaunchedEffect(modelText) {
-        if (platformTextFieldValue.text != modelText) {
-            platformTextFieldValue = TextFieldValue(modelText, TextRange(modelText.length))
+        if (platformValue.text != modelText) {
+            val start = platformValue.selection.start.coerceIn(0, modelText.length)
+            val end = platformValue.selection.end.coerceIn(0, modelText.length)
+            platformValue = TextFieldValue(modelText, TextRange(start, end))
         }
     }
 
+    val paragraphTextStyle = LocalTextStyle.current.copy(
+        color = Color(0xFF0F172A),
+        lineHeight = RichContentLayoutDefaults.LineHeight.sp,
+        fontSize = when (paragraph.style.headingLevel) {
+            1 -> 24.sp
+            2 -> 20.sp
+            3 -> 17.sp
+            else -> 14.sp
+        },
+        fontWeight = if (paragraph.style.headingLevel > 0) FontWeight.SemiBold else FontWeight.Normal,
+        textAlign = when (paragraph.style.alignment) {
+            TextAlignment.Start -> TextAlign.Start
+            TextAlignment.Center -> TextAlign.Center
+            TextAlignment.End -> TextAlign.End
+        },
+    )
+    val indent = (paragraph.style.indentLevel * 20).dp
+
     BasicTextField(
-        value = platformTextFieldValue,
+        value = platformValue,
         onValueChange = { nextValue ->
-            val previousValue = platformTextFieldValue
-            platformTextFieldValue = nextValue
+            val previousValue = platformValue
+            platformValue = nextValue
             controller.updateRichContentParagraphFromPlatformInput(
                 boxId = box.id,
                 blockIndex = blockIndex,
@@ -115,23 +139,18 @@ internal fun RichParagraphEditor(
             capitalization = KeyboardCapitalization.Sentences,
             imeAction = ImeAction.Default,
         ),
-        textStyle = LocalTextStyle.current.copy(color = Color(0xFF0F172A), lineHeight = RichContentLayoutDefaults.LineHeight.sp),
+        textStyle = paragraphTextStyle,
         cursorBrush = SolidColor(Color(0xFF7C3AED)),
-        visualTransformation = remember(paragraph) { ParagraphStyleVisualTransformation(paragraph) },
+        visualTransformation = remember(paragraph) { CompleteParagraphVisualTransformation(paragraph) },
         modifier = modifier
             .fillMaxWidth()
+            .padding(start = indent)
             .heightIn(min = RichContentLayoutDefaults.LineHeight.dp)
             .focusRequester(focusRequester)
             .onFocusChanged { focusState ->
                 if (focusState.isFocused && !selectionMode && !selected && !box.isFocused) {
                     controller.activateRichContentBox(box.id)
                 }
-                // Do not commit or clear the rich-content session on plain platform
-                // focus loss. Toolbar taps can transiently move Android focus away
-                // from BasicTextField; the editor session remains the source of
-                // truth for the active paragraph selection until an explicit editor
-                // transition (selection mode, page switch, or focusing another box)
-                // commits it.
             }
             .onPreviewKeyEvent { keyEvent ->
                 val style = keyEvent.richContentShortcutStyle()
@@ -139,12 +158,12 @@ internal fun RichParagraphEditor(
                 val pastedText = keyEvent.richContentPlainTextPaste(clipboardManager, context)
                 when {
                     pastedText != null && box.isFocused -> {
-                        val selectionStart = minOf(platformTextFieldValue.selection.start, platformTextFieldValue.selection.end)
-                        val selectionEnd = maxOf(platformTextFieldValue.selection.start, platformTextFieldValue.selection.end)
-                        val nextText = platformTextFieldValue.text.replaceRange(selectionStart, selectionEnd, pastedText)
-                        val nextCursor = selectionStart + pastedText.length
-                        val previousValue = platformTextFieldValue
-                        platformTextFieldValue = TextFieldValue(text = nextText, selection = TextRange(nextCursor))
+                        val start = minOf(platformValue.selection.start, platformValue.selection.end)
+                        val end = maxOf(platformValue.selection.start, platformValue.selection.end)
+                        val nextText = platformValue.text.replaceRange(start, end, pastedText)
+                        val nextCursor = start + pastedText.length
+                        val previousValue = platformValue
+                        platformValue = TextFieldValue(nextText, TextRange(nextCursor))
                         controller.updateRichContentParagraphFromPlatformInput(
                             boxId = box.id,
                             blockIndex = blockIndex,
@@ -161,8 +180,8 @@ internal fun RichParagraphEditor(
                             boxId = box.id,
                             blockIndex = blockIndex,
                             style = style,
-                            selectionStart = platformTextFieldValue.selection.start,
-                            selectionEnd = platformTextFieldValue.selection.end,
+                            selectionStart = platformValue.selection.start,
+                            selectionEnd = platformValue.selection.end,
                         )
                         true
                     }
@@ -171,8 +190,8 @@ internal fun RichParagraphEditor(
                             boxId = box.id,
                             blockIndex = blockIndex,
                             kind = listKind,
-                            selectionStart = platformTextFieldValue.selection.start,
-                            selectionEnd = platformTextFieldValue.selection.end,
+                            selectionStart = platformValue.selection.start,
+                            selectionEnd = platformValue.selection.end,
                         )
                         true
                     }
@@ -181,8 +200,8 @@ internal fun RichParagraphEditor(
             },
         decorationBox = { innerTextField ->
             Box(modifier = Modifier.fillMaxWidth()) {
-                if (platformTextFieldValue.text.isEmpty()) {
-                    Text(text = "Start typing…", color = Color(0xFF94A3B8), style = LocalTextStyle.current.copy(lineHeight = RichContentLayoutDefaults.LineHeight.sp))
+                if (platformValue.text.isEmpty()) {
+                    Text("Start typing…", color = Color(0xFF94A3B8), style = paragraphTextStyle)
                 }
                 innerTextField()
             }
@@ -200,36 +219,65 @@ private fun ParagraphNode.plainTextForEditor(): String = inlines.joinToString(""
 
 private const val InlineAtomPlaceholder: String = "\uFFFC"
 
-private class ParagraphStyleVisualTransformation(
+/** Preserves one model character per platform character, keeping IME offsets identity-mapped. */
+private class CompleteParagraphVisualTransformation(
     private val paragraph: ParagraphNode,
 ) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
-        val builder = AnnotatedString.Builder(text.text)
+        val visible = text.text.toCharArray()
+        val spans = mutableListOf<Triple<SpanStyle, Int, Int>>()
         var offset = 0
         paragraph.inlines.forEach { inline ->
             when (inline) {
                 is InlineText -> {
                     val end = (offset + inline.text.length).coerceAtMost(text.length)
-                    if (end > offset && (inline.bold || inline.italic || inline.underline)) {
-                        builder.addStyle(
-                            style = SpanStyle(
-                                fontWeight = if (inline.bold) FontWeight.Bold else null,
-                                fontStyle = if (inline.italic) FontStyle.Italic else null,
-                                textDecoration = if (inline.underline) TextDecoration.Underline else null,
-                            ),
-                            start = offset,
-                            end = end,
-                        )
-                    }
+                    if (end > offset) spans += Triple(inline.completeSpanStyle(), offset, end)
                     offset = end
                 }
                 InlineLineBreak -> offset = (offset + 1).coerceAtMost(text.length)
-                is InlineFormula, is InlineImage -> offset = (offset + 1).coerceAtMost(text.length)
+                is InlineFormula -> {
+                    if (offset < visible.size) visible[offset] = formulaGlyph(inline.expression)
+                    if (offset < text.length) spans += Triple(inlineAtomStyle, offset, offset + 1)
+                    offset = (offset + 1).coerceAtMost(text.length)
+                }
+                is InlineImage -> {
+                    if (offset < visible.size) visible[offset] = '▧'
+                    if (offset < text.length) spans += Triple(inlineAtomStyle, offset, offset + 1)
+                    offset = (offset + 1).coerceAtMost(text.length)
+                }
             }
         }
+        val builder = AnnotatedString.Builder(visible.concatToString())
+        spans.forEach { (style, start, end) -> builder.addStyle(style, start, end) }
         return TransformedText(builder.toAnnotatedString(), OffsetMapping.Identity)
     }
+
+    private fun formulaGlyph(expression: String): Char {
+        val display = MathExpressionFormatter.render(expression).displayText
+        return display.firstOrNull { !it.isWhitespace() } ?: 'ƒ'
+    }
 }
+
+private fun InlineText.completeSpanStyle(): SpanStyle {
+    val decorations = buildList {
+        if (underline) add(TextDecoration.Underline)
+        if (strikethrough) add(TextDecoration.LineThrough)
+    }
+    return SpanStyle(
+        fontWeight = if (bold) FontWeight.Bold else null,
+        fontStyle = if (italic) FontStyle.Italic else null,
+        textDecoration = if (decorations.isEmpty()) null else TextDecoration.combine(decorations),
+        color = textColorArgb?.let(::Color) ?: Color.Unspecified,
+        background = highlightColorArgb?.let(::Color) ?: Color.Unspecified,
+        fontSize = (14f * fontScale.coerceIn(0.5f, 4f)).sp,
+    )
+}
+
+private val inlineAtomStyle = SpanStyle(
+    color = Color(0xFF1E3A8A),
+    background = Color(0xFFE0F2FE),
+    fontWeight = FontWeight.SemiBold,
+)
 
 private fun androidx.compose.ui.input.key.KeyEvent.richContentPlainTextPaste(
     clipboardManager: ClipboardManager?,
@@ -237,17 +285,17 @@ private fun androidx.compose.ui.input.key.KeyEvent.richContentPlainTextPaste(
 ): String? {
     if (type != KeyEventType.KeyDown || !isCtrlPressed || isShiftPressed || key != Key.V) return null
     val clip = clipboardManager?.primaryClip ?: return null
-    val description = clip.description
-    if (!description.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) || clip.itemCount == 0) return null
+    if (!clip.description.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) || clip.itemCount == 0) return null
     return clip.getItemAt(0).coerceToText(context)?.toString()?.replace("\r\n", "\n")?.replace('\r', '\n')
 }
 
 private fun androidx.compose.ui.input.key.KeyEvent.richContentShortcutStyle(): InlineStyle? {
-    if (type != KeyEventType.KeyDown || !isCtrlPressed || isShiftPressed) return null
-    return when (key) {
-        Key.B -> InlineStyle.Bold
-        Key.I -> InlineStyle.Italic
-        Key.U -> InlineStyle.Underline
+    if (type != KeyEventType.KeyDown || !isCtrlPressed) return null
+    return when {
+        !isShiftPressed && key == Key.B -> InlineStyle.Bold
+        !isShiftPressed && key == Key.I -> InlineStyle.Italic
+        !isShiftPressed && key == Key.U -> InlineStyle.Underline
+        isShiftPressed && key == Key.X -> InlineStyle.Strikethrough
         else -> null
     }
 }
