@@ -24,10 +24,6 @@ internal fun RichContentEditor(
     controller: NeoNoteEditorController,
     modifier: Modifier = Modifier,
 ) {
-    val activeTarget = controller.activeRichContentTarget(box.id)
-    val activeBlockIndex = activeTarget?.blockIndexForEditor()
-        ?: box.content.blocks.indexOfFirst { it is ParagraphNode }.coerceAtLeast(0)
-
     Column(
         modifier = modifier.fillMaxSize().padding(
             horizontal = RichContentLayoutDefaults.RendererHorizontalPadding.dp,
@@ -35,19 +31,20 @@ internal fun RichContentEditor(
         ),
         verticalArrangement = Arrangement.spacedBy(RichContentLayoutDefaults.BlockSpacing.dp),
     ) {
-        if (box.content.blocks.isEmpty()) {
-            RichParagraphEditor(
+        if (box.content.blocks.isEmpty() || box.content.blocks.all { it is ParagraphNode }) {
+            UnifiedRichTextEditor(
                 box = box,
-                blockIndex = 0,
-                paragraph = ParagraphNode(),
-                active = true,
                 selectionMode = selectionMode,
                 selected = selected,
                 controller = controller,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxSize(),
             )
             return@Column
         }
+
+        val activeTarget = controller.activeRichContentTarget(box.id)
+        val activeBlockIndex = activeTarget?.blockIndexForEditor()
+            ?: box.content.blocks.indexOfFirst { it is ParagraphNode }.coerceAtLeast(0)
 
         box.content.blocks.forEachIndexed { blockIndex, block ->
             when (block) {
