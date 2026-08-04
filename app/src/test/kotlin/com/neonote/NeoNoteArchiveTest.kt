@@ -15,6 +15,7 @@ import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
 import com.neonote.model.TableCell
 import com.neonote.model.TableNode
+import java.io.File
 import java.nio.file.Files
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
@@ -24,7 +25,7 @@ import kotlin.test.assertNotNull
 
 class NeoNoteArchiveTest {
     @Test
-    fun `archive exports imports and remaps recursively referenced assets`() = runBlocking {
+    fun `archive exports imports and remaps recursively referenced assets`() = runBlocking<Unit> {
         val sourceRoot = Files.createTempDirectory("neonote-archive-source").toFile()
         val targetRoot = Files.createTempDirectory("neonote-archive-target").toFile()
         try {
@@ -33,27 +34,36 @@ class NeoNoteArchiveTest {
             val secondBytes = byteArrayOf(5, 6, 7)
             val first = sourceStore.put(AssetDraft("image/png", firstBytes, "nested.png"))
             val second = sourceStore.put(AssetDraft("image/jpeg", secondBytes, "floating.jpg"))
+            val nestedTable = TableNode(
+                rows = listOf(
+                    listOf(
+                        TableCell(content = RichContent(listOf(BlockImage(first.id)))),
+                    ),
+                ),
+            )
             val document = NeoNoteDocument(
                 id = "source-document",
                 title = "Archive test",
                 assetStoreId = "assets",
-                pages = listOf(NotePage(
-                    id = "page",
-                    canvas = InfiniteCanvas(objects = listOf(
-                        RichContentBox(
-                            id = "box",
-                            content = RichContent(listOf(TableNode(rows = listOf(listOf(
-                                TableCell(content = RichContent(listOf(BlockImage(first.id)))),
-                            ))))),
+                pages = listOf(
+                    NotePage(
+                        id = "page",
+                        canvas = InfiniteCanvas(
+                            objects = listOf(
+                                RichContentBox(
+                                    id = "box",
+                                    content = RichContent(listOf(nestedTable)),
+                                ),
+                                FloatingImage(
+                                    id = "floating",
+                                    position = CanvasPoint(10f, 20f),
+                                    size = CanvasSize(100f, 80f),
+                                    assetId = second.id,
+                                ),
+                            ),
                         ),
-                        FloatingImage(
-                            id = "floating",
-                            position = CanvasPoint(10f, 20f),
-                            size = CanvasSize(100f, 80f),
-                            assetId = second.id,
-                        ),
-                    )),
-                )),
+                    ),
+                ),
             )
 
             val archive = NeoNoteArchiveCodec(sourceStore).export(document)
@@ -65,11 +75,12 @@ class NeoNoteArchiveTest {
             val importedIds = imported.document.referencedAssetIds()
             assertEquals(2, importedIds.size)
             assertNotEquals(document.referencedAssetIds(), importedIds)
-            val importedReferences = importedIds.map { assertNotNull(targetStore.get(it)) }
-            assertContentEquals(
-                setOf(firstBytes.toList(), secondBytes.toList()),
-                importedReferences.map { java.io.File(requireNotNull(it.uri)).readBytes().toList() }.toSet(),
-            )
+            val actualBytes: Set<List<Byte>> = importedIds.map { assetId ->
+                val reference = assertNotNull(targetStore.get(assetId))
+                File(assertNotNull(reference.uri)).readBytes().toList()
+            }.toSet()
+            val expectedBytes: Set<List<Byte>> = setOf(firstBytes.toList(), secondBytes.toList())
+            assertEquals(expectedBytes, actualBytes)
         } finally {
             sourceRoot.deleteRecursively()
             targetRoot.deleteRecursively()

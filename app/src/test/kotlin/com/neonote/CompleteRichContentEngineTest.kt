@@ -26,28 +26,37 @@ class CompleteRichContentEngineTest {
     private val engine = RichContentEngine()
 
     @Test
-    fun `recursive table cell address edits nested content without touching siblings`() {
-        val nested = TableNode(rows = listOf(listOf(TableCell())))
-        val outer = TableNode(rows = listOf(listOf(
-            TableCell(content = RichContent(listOf(nested))),
-            TableCell(content = RichContent(listOf(ParagraphNode(listOf(InlineText("sibling"))))))),
-        )))
-        val box = RichContentBox(id = "box", content = RichContent(listOf(outer)))
-        val address = TableCellAddress(0, 0, 0).child(0, 0, 0)
+fun `recursive table cell address edits nested content without touching siblings`() {
+    val nested = TableNode(rows = listOf(listOf(TableCell())))
+    val outer = TableNode(
+        rows = listOf(
+            listOf(
+                TableCell(content = RichContent(listOf(nested))),
+                TableCell(
+                    content = RichContent(
+                        listOf(ParagraphNode(listOf(InlineText("sibling")))),
+                    ),
+                ),
+            ),
+        ),
+    )
+    val box = RichContentBox(id = "box", content = RichContent(listOf(outer)))
+    val address = TableCellAddress(0, 0, 0).child(0, 0, 0)
 
-        val result = engine.execute(
-            box,
-            RichContentCommand.ReplaceTableCellParagraphText(address, "nested text"),
-        ) as RichContentCommandResult.ContentEdited
+    val result = engine.execute(
+        box,
+        RichContentCommand.ReplaceTableCellParagraphText(address, "nested text"),
+    ) as RichContentCommandResult.ContentEdited
 
-        val paragraph = assertIs<ParagraphNode>(RichContentTree.block(result.box.content, address))
-        assertEquals("nested text", assertIs<InlineText>(paragraph.inlines.single()).text)
-        val sibling = (assertIs<TableNode>(result.box.content.blocks.single()).rows[0][1].content.blocks.single() as ParagraphNode)
-        assertEquals("sibling", assertIs<InlineText>(sibling.inlines.single()).text)
-    }
+    val paragraph = assertIs<ParagraphNode>(RichContentTree.block(result.box.content, address))
+    assertEquals("nested text", assertIs<InlineText>(paragraph.inlines.single()).text)
+    val outerResult = assertIs<TableNode>(result.box.content.blocks.single())
+    val sibling = assertIs<ParagraphNode>(outerResult.rows[0][1].content.blocks.single())
+    assertEquals("sibling", assertIs<InlineText>(sibling.inlines.single()).text)
+}
 
-    @Test
-    fun `nested table supports row column insertion deletion and manual width`() {
+@Test
+fun `nested table supports row column insertion deletion and manual width`() {
         val outerAddress = TableCellAddress(0, 0, 0)
         var box = RichContentBox(
             id = "box",
