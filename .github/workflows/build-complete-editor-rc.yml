@@ -26,59 +26,89 @@ jobs:
           ref: feature/complete-editor-rc
           fetch-depth: 0
 
-      - name: Apply known compiler fixes to feature branch
+      - name: Apply guarded compiler and test fixes
         shell: bash
         run: |
           set -euo pipefail
           python3 <<'PY'
           from pathlib import Path
 
-          def once(path, old, new):
+          def replace_optional(path, old, new):
               p = Path(path)
               text = p.read_text()
               count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{path}: expected one match, got {count}: {old!r}")
-              p.write_text(text.replace(old, new))
+              if count > 1:
+                  raise SystemExit(f"{path}: ambiguous replacement ({count} matches)")
+              if count == 1:
+                  p.write_text(text.replace(old, new))
 
-          once(
-              'app/src/main/java/com/neonote/NeoNoteWorkspaceChrome.kt',
+          replace_optional('app/src/main/java/com/neonote/NeoNoteWorkspaceChrome.kt',
               'import androidx.compose.foundation.background\n',
-              'import androidx.compose.foundation.background\nimport androidx.compose.foundation.border\n',
-          )
-          once(
-              'app/src/main/java/com/neonote/UnifiedRichTextEditor.kt',
-              'textColorArgb?.let(::androidx.compose.ui.graphics.Color)',
-              'textColorArgb?.let(::Color)',
-          )
-          once(
-              'app/src/main/java/com/neonote/UnifiedRichTextEditor.kt',
-              'highlightColorArgb?.let(::androidx.compose.ui.graphics.Color)',
-              'highlightColorArgb?.let(::Color)',
-          )
-          once(
-              'app/src/main/java/com/neonote/engine/RichContentEditorSession.kt',
+              'import androidx.compose.foundation.background\nimport androidx.compose.foundation.border\n')
+          replace_optional('app/src/main/java/com/neonote/UnifiedRichTextEditor.kt',
+              'textColorArgb?.let(::androidx.compose.ui.graphics.Color)', 'textColorArgb?.let(::Color)')
+          replace_optional('app/src/main/java/com/neonote/UnifiedRichTextEditor.kt',
+              'highlightColorArgb?.let(::androidx.compose.ui.graphics.Color)', 'highlightColorArgb?.let(::Color)')
+          replace_optional('app/src/main/java/com/neonote/engine/RichContentEditorSession.kt',
               'pendingCommands.also(mutablePendingCommands::clear)',
-              'pendingCommands.also { mutablePendingCommands.clear() }',
+              'pendingCommands.also { mutablePendingCommands.clear() }')
+          replace_optional('app/src/main/java/com/neonote/engine/SelectionEngine.kt',
+              '.mapNotNull(InkStroke::boundsOrNull)', '.mapNotNull { it.boundsOrNull() }')
+          replace_optional('app/src/main/java/com/neonote/engine/SelectionEngine.kt',
+              'stroke.points.map(InkPoint::toCanvasPoint)', 'stroke.points.map { it.toCanvasPoint() }')
+
+          replace_optional(
+              'app/src/test/kotlin/com/neonote/CompleteRichContentEngineTest.kt',
+              '''        val outer = TableNode(rows = listOf(listOf(
+              TableCell(content = RichContent(listOf(nested))),
+              TableCell(content = RichContent(listOf(ParagraphNode(listOf(InlineText("sibling"))))))),
+          )))''',
+              '''        val outer = TableNode(
+              rows = listOf(
+                  listOf(
+                      TableCell(content = RichContent(listOf(nested))),
+                      TableCell(content = RichContent(listOf(ParagraphNode(listOf(InlineText("sibling")))))),
+                  ),
+              ),
+          )''',
           )
-          once(
-              'app/src/main/java/com/neonote/engine/SelectionEngine.kt',
-              '.mapNotNull(InkStroke::boundsOrNull)',
-              '.mapNotNull { it.boundsOrNull() }',
-          )
-          once(
-              'app/src/main/java/com/neonote/engine/SelectionEngine.kt',
-              'stroke.points.map(InkPoint::toCanvasPoint)',
-              'stroke.points.map { it.toCanvasPoint() }',
-          )
+          replace_optional('app/src/test/kotlin/com/neonote/NeoNoteArchiveTest.kt',
+              'import kotlin.test.assertContentEquals\n', '')
+          replace_optional('app/src/test/kotlin/com/neonote/NeoNoteArchiveTest.kt',
+              '''            assertContentEquals(
+                  setOf(firstBytes.toList(), secondBytes.toList()),
+                  importedReferences.map { java.io.File(requireNotNull(it.uri)).readBytes().toList() }.toSet(),
+              )''',
+              '''            assertEquals(
+                  setOf(firstBytes.toList(), secondBytes.toList()),
+                  importedReferences.map { java.io.File(requireNotNull(it.uri)).readBytes().toList() }.toSet(),
+              )''')
+          replace_optional('app/src/test/kotlin/com/neonote/RichContentRendererTest.kt',
+              '''    @Test
+              fun `inline placeholder helpers fall back to stable labels`() {
+                  assertEquals(" ƒ empty ", InlineFormula("").formulaChipText())
+                  assertEquals(" Image: asset:asset-42 ", InlineImage(assetId = "asset-42").imageChipText())
+              }''',
+              '''    @Test
+              fun `inline placeholders fall back to stable labels`() {
+                  val annotated = ParagraphNode(
+                      inlines = listOf(
+                          InlineFormula(""),
+                          InlineImage(assetId = "asset-42"),
+                      ),
+                  ).toDisplayAnnotatedString()
+                  assertEquals(" ƒ empty  Image: asset:asset-42 ", annotated.text)
+              }''')
           PY
           rm -f ci/last-rc-failure.log
           rmdir ci 2>/dev/null || true
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m 'fix: resolve first complete-editor compile errors'
-          git push origin HEAD:${FEATURE_BRANCH}
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix: align complete-editor tests with production behavior'
+            git push origin HEAD:${FEATURE_BRANCH}
+          fi
 
       - uses: actions/setup-java@v4
         with:
