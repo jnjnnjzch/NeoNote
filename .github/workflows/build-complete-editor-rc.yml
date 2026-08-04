@@ -26,100 +26,26 @@ jobs:
           ref: feature/complete-editor-rc
           fetch-depth: 0
 
-      - name: Apply semantic product fixes
+      - name: Fix Kotlin search regex
         shell: bash
         run: |
           set -euo pipefail
           python3 <<'PY'
           from pathlib import Path
-          import re
-
-          p = Path('app/src/main/java/com/neonote/NeoNoteEditorController.kt')
-          text = p.read_text()
-          pattern = re.compile(
-              r'(public fun focusOrCreateRichContentBox\(documentPosition: CanvasPoint\) \{.*?)(\n\s*if \(state\.currentTool != EditorTool\.Text\) return)(.*?\n\s*public fun insertFloatingImage)',
-              re.S,
-          )
-          text, count = pattern.subn(r'\1\3', text)
-          if count != 1:
-              raise SystemExit(f'focusOrCreate semantic replacement count={count}')
-          text, page_count = re.subn(r'firstPageId = "page-1",', 'firstPageId = "page-initial",', text, count=1)
-          if page_count != 1:
-              raise SystemExit(f'initial page id replacement count={page_count}')
-          if 'firstSectionId = "section-initial"' not in text:
-              text, section_count = re.subn(
-                  r'(documentId = "default-document",\s*\n\s*firstPageId = "page-initial",)',
-                  r'\1\n        firstSectionId = "section-initial",',
-                  text,
-                  count=1,
-              )
-              if section_count != 1:
-                  raise SystemExit(f'initial section id replacement count={section_count}')
-          p.write_text(text)
-
           p = Path('app/src/main/java/com/neonote/engine/DocumentSearch.kt')
           text = p.read_text()
-          text = text.replace('.joinToString("\\n")\n        .lowercase()', '.joinToString("\\n")\n        .normalizedSearchText()')
-          text = text.replace('val normalized = lowercase()', 'val normalized = normalizedSearchText()')
-          old = '''private fun String.normalizedTerms(): List<String> = trim()
-              .lowercase()
-              .split(Regex("\\\\s+"))
-              .map(String::trim)
-              .filter(String::isNotEmpty)
-              .distinct()
-              .take(MaximumSearchTerms)'''
-          new = '''private fun String.normalizedTerms(): List<String> = normalizedSearchText()
-              .split(Regex("\\\\s+"))
-              .map(String::trim)
-              .filter(String::isNotEmpty)
-              .distinct()
-              .take(MaximumSearchTerms)
-
-          private fun String.normalizedSearchText(): String = lowercase()
-              .replace(Regex("[\\\\{}_]+"), " ")
-              .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
-              .replace(Regex("\\\\s+"), " ")
-              .trim()'''
-          if old in text:
-              text = text.replace(old, new)
-          elif 'private fun String.normalizedSearchText()' not in text:
-              raise SystemExit('search normalization source not found')
-          p.write_text(text)
-
-          p = Path('app/src/test/kotlin/com/neonote/RichContentRendererTest.kt')
-          text = p.read_text()
-          pattern = re.compile(r'    @Test\n\s*fun `paragraph renderer emits visible chips for inline formula and image`\(\) \{.*?\n\s*\}\n\n\s*@Test', re.S)
-          replacement = '''    @Test
-              fun `paragraph renderer emits visible chips for inline formula and image`() {
-                  val paragraph = ParagraphNode(
-                      inlines = listOf(
-                          InlineText("before"),
-                          InlineFormula("x^2"),
-                          InlineLineBreak,
-                          InlineImage(assetId = "asset-42", altText = "diagram"),
-                      ),
-                  )
-                  val annotated = paragraph.toDisplayAnnotatedString()
-                  val chipSpans = annotated.spanStyles.filter { it.item.background != Color.Unspecified }
-                  assertEquals(2, chipSpans.size)
-                  assertTrue(annotated.text.startsWith("before"))
-                  assertTrue(annotated.text.contains("x"))
-                  assertTrue(annotated.text.contains("Image: diagram"))
-              }
-
-              @Test'''
-          text, count = pattern.subn(replacement, text)
-          if count not in (0, 1):
-              raise SystemExit(f'renderer test replacement count={count}')
-          p.write_text(text)
+          old = '.replace(Regex("[^\\p{L}\\p{N}]+"), " ")'
+          new = '.replace(Regex("""[^\\p{L}\\p{N}]+"""), " ")'
+          if old not in text:
+              raise SystemExit('invalid regex source not found')
+          p.write_text(text.replace(old, new))
           PY
-
           rm -f ci/last-rc-failure.log
           rmdir ci 2>/dev/null || true
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m 'fix: restore explicit text creation and normalize formula search'
+          git commit -m 'fix: use raw Kotlin regex for Unicode search normalization'
           git push origin HEAD:${FEATURE_BRANCH}
 
       - uses: actions/setup-java@v4
