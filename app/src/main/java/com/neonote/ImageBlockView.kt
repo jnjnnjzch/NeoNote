@@ -1,7 +1,5 @@
 package com.neonote
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,7 +25,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -42,10 +39,6 @@ import com.neonote.engine.FileAssetStore
 import com.neonote.model.BlockImage
 import com.neonote.model.ImageCrop
 import com.neonote.model.RichContentBox
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-
-private const val MaximumDecodedImageDimension = 2_048
 
 @Composable
 internal fun ImageBlockView(
@@ -59,10 +52,10 @@ internal fun ImageBlockView(
 ) {
     val context = LocalContext.current
     val assetStore = FileAssetStore(FileAssetStore.defaultDirectory(context.filesDir))
-    val imageBitmap by produceState<ImageBitmap?>(null, block.assetId, context.filesDir.absolutePath) {
-        value = withContext(Dispatchers.IO) {
-            assetStore.get(block.assetId)?.uri?.let(::decodeSampledBitmap)?.asImageBitmap()
-        }
+    val targetWidthPx = (block.width ?: box.size.width).toInt().coerceAtLeast(120)
+    val targetHeightPx = (block.height ?: 220f).toInt().coerceAtLeast(96)
+    val imageBitmap by produceState<ImageBitmap?>(null, block.assetId, targetWidthPx, targetHeightPx, context.filesDir.absolutePath) {
+        value = AssetImageLoader.load(assetStore, block.assetId, targetWidthPx, targetHeightPx)
     }
     val shape = RoundedCornerShape(12.dp)
     val imageHeight = (block.height ?: 220f).coerceIn(96f, 640f).dp
@@ -157,15 +150,6 @@ internal fun ImageBlockView(
             )
         }
     }
-}
-
-private fun decodeSampledBitmap(path: String): Bitmap? {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeFile(path, bounds)
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-    var sample = 1
-    while (bounds.outWidth / sample > MaximumDecodedImageDimension || bounds.outHeight / sample > MaximumDecodedImageDimension) sample *= 2
-    return BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
 }
 
 private fun BlockImage.displayTitle(): String = altText?.takeIf(String::isNotBlank) ?: "Image"
