@@ -482,14 +482,9 @@ public fun focusOrCreateRichContentBox(documentPosition: CanvasPoint) {
     val availableWidth = (viewportWidthScreenPx - TextBoxScreenMarginDp * 2f * displayDensity) / zoom
     val width = preferredWidth.coerceIn(minimumWidth, maximumWidth)
         .coerceAtMost(availableWidth.coerceAtLeast(minimumWidth))
-    val visibleLeft = -state.viewport.panOffsetX / zoom
-    val visibleRight = (viewportWidthScreenPx - state.viewport.panOffsetX) / zoom
-    val margin = TextBoxScreenMarginDp * displayDensity / zoom
-    val maximumRight = visibleRight - margin
-    val overflow = (documentPosition.x + width - maximumRight).coerceAtLeast(0f)
-    val position = documentPosition.copy(
-        x = (documentPosition.x - overflow).coerceAtLeast(visibleLeft + margin),
-    )
+    // Canvas commands preserve document coordinates exactly. Viewport fitting belongs
+    // to the screen/UI layer and must never rewrite persisted object positions.
+    val position = documentPosition
     val minimumHeight = MinimumTextBoxHeightDp * displayDensity / zoom
     val box = RichContentBox(
         id = nextRichContentBoxId(),
