@@ -42,63 +42,72 @@ import com.neonote.model.CanvasRect
 import com.neonote.model.CanvasSize
 import com.neonote.model.EditorState
 import com.neonote.model.EditorTool
+import com.neonote.model.EraserMode
+import com.neonote.model.FloatingImage
+import com.neonote.model.FormulaDisplayMode
+import com.neonote.model.ImageCrop
 import com.neonote.model.InfiniteCanvas
+import com.neonote.model.InkBrush
 import com.neonote.model.InkPoint
 import com.neonote.model.InkStroke
 import com.neonote.model.InkStrokeRef
+import com.neonote.model.InkToolSettings
 import com.neonote.model.ListKind
 import com.neonote.model.NeoNoteDocument
 import com.neonote.model.NotePage
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
 import com.neonote.model.SelectionState
-import com.neonote.model.TableCell
 import com.neonote.model.TableCellAddress
-import com.neonote.model.TableNode
+import com.neonote.model.TextAlignment
+import com.neonote.model.TextSelection
 import com.neonote.model.ViewportState
 import java.util.ArrayDeque
 
 private const val DefaultBoxWidth = 320f
-private const val DefaultBoxHeight = 160f
-private const val MinZoomScale = 0.25f
-private const val MaxZoomScale = 4f
+private const val DefaultBoxHeight = 96f
+private const val DefaultViewportWidthPx = 1280f
+private const val MinimumTextBoxWidthDp = 320f
+private const val PreferredTextBoxWidthDp = 520f
+private const val MaximumTextBoxWidthDp = 760f
+private const val MinimumTextBoxHeightDp = 96f
+private const val TextBoxScreenMarginDp = 20f
+private const val DefaultImageWidth = 320f
+private const val DefaultImageHeight = 220f
+private const val MinZoomScale = 0.2f
+private const val MaxZoomScale = 6f
 private const val DefaultInputDiagnosticsThrottleMillis = 32L
-private const val HistoryLimit = 100
+private const val HistoryLimit = 150
 private const val MaximumDocumentTitleLength = 120
-private const val MaximumTableRows = 50
-private const val MaximumTableColumns = 20
 
 /**
- * Small reducer-style controller for the first v2 interactive vertical slice.
- * Composables translate UI events into these intents; document mutations stay
- * here and flow through the existing engines where appropriate.
+ * Product editor reducer. Compose sends user intents here; all persisted
+ * mutations flow through pure document/content/ink/selection engines.
  */
 public class NeoNoteEditorController(
-    initialState: EditorState = createTestEditorState(),
+    initialState: EditorState = createInitialEditorState(),
     private val canvasEngine: CanvasEngine = CanvasEngine(),
     private val selectionEngine: SelectionEngine = SelectionEngine(),
-    private val inkEngine: InkEngine = InkEngine(SequentialIdGenerator()),
+    private val idGenerator: IdGenerator = SequentialIdGenerator(),
+    private val inkEngine: InkEngine = InkEngine(idGenerator),
     private val richContentEngine: RichContentEngine = RichContentEngine(),
     private val richContentMeasurer: RichContentMeasurer = RichContentMeasurer(),
-    private val documentEngine: DocumentEngine = DocumentEngine(SequentialIdGenerator()),
+    private val documentEngine: DocumentEngine = DocumentEngine(idGenerator),
     private val inputDiagnosticsThrottleMillis: Long = DefaultInputDiagnosticsThrottleMillis,
     private val diagnosticsClockMillis: () -> Long = { System.currentTimeMillis() },
 ) {
-    private val undoDocuments: ArrayDeque<NeoNoteDocument> = ArrayDeque()
-    private val redoDocuments: ArrayDeque<NeoNoteDocument> = ArrayDeque()
-    private var historyMutationInProgress: Boolean = false
-    private var stateBacking: EditorState by mutableStateOf(initialState)
+    private val undoDocuments = ArrayDeque<NeoNoteDocument>()
+    private val redoDocuments = ArrayDeque<NeoNoteDocument>()
+    private var historyMutationInProgress = false
+    private var stateBacking by mutableStateOf(initialState.ensurePage())
 
     public var state: EditorState
         get() = stateBacking
         private set(value) {
-            val previousDocument = stateBacking.document.historySnapshot()
-            val nextDocument = value.document.historySnapshot()
-            if (
-                !historyMutationInProgress &&
-                !previousDocument.hasSameHistoryContentAs(nextDocument)
-            ) {
-                undoDocuments.addLast(previousDocument)
+            val previous = stateBacking.document.historySnapshot()
+            val next = value.document.historySnapshot()
+            if (!historyMutationInProgress && !previous.hasSameHistoryContentAs(next)) {
+                undoDocuments.addLast(previous)
                 undoDocuments.trimToHistoryLimit()
                 redoDocuments.clear()
             }
@@ -107,17 +116,23 @@ public class NeoNoteEditorController(
 
     public var inputDiagnostics: InputDiagnostics by mutableStateOf(InputDiagnostics())
         private set
-
     public var inkSession: InkSession by mutableStateOf(InkSession.fromCanvas(currentCanvas))
         private set
-
     public var persistenceStatus: String by mutableStateOf("Not saved")
         private set
-
     public var persistenceDiagnostics: PersistenceDiagnostics? by mutableStateOf(null)
         private set
-
     private var lastPersistedRevision: Long? by mutableStateOf(null)
+
+    private var activeSelectionGesture: ActiveSelectionGesture? by mutableStateOf(null)
+    private var lastInputDiagnosticsUpdateMillis: Long? = null
+    private var pendingInputDiagnostics: InputDiagnostics? = null
+    private var richContentInteractionRevision by mutableStateOf(0)
+    private var displayDensity: Float = 1f
+    private var viewportWidthScreenPx: Float = DefaultViewportWidthPx
+    private var hasViewportMetrics: Boolean = false
+    private val richContentSessions = mutableMapOf<String, RichContentEditorSession>()
+    private val selectedRichContentObjectBlocks = mutableMapOf<String, Int>()
 
     public val saveStateLabel: String
         get() = when {
@@ -125,115 +140,176 @@ public class NeoNoteEditorController(
             lastPersistedRevision == null -> "Saving locally"
             else -> "Saving…"
         }
-
-    public val activeInkStroke: InkStroke?
-        get() = inkSession.activeStroke
-
+    public val activeInkStroke: InkStroke? get() = inkSession.activeStroke
     public val activeLassoPath: List<CanvasPoint>
         get() = (activeSelectionGesture as? ActiveSelectionGesture.Lasso)?.path.orEmpty()
-
-    public val selectedBounds: CanvasRect?
-        get() = selectionEngine.selectedBounds(currentCanvas, state.selection)
-
-    public val currentCanvas: InfiniteCanvas
-        get() = currentPage.canvas
-
+    public val selectedBounds: CanvasRect? get() = selectionEngine.selectedBounds(currentCanvas, state.selection)
+    public val currentCanvas: InfiniteCanvas get() = currentPage.canvas
     public val currentPageIndex: Int
         get() = state.document.pages.indexOfFirst { it.id == state.currentPageId }.coerceAtLeast(0)
-
-    public val currentPageNumber: Int
-        get() = currentPageIndex + 1
-
-    public val pageCount: Int
-        get() = state.document.pages.size
-
-    public val canSwitchToPreviousPage: Boolean
-        get() = currentPageIndex > 0
-
-    public val canSwitchToNextPage: Boolean
-        get() = currentPageIndex < pageCount - 1
-
-    public val canUndo: Boolean
-        get() = undoDocuments.isNotEmpty()
-
-    public val canRedo: Boolean
-        get() = redoDocuments.isNotEmpty()
-
-    private var activeSelectionGesture: ActiveSelectionGesture? by mutableStateOf(null)
-    private var lastInputDiagnosticsUpdateMillis: Long? = null
-    private var pendingInputDiagnostics: InputDiagnostics? = null
-    private var richContentInteractionRevision: Int by mutableStateOf(0)
-    private val richContentSessions: MutableMap<String, RichContentEditorSession> = mutableMapOf()
-    private val selectedRichContentObjectBlocks: MutableMap<String, Int> = mutableMapOf()
-
-    private val currentPage: NotePage
-        get() = state.document.pages.first { it.id == state.currentPageId }
+    public val currentPageNumber: Int get() = currentPageIndex + 1
+    public val pageCount: Int get() = state.document.pages.size
+    public val canSwitchToPreviousPage: Boolean get() = currentPageIndex > 0
+    public val canSwitchToNextPage: Boolean get() = currentPageIndex < pageCount - 1
+    public val canUndo: Boolean get() = undoDocuments.isNotEmpty()
+    public val canRedo: Boolean get() = redoDocuments.isNotEmpty()
+    private val currentPage: NotePage get() = state.document.pages[currentPageIndex]
 
     public fun undo() {
         if (undoDocuments.isEmpty()) return
-        val previousDocument = undoDocuments.removeLast()
+        val previous = undoDocuments.removeLast()
         redoDocuments.addLast(state.document.historySnapshot())
         redoDocuments.trimToHistoryLimit()
-        restoreDocumentFromHistory(previousDocument)
+        restoreDocumentFromHistory(previous)
     }
 
     public fun redo() {
         if (redoDocuments.isEmpty()) return
-        val nextDocument = redoDocuments.removeLast()
+        val next = redoDocuments.removeLast()
         undoDocuments.addLast(state.document.historySnapshot())
         undoDocuments.trimToHistoryLimit()
-        restoreDocumentFromHistory(nextDocument)
+        restoreDocumentFromHistory(next)
     }
 
     public fun setTool(tool: EditorTool) {
         if (state.currentTool == tool) return
-        if (tool != EditorTool.Text) {
-            state.focusedRichContentBoxId?.let(::commitRichContentEditing)
-        }
+        if (tool != EditorTool.Text) state.focusedRichContentBoxId?.let(::commitRichContentEditing)
         cancelInkIfActive()
-        val nextCanvas = if (tool == EditorTool.Text) {
-            currentCanvas
-        } else {
-            currentCanvas.setFocusedRichContentBox(null)
-        }
+        val canvas = if (tool == EditorTool.Text) currentCanvas else currentCanvas.setFocusedRichContentBox(null)
         state = state.copy(
             currentTool = tool,
             focusedRichContentBoxId = if (tool == EditorTool.Text) state.focusedRichContentBoxId else null,
             selection = if (tool == EditorTool.Selection) state.selection else SelectionState(),
-            document = if (nextCanvas == currentCanvas) state.document else state.document.withCanvas(nextCanvas),
+            document = if (canvas == currentCanvas) state.document else state.document.withCanvas(canvas),
         )
     }
 
-    public fun resetViewport() {
-        state = state.copy(viewport = ViewportState())
+    public fun setInkColor(colorArgb: Int) {
+        state = state.copy(inkSettings = state.inkSettings.copy(colorArgb = colorArgb).normalized())
     }
+
+    public fun setInkWidth(width: Float) {
+        state = state.copy(inkSettings = state.inkSettings.copy(width = width).normalized())
+    }
+
+    public fun setInkOpacity(opacity: Float) {
+        state = state.copy(inkSettings = state.inkSettings.copy(opacity = opacity).normalized())
+    }
+
+    public fun setInkBrush(brush: InkBrush) {
+        state = state.copy(inkSettings = state.inkSettings.copy(
+            brush = brush,
+            opacity = if (brush == InkBrush.Highlighter) 0.35f else state.inkSettings.opacity,
+            width = if (brush == InkBrush.Highlighter) state.inkSettings.width.coerceAtLeast(12f) else state.inkSettings.width,
+        ).normalized())
+    }
+
+    public fun setPressureEnabled(enabled: Boolean) {
+        state = state.copy(inkSettings = state.inkSettings.copy(pressureEnabled = enabled))
+    }
+
+    public fun setEraserMode(mode: EraserMode) {
+        state = state.copy(eraserMode = mode)
+    }
+
+    public fun resetViewport() { state = state.copy(viewport = ViewportState()) }
 
     public fun renameDocument(title: String) {
-        val nextTitle = title.take(MaximumDocumentTitleLength)
-        if (state.document.title == nextTitle) return
-        state = state.copy(
-            document = state.document.copy(
-                title = nextTitle,
-                revision = state.document.revision + 1,
-            ),
-        )
+        val next = title.take(MaximumDocumentTitleLength)
+        if (next == state.document.title) return
+        val result = documentEngine.execute(DocumentCommand.RenameDocument(state.document, next))
+            as DocumentCommandResult.DocumentUpdated
+        state = state.copy(document = result.document)
+    }
+
+    public fun toggleDocumentFavorite() {
+        val result = documentEngine.execute(DocumentCommand.ToggleFavorite(state.document))
+            as DocumentCommandResult.DocumentUpdated
+        state = state.copy(document = result.document)
+    }
+
+    public fun addPage() {
+        val result = documentEngine.execute(DocumentCommand.AddPage(state.document)) as DocumentCommandResult.PageAdded
+        state = state.copy(document = result.document)
+        switchPage(result.page.id)
+    }
+
+    public fun renamePage(pageId: String, title: String) {
+        val result = documentEngine.execute(DocumentCommand.RenamePage(state.document, pageId, title))
+            as DocumentCommandResult.PageUpdated
+        state = state.copy(document = result.document)
+    }
+
+    public fun duplicatePage(pageId: String = currentPage.id) {
+        val result = documentEngine.execute(DocumentCommand.DuplicatePage(state.document, pageId))
+            as DocumentCommandResult.PageAdded
+        state = state.copy(document = result.document)
+        switchPage(result.page.id)
+    }
+
+    public fun deletePage(pageId: String = currentPage.id) {
+        val result = documentEngine.execute(DocumentCommand.DeletePage(state.document, pageId))
+            as DocumentCommandResult.PageDeleted
+        if (result.document == state.document) return
+        replaceStateWithoutRecordingHistory {
+            state = state.copy(document = result.document, currentPageId = result.nextPageId)
+        }
+        resetTransientEditingState()
+    }
+
+    public fun movePage(fromIndex: Int, toIndex: Int) {
+        val result = documentEngine.execute(DocumentCommand.MovePage(state.document, fromIndex, toIndex))
+            as DocumentCommandResult.PagesReordered
+        state = state.copy(document = result.document)
+    }
+
+    public fun switchToPreviousPage() {
+        if (canSwitchToPreviousPage) switchPage(state.document.pages[currentPageIndex - 1].id)
+    }
+
+    public fun switchToNextPage() {
+        if (canSwitchToNextPage) switchPage(state.document.pages[currentPageIndex + 1].id)
+    }
+
+    public fun switchPage(pageId: String) {
+        if (pageId == state.currentPageId) return
+        state.focusedRichContentBoxId?.let(::commitRichContentEditing)
+        val clearedDocument = state.document.withCanvasForPage(currentPage.id, currentCanvas.setFocusedRichContentBox(null))
+        val result = documentEngine.execute(DocumentCommand.SwitchPage(
+            state.copy(document = clearedDocument, focusedRichContentBoxId = null, selection = SelectionState()),
+            pageId,
+        )) as DocumentCommandResult.PageSwitched
+        state = result.state
+        activeSelectionGesture = null
+        inkSession = InkSession.fromCanvas(currentCanvas)
     }
 
     public fun deleteSelection() {
-        val selection = state.selection
-        if (selection.selectedRefs.isEmpty()) return
-        val updatedCanvas = currentCanvas.copy(
-            objects = currentCanvas.objects.filterNot { selection.isObjectSelected(it.id) },
-            inkLayer = currentCanvas.inkLayer.copy(
-                strokes = currentCanvas.inkLayer.strokes.filterNot { selection.isStrokeSelected(it.id) },
-            ),
-        )
-        state = state.copy(
-            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(null)),
-            focusedRichContentBoxId = null,
-            selection = SelectionState(),
-        )
-        inkSession = InkSession.fromCanvas(updatedCanvas)
+        if (state.selection.selectedRefs.isEmpty()) return
+        applyCanvas(selectionEngine.deleteSelection(currentCanvas, state.selection), clearSelection = true)
+    }
+
+    public fun duplicateSelection() {
+        if (state.selection.selectedRefs.isEmpty()) return
+        val result = selectionEngine.duplicateSelection(currentCanvas, state.selection, idGenerator)
+        applyCanvas(result.canvas, selection = result.selection)
+    }
+
+    public fun scaleSelection(scaleX: Float, scaleY: Float = scaleX) {
+        if (state.selection.selectedRefs.isEmpty()) return
+        applyCanvas(selectionEngine.scaleSelection(currentCanvas, state.selection, scaleX, scaleY))
+    }
+
+    public fun bringSelectionToFront() {
+        applyCanvas(selectionEngine.bringSelectionToFront(currentCanvas, state.selection))
+    }
+
+    public fun sendSelectionToBack() {
+        applyCanvas(selectionEngine.sendSelectionToBack(currentCanvas, state.selection))
+    }
+
+    public fun setSelectionLocked(locked: Boolean) {
+        applyCanvas(selectionEngine.setSelectionLocked(currentCanvas, state.selection, locked))
     }
 
     public suspend fun saveDocument(store: PersistenceStore): PersistenceResult.Saved {
@@ -249,101 +325,58 @@ public class NeoNoteEditorController(
         documentId: String = state.document.id,
     ): PersistenceResult.Loaded {
         val loaded = store.load(documentId)
-        val document = loaded.document
-        if (document == null) {
+        val document = loaded.document ?: run {
             lastPersistedRevision = null
-            persistenceDiagnostics = null
             persistenceStatus = "No local document found for $documentId"
             return loaded
         }
-
-        val nextPageId = document.pages.firstOrNull()?.id
-        replaceStateWithoutRecordingHistory {
-            state = state.copy(
-                document = document.withMeasuredRichContentBoxHeights(),
-                currentPageId = nextPageId,
-                focusedRichContentBoxId = null,
-                selection = SelectionState(),
-            )
-        }
-        undoDocuments.clear()
-        redoDocuments.clear()
-        richContentSessions.clear()
-        selectedRichContentObjectBlocks.clear()
-        val cacheRebuildTimeMillis = elapsedMillis {
-            inkSession = document.pages.firstOrNull()?.canvas?.let(InkSession::fromCanvas) ?: InkSession()
-        }
-        val diagnostics = loaded.diagnostics?.copy(cacheRebuildTimeMillis = cacheRebuildTimeMillis)
+        val rebuildStartNanos = System.nanoTime()
+        val measuredDocument = document.withMeasuredRichContentBoxHeights()
+        replaceDocument(measuredDocument, recordHistory = false)
+        val diagnostics = loaded.diagnostics?.copy(
+            cacheRebuildTimeMillis = (System.nanoTime() - rebuildStartNanos) / 1_000_000.0,
+        )
+        val result = loaded.copy(diagnostics = diagnostics)
         lastPersistedRevision = document.revision
         persistenceDiagnostics = diagnostics
         persistenceStatus = "Loaded ${document.id} at revision ${document.revision}" + diagnostics.toStatusSuffix()
-        return loaded.copy(diagnostics = diagnostics)
+        return result
     }
 
-    /**
-     * Updates toolbar-only input diagnostics at a bounded cadence.
-     *
-     * The pending diagnostics are merged so the toolbar can still show the latest
-     * tool and pressure plus a pressure range/sample count for throttled events.
-     * This method is intentionally separate from [routeInputEvent], so throttling
-     * Compose state writes cannot drop ink samples or alter pressure routing.
-     */
+    public fun replaceDocument(document: NeoNoteDocument, recordHistory: Boolean = true) {
+        val action = {
+            state = state.copy(
+                document = document.ensurePageDocument(),
+                currentPageId = document.pages.firstOrNull()?.id,
+                focusedRichContentBoxId = null,
+                selection = SelectionState(),
+                viewport = ViewportState(),
+            )
+        }
+        if (recordHistory) action() else replaceStateWithoutRecordingHistory(action)
+        undoDocuments.clear()
+        redoDocuments.clear()
+        resetTransientEditingState()
+    }
+
     public fun updateInputDiagnostics(
         diagnostics: InputDiagnostics,
         eventTimeMillis: Long = diagnosticsClockMillis(),
         force: Boolean = false,
     ): Boolean {
-        val pendingDiagnostics = pendingInputDiagnostics?.mergeForThrottledDisplay(diagnostics) ?: diagnostics
-        val lastUpdateMillis = lastInputDiagnosticsUpdateMillis
-        val shouldPublish = force ||
-            inputDiagnosticsThrottleMillis <= 0L ||
-            lastUpdateMillis == null ||
-            eventTimeMillis - lastUpdateMillis >= inputDiagnosticsThrottleMillis ||
-            diagnostics.tool != inputDiagnostics.tool
-
-        return if (shouldPublish) {
-            inputDiagnostics = pendingDiagnostics
+        val pending = pendingInputDiagnostics?.mergeForThrottledDisplay(diagnostics) ?: diagnostics
+        val last = lastInputDiagnosticsUpdateMillis
+        val publish = force || inputDiagnosticsThrottleMillis <= 0L || last == null ||
+            eventTimeMillis - last >= inputDiagnosticsThrottleMillis || diagnostics.tool != inputDiagnostics.tool
+        return if (publish) {
+            inputDiagnostics = pending
             pendingInputDiagnostics = null
             lastInputDiagnosticsUpdateMillis = eventTimeMillis
             true
         } else {
-            pendingInputDiagnostics = pendingDiagnostics
+            pendingInputDiagnostics = pending
             false
         }
-    }
-
-    public fun addPage() {
-        val result = documentEngine.execute(DocumentCommand.AddPage(state.document)) as DocumentCommandResult.PageAdded
-        state = state.copy(document = result.document)
-        switchPage(result.page.id)
-    }
-
-    public fun switchToPreviousPage() {
-        if (!canSwitchToPreviousPage) return
-        switchPage(state.document.pages[currentPageIndex - 1].id)
-    }
-
-    public fun switchToNextPage() {
-        if (!canSwitchToNextPage) return
-        switchPage(state.document.pages[currentPageIndex + 1].id)
-    }
-
-    public fun switchPage(pageId: String) {
-        if (pageId == state.currentPageId) return
-        state.focusedRichContentBoxId?.let(::commitRichContentEditing)
-        val documentWithClearedFocus = state.document.withCanvasForPage(
-            pageId = currentPage.id,
-            canvas = currentCanvas.setFocusedRichContentBox(null),
-        )
-        val clearedState = state.copy(
-            document = documentWithClearedFocus,
-            focusedRichContentBoxId = null,
-            selection = SelectionState(),
-        )
-        val result = documentEngine.execute(DocumentCommand.SwitchPage(clearedState, pageId)) as DocumentCommandResult.PageSwitched
-        state = result.state
-        activeSelectionGesture = null
-        inkSession = InkSession.fromCanvas(currentCanvas)
     }
 
     public fun routeInputEvent(
@@ -351,7 +384,7 @@ public class NeoNoteEditorController(
         event: InputEvent,
         mode: InputMode = InputMode.Write,
     ): InputRouteResult {
-        val result = router.route(canvas = currentCanvas, event = event, mode = mode)
+        val result = router.route(currentCanvas, event, mode)
         when (val action = result.action) {
             is InputAction.BeginInk -> beginInk(action.position, action.pressure, action.rawPressure)
             is InputAction.ContinueInk -> continueInk(action.samples)
@@ -368,24 +401,18 @@ public class NeoNoteEditorController(
         return result
     }
 
-
     private fun beginInk(screenPosition: CanvasPoint, pressure: Float, rawPressure: Float?) {
-        val point = screenPosition.toInkPoint(pressure, rawPressure)
-        val result = inkEngine.execute(
-            session = InkSession.fromCanvas(currentCanvas),
-            command = InkCommand.BeginStroke(point),
-        ) as InkCommandResult.StrokeBegun
-        inkSession = result.session
+        val command = InkCommand.BeginStroke(
+            point = screenPosition.toInkPoint(pressure, rawPressure),
+            style = state.inkSettings.toStrokeStyle(),
+        )
+        inkSession = (inkEngine.execute(InkSession.fromCanvas(currentCanvas), command) as InkCommandResult.StrokeBegun).session
     }
 
     private fun continueInk(samples: List<InputInkSample>) {
-        if (inkSession.activeStroke == null) return
-        val points = samples.map { sample -> sample.position.toInkPoint(sample.pressure, sample.rawPressure) }
-        val result = inkEngine.execute(
-            session = inkSession,
-            command = InkCommand.AppendPoints(points),
-        ) as InkCommandResult.PointAppended
-        inkSession = result.session
+        if (inkSession.activeStroke == null || samples.isEmpty()) return
+        val points = samples.map { it.position.toInkPoint(it.pressure, it.rawPressure) }
+        inkSession = (inkEngine.execute(inkSession, InkCommand.AppendPoints(points)) as InkCommandResult.PointAppended).session
     }
 
     private fun endInkIfActive() {
@@ -397,72 +424,57 @@ public class NeoNoteEditorController(
 
     private fun cancelInkIfActive() {
         if (inkSession.activeStroke == null) return
-        val result = inkEngine.execute(inkSession, InkCommand.CancelStroke) as InkCommandResult.StrokeCancelled
-        inkSession = result.session
-    }
-
-    private fun CanvasPoint.toInkPoint(pressure: Float, rawPressure: Float?): InkPoint {
-        val documentPosition = screenToDocument(this)
-        return InkPoint(
-            x = documentPosition.x,
-            y = documentPosition.y,
-            pressure = pressure,
-            rawPressure = rawPressure,
-        )
-    }
-
-    private fun commitInkLayer(inkLayer: com.neonote.model.InkLayer) {
-        val updatedCanvas = currentCanvas.copy(inkLayer = inkLayer)
-        state = state.copy(document = state.document.withCanvas(updatedCanvas))
+        inkSession = (inkEngine.execute(inkSession, InkCommand.CancelStroke) as InkCommandResult.StrokeCancelled).session
     }
 
     private fun eraseInkAtScreenPositions(screenPositions: List<CanvasPoint>) {
-        if (screenPositions.isEmpty() || currentCanvas.inkLayer.strokes.isEmpty()) return
-        val documentPositions = screenPositions.map(::screenToDocument)
-        val tolerance = 14f / state.viewport.zoomScale.coerceAtLeast(MinZoomScale)
-        val remainingStrokes = currentCanvas.inkLayer.strokes.filterNot { stroke ->
-            documentPositions.any { point ->
-                selectionEngine.hitTestInkStroke(stroke = stroke, point = point, tolerance = tolerance)
-            }
+        if (screenPositions.isEmpty()) return
+        val points = screenPositions.map { screen ->
+            val document = screenToDocument(screen)
+            InkPoint(document.x, document.y)
         }
-        if (remainingStrokes.size == currentCanvas.inkLayer.strokes.size) return
-        val updatedCanvas = currentCanvas.copy(
-            inkLayer = currentCanvas.inkLayer.copy(strokes = remainingStrokes),
-        )
-        state = state.copy(document = state.document.withCanvas(updatedCanvas))
-        inkSession = InkSession.fromCanvas(updatedCanvas)
+        val radius = 14f / state.viewport.zoomScale.coerceAtLeast(MinZoomScale)
+        val command = when (state.eraserMode) {
+            EraserMode.Stroke -> InkCommand.EraseWholeStrokes(points, radius)
+            EraserMode.Segment -> InkCommand.EraseSegments(points, radius)
+        }
+        val result = inkEngine.execute(InkSession.fromCanvas(currentCanvas), command) as InkCommandResult.InkErased
+        if (result.session.inkLayer == currentCanvas.inkLayer) return
+        inkSession = result.session
+        commitInkLayer(result.session.inkLayer)
+    }
+
+    private fun CanvasPoint.toInkPoint(pressure: Float, rawPressure: Float?): InkPoint {
+        val point = screenToDocument(this)
+        return InkPoint(point.x, point.y, pressure, rawPressure)
+    }
+
+    private fun commitInkLayer(layer: com.neonote.model.InkLayer) {
+        applyCanvas(currentCanvas.copy(inkLayer = layer))
     }
 
     public fun setSelectionMode(enabled: Boolean) {
-        if (enabled) state.focusedRichContentBoxId?.let(::commitRichContentEditing)
-        state = state.copy(
-            currentTool = if (enabled) EditorTool.Selection else EditorTool.Pen,
-            focusedRichContentBoxId = null,
-            selection = if (enabled) state.selection else SelectionState(),
-            document = state.document.withCanvas(currentCanvas.setFocusedRichContentBox(null)),
-        )
+        setTool(if (enabled) EditorTool.Selection else EditorTool.Pen)
     }
 
     public fun panViewportBy(screenDx: Float, screenDy: Float) {
-        val viewport = state.viewport
-        state = state.copy(
-            viewport = viewport.copy(
-                panOffsetX = viewport.panOffsetX + screenDx,
-                panOffsetY = viewport.panOffsetY + screenDy,
-            ),
-        )
+        state = state.copy(viewport = state.viewport.copy(
+            panOffsetX = state.viewport.panOffsetX + screenDx,
+            panOffsetY = state.viewport.panOffsetY + screenDy,
+        ))
     }
 
     public fun zoomViewportBy(zoomChange: Float, screenCentroid: CanvasPoint) {
         if (zoomChange == 1f) return
-        state = state.copy(
-            viewport = state.viewport.zoomAroundScreenPoint(
-                zoomChange = zoomChange,
-                screenCentroid = screenCentroid,
-                minZoomScale = MinZoomScale,
-                maxZoomScale = MaxZoomScale,
-            ),
-        )
+        state = state.copy(viewport = state.viewport.zoomAroundScreenPoint(
+            zoomChange, screenCentroid, MinZoomScale, MaxZoomScale,
+        ))
+    }
+
+    public fun updateViewportMetrics(widthPx: Int, density: Float) {
+        if (widthPx > 0) viewportWidthScreenPx = widthPx.toFloat()
+        if (density.isFinite() && density > 0f) displayDensity = density
+        hasViewportMetrics = widthPx > 0 && density.isFinite() && density > 0f
     }
 
     public fun focusOrCreateRichContentBox(documentPosition: CanvasPoint) {
@@ -471,11 +483,26 @@ public class NeoNoteEditorController(
             activateRichContentBox(existing.id)
             return
         }
-
+        val zoom = state.viewport.zoomScale.coerceAtLeast(MinZoomScale)
+        val width = if (hasViewportMetrics) {
+            val minimumWidth = MinimumTextBoxWidthDp * displayDensity / zoom
+            val preferredWidth = PreferredTextBoxWidthDp * displayDensity / zoom
+            val maximumWidth = MaximumTextBoxWidthDp * displayDensity / zoom
+            val availableWidth = (viewportWidthScreenPx - TextBoxScreenMarginDp * 2f * displayDensity) / zoom
+            preferredWidth.coerceIn(minimumWidth, maximumWidth)
+                .coerceAtMost(availableWidth.coerceAtLeast(minimumWidth))
+        } else {
+            DefaultBoxWidth
+        }
+        val height = if (hasViewportMetrics) {
+            MinimumTextBoxHeightDp * displayDensity / zoom
+        } else {
+            DefaultBoxHeight
+        }
         val box = RichContentBox(
             id = nextRichContentBoxId(),
             position = documentPosition,
-            size = CanvasSize(DefaultBoxWidth, DefaultBoxHeight),
+            size = CanvasSize(width, height),
             zIndex = (currentCanvas.objects.maxOfOrNull { it.zIndex } ?: 0) + 1,
             content = RichContent(),
             isFocused = true,
@@ -489,11 +516,43 @@ public class NeoNoteEditorController(
         )
     }
 
-    /**
-     * User intent for tapping an existing floating text box. Selection mode
-     * selects the canvas object only; text mode enters editing and allows the
-     * platform keyboard to appear.
-     */
+    public fun insertFloatingImage(
+        assetId: String,
+        position: CanvasPoint,
+        size: CanvasSize = CanvasSize(DefaultImageWidth, DefaultImageHeight),
+        altText: String? = null,
+    ): String {
+        val image = FloatingImage(
+            id = idGenerator.nextId("image"),
+            position = position,
+            size = size,
+            zIndex = (currentCanvas.objects.maxOfOrNull { it.zIndex } ?: 0) + 1,
+            assetId = assetId,
+            altText = altText,
+        )
+        applyCanvas(currentCanvas.copy(objects = currentCanvas.objects + image))
+        return image.id
+    }
+
+    public fun updateFloatingImage(
+        imageId: String,
+        size: CanvasSize? = null,
+        rotationDegrees: Float? = null,
+        crop: ImageCrop? = null,
+        replacementAssetId: String? = null,
+    ) {
+        val canvas = currentCanvas.copy(objects = currentCanvas.objects.map { objectValue ->
+            if (objectValue !is FloatingImage || objectValue.id != imageId || objectValue.isLocked) objectValue
+            else objectValue.copy(
+                size = size ?: objectValue.size,
+                rotationDegrees = rotationDegrees ?: objectValue.rotationDegrees,
+                crop = (crop ?: objectValue.crop).normalized(),
+                assetId = replacementAssetId ?: objectValue.assetId,
+            )
+        })
+        applyCanvas(canvas)
+    }
+
     public fun activateRichContentBox(boxId: String) {
         when (state.currentTool) {
             EditorTool.Text -> focusRichContentBox(boxId)
@@ -504,31 +563,21 @@ public class NeoNoteEditorController(
 
     public fun focusRichContentBox(boxId: String) {
         if (state.currentTool != EditorTool.Text) return
-        if (state.focusedRichContentBoxId != null && state.focusedRichContentBoxId != boxId) {
-            commitRichContentEditing(state.focusedRichContentBoxId!!)
-        }
+        state.focusedRichContentBoxId?.takeIf { it != boxId }?.let(::commitRichContentEditing)
         val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
+        if (box.isLocked) return
         editorSessionFor(boxId, box).focus(box)
         state = state.copy(
             document = state.document.withCanvas(currentCanvas.setFocusedRichContentBox(boxId)),
             focusedRichContentBoxId = boxId,
             selection = SelectionState(),
-            currentTool = EditorTool.Text,
         )
     }
 
     public fun updateRichContentText(boxId: String, text: String) {
-        val previousText = richContentSessions[boxId]?.localEditableBuffer
-            ?: currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId }?.toPlainText()
-            ?: ""
-        updateRichContentFromPlatformInput(
-            boxId = boxId,
-            previousText = previousText,
-            nextText = text,
-            selectionStart = text.length,
-            selectionEnd = text.length,
-            hasActiveComposition = false,
-        )
+        val previous = richContentSessions[richContentSessionKey(boxId)]?.localEditableBuffer
+            ?: richContentBox(boxId)?.toPlainText().orEmpty()
+        updateRichContentFromPlatformInput(boxId, previous, text, text.length)
     }
 
     public fun updateRichContentFromPlatformInput(
@@ -538,28 +587,9 @@ public class NeoNoteEditorController(
         selectionStart: Int,
         selectionEnd: Int = selectionStart,
         hasActiveComposition: Boolean = false,
-    ) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
-
-        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val session = editorSessionFor(boxId, box)
-            val edit = if (hasActiveComposition) {
-                session.replaceFromPlatformCompositionFallback(
-                    nextText = nextText,
-                    selectionStartPlainOffset = selectionStart,
-                    selectionEndPlainOffset = selectionEnd,
-                )
-            } else {
-                session.replaceFromPlatformInput(
-                    previousText = previousText,
-                    nextText = nextText,
-                    selectionStartPlainOffset = selectionStart,
-                    selectionEndPlainOffset = selectionEnd,
-                )
-            }
-            richContentMeasurer.resizeBoxToMeasuredContent(edit.box)
-        }
-        state = state.copy(document = state.document.withCanvas(updatedCanvas))
+    ) = editBox(boxId) { session ->
+        if (hasActiveComposition) session.replaceFromPlatformCompositionFallback(nextText, selectionStart, selectionEnd)
+        else session.replaceFromPlatformInput(previousText, nextText, selectionStart, selectionEnd)
     }
 
     public fun activeRichContentBlockIndex(boxId: String): Int? {
@@ -581,28 +611,18 @@ public class NeoNoteEditorController(
         selectedRichContentObjectBlocks[richContentSessionKey(boxId)]
 
     public fun selectRichContentObjectBlock(boxId: String, blockIndex: Int) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
+        if (!canEditRichContent()) return
         focusRichContentBox(boxId)
         selectedRichContentObjectBlocks[richContentSessionKey(boxId)] = blockIndex
-        state = state.copy(
-            document = state.document.withCanvas(currentCanvas.setFocusedRichContentBox(boxId)),
-            focusedRichContentBoxId = boxId,
-            currentTool = EditorTool.Text,
-        )
+        richContentInteractionRevision++
     }
 
     public fun focusRichContentFormulaBlock(boxId: String, blockIndex: Int) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
+        if (!canEditRichContent()) return
         focusRichContentBox(boxId)
+        richContentBox(boxId)?.let { editorSessionFor(boxId, it).focusFormulaBlock(blockIndex) }
         selectedRichContentObjectBlocks.remove(richContentSessionKey(boxId))
-        val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
-        editorSessionFor(boxId, box).focusFormulaBlock(blockIndex)
         richContentInteractionRevision++
-        state = state.copy(
-            document = state.document.withCanvas(currentCanvas.setFocusedRichContentBox(boxId)),
-            focusedRichContentBoxId = boxId,
-            currentTool = EditorTool.Text,
-        )
     }
 
     public fun blurRichContentFormulaBlock(boxId: String, blockIndex: Int) {
@@ -616,38 +636,23 @@ public class NeoNoteEditorController(
         selectionStart: Int = 0,
         selectionEnd: Int = selectionStart,
     ) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
+        if (!canEditRichContent()) return
         focusRichContentBox(boxId)
+        richContentBox(boxId)?.let { editorSessionFor(boxId, it).focusParagraph(blockIndex, selectionStart, selectionEnd) }
         selectedRichContentObjectBlocks.remove(richContentSessionKey(boxId))
-        val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
-        editorSessionFor(boxId, box).focusParagraph(blockIndex, selectionStart, selectionEnd)
         richContentInteractionRevision++
     }
-
 
     public fun focusRichContentTableCell(boxId: String, address: TableCellAddress) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
+        if (!canEditRichContent()) return
         focusRichContentBox(boxId)
+        richContentBox(boxId)?.let { editorSessionFor(boxId, it).focusTableCell(address) }
         selectedRichContentObjectBlocks.remove(richContentSessionKey(boxId))
-        val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
-        editorSessionFor(boxId, box).focusTableCell(address)
         richContentInteractionRevision++
     }
 
-    public fun updateRichContentTableCellFromPlatformInput(
-        boxId: String,
-        address: TableCellAddress,
-        nextText: String,
-    ) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
-
-        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val session = editorSessionFor(boxId, box)
-            val edit = session.replaceTableCellParagraphFromPlatformInput(address, nextText)
-            richContentMeasurer.resizeBoxToMeasuredContent(edit.box)
-        }
-        state = state.copy(document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)), focusedRichContentBoxId = boxId)
-    }
+    public fun updateRichContentTableCellFromPlatformInput(boxId: String, address: TableCellAddress, nextText: String) =
+        editBox(boxId, keepFocused = true) { it.replaceTableCellParagraphFromPlatformInput(address, nextText) }
 
     public fun updateRichContentParagraphFromPlatformInput(
         boxId: String,
@@ -657,49 +662,24 @@ public class NeoNoteEditorController(
         selectionStart: Int,
         selectionEnd: Int = selectionStart,
         hasActiveComposition: Boolean = false,
-    ) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
-
-        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val session = editorSessionFor(boxId, box)
-            val edit = if (hasActiveComposition) {
-                session.replaceParagraphFromPlatformCompositionFallback(
-                    blockIndex = blockIndex,
-                    nextText = nextText,
-                    selectionStartOffset = selectionStart,
-                    selectionEndOffset = selectionEnd,
-                )
-            } else {
-                session.replaceFromPlatformParagraphInput(
-                    blockIndex = blockIndex,
-                    previousText = previousText,
-                    nextText = nextText,
-                    selectionStartOffset = selectionStart,
-                    selectionEndOffset = selectionEnd,
-                )
-            }
-            richContentMeasurer.resizeBoxToMeasuredContent(edit.box)
+    ) = editBox(boxId) { session ->
+        if (hasActiveComposition) {
+            session.replaceParagraphFromPlatformCompositionFallback(blockIndex, nextText, selectionStart, selectionEnd)
+        } else {
+            session.replaceFromPlatformParagraphInput(blockIndex, previousText, nextText, selectionStart, selectionEnd)
         }
-        state = state.copy(document = state.document.withCanvas(updatedCanvas))
     }
 
-    public fun updateRichContentFormulaExpression(
+    public fun updateRichContentFormulaExpression(boxId: String, blockIndex: Int, expression: String) =
+        editBox(boxId, keepFocused = true) { it.replaceFormulaExpression(blockIndex, expression) }
+
+    public fun updateRichContentFormula(
         boxId: String,
         blockIndex: Int,
-        expression: String,
-    ) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
-
-        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val session = editorSessionFor(boxId, box)
-            richContentMeasurer.resizeBoxToMeasuredContent(session.replaceFormulaExpression(blockIndex, expression).box)
-        }
-        richContentInteractionRevision++
-        state = state.copy(
-            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)),
-            focusedRichContentBoxId = boxId,
-        )
-    }
+        expression: String? = null,
+        displayMode: FormulaDisplayMode? = null,
+        numbered: Boolean? = null,
+    ) = editBox(boxId, keepFocused = true) { it.updateFormula(blockIndex, expression, displayMode, numbered) }
 
     public fun toggleRichContentParagraphStyle(
         boxId: String,
@@ -707,16 +687,7 @@ public class NeoNoteEditorController(
         style: InlineStyle,
         selectionStart: Int,
         selectionEnd: Int = selectionStart,
-    ) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
-
-        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val session = editorSessionFor(boxId, box)
-            session.focusParagraph(blockIndex, selectionStart, selectionEnd)
-            richContentMeasurer.resizeBoxToMeasuredContent(session.toggleStyle(style).box)
-        }
-        state = state.copy(document = state.document.withCanvas(updatedCanvas))
-    }
+    ) = editBox(boxId) { it.focusParagraph(blockIndex, selectionStart, selectionEnd); it.toggleStyle(style) }
 
     public fun toggleRichContentParagraphList(
         boxId: String,
@@ -724,214 +695,175 @@ public class NeoNoteEditorController(
         kind: ListKind,
         selectionStart: Int,
         selectionEnd: Int = selectionStart,
-    ) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
-
-        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val session = editorSessionFor(boxId, box)
-            session.focusParagraph(blockIndex, selectionStart, selectionEnd)
-            richContentMeasurer.resizeBoxToMeasuredContent(session.toggleList(kind).box)
-        }
-        state = state.copy(document = state.document.withCanvas(updatedCanvas))
-    }
+    ) = editBox(boxId) { it.focusParagraph(blockIndex, selectionStart, selectionEnd); it.toggleList(kind) }
 
     public fun toggleRichContentStyle(
         boxId: String,
         style: InlineStyle,
         selectionStart: Int,
         selectionEnd: Int = selectionStart,
-    ) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
-
-        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val session = editorSessionFor(boxId, box)
-            session.setSelectionFromPlainOffsets(selectionStart, selectionEnd)
-            richContentMeasurer.resizeBoxToMeasuredContent(session.toggleStyle(style).box)
-        }
-        state = state.copy(document = state.document.withCanvas(updatedCanvas))
-    }
+    ) = editBox(boxId) { it.setSelectionFromPlainOffsets(selectionStart, selectionEnd); it.toggleStyle(style) }
 
     public fun toggleRichContentList(
         boxId: String,
         kind: ListKind,
         selectionStart: Int,
         selectionEnd: Int = selectionStart,
-    ) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
+    ) = editBox(boxId) { it.setSelectionFromPlainOffsets(selectionStart, selectionEnd); it.toggleList(kind) }
 
-        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val session = editorSessionFor(boxId, box)
-            session.setSelectionFromPlainOffsets(selectionStart, selectionEnd)
-            richContentMeasurer.resizeBoxToMeasuredContent(session.toggleList(kind).box)
-        }
-        state = state.copy(document = state.document.withCanvas(updatedCanvas))
-    }
+    public fun toggleRichContentTodoCheckedState(boxId: String, blockIndex: Int) =
+        editBox(boxId) { it.toggleTodoCheckedState(blockIndex) }
 
-    public fun toggleRichContentTodoCheckedState(boxId: String, blockIndex: Int) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
-        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val session = editorSessionFor(boxId, box)
-            richContentMeasurer.resizeBoxToMeasuredContent(session.toggleTodoCheckedState(blockIndex).box)
-        }
-        state = state.copy(document = state.document.withCanvas(updatedCanvas))
-    }
+    public fun toggleActiveRichContentStyle(boxId: String, style: InlineStyle) =
+        editBox(boxId, keepFocused = true) { it.toggleStyle(style) }
 
-    public fun toggleActiveRichContentStyle(boxId: String, style: InlineStyle) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
+    public fun toggleActiveRichContentList(boxId: String, kind: ListKind) =
+        editBox(boxId, keepFocused = true) { it.toggleList(kind) }
 
-        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val session = editorSessionFor(boxId, box)
-            richContentMeasurer.resizeBoxToMeasuredContent(session.toggleStyle(style).box)
-        }
-        state = state.copy(
-            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)),
-            focusedRichContentBoxId = boxId,
-            currentTool = EditorTool.Text,
-        )
-    }
+    public fun setActiveRichContentTextColor(boxId: String, colorArgb: Int?) =
+        editBox(boxId, keepFocused = true) { it.setTextColor(colorArgb) }
 
-    public fun toggleActiveRichContentList(boxId: String, kind: ListKind) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
+    public fun setActiveRichContentHighlight(boxId: String, colorArgb: Int?) =
+        editBox(boxId, keepFocused = true) { it.setHighlightColor(colorArgb) }
 
-        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val session = editorSessionFor(boxId, box)
-            richContentMeasurer.resizeBoxToMeasuredContent(session.toggleList(kind).box)
-        }
-        state = state.copy(
-            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)),
-            focusedRichContentBoxId = boxId,
-            currentTool = EditorTool.Text,
-        )
-    }
+    public fun setActiveRichContentFontScale(boxId: String, scale: Float) =
+        editBox(boxId, keepFocused = true) { it.setFontScale(scale) }
 
-    public fun insertRichContentTablePlaceholder(boxId: String, rows: Int = 2, columns: Int = 2) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
+    public fun setActiveRichContentLink(boxId: String, url: String?) =
+        editBox(boxId, keepFocused = true) { it.setLink(url) }
 
-        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val session = editorSessionFor(boxId, box)
-            richContentMeasurer.resizeBoxToMeasuredContent(session.insertTablePlaceholder(rows = rows, columns = columns).box)
-        }
-        state = state.copy(
-            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)),
-            focusedRichContentBoxId = boxId,
-            currentTool = EditorTool.Text,
-        )
-    }
+    public fun setActiveParagraphAlignment(boxId: String, alignment: TextAlignment) =
+        editBox(boxId, keepFocused = true) { it.setParagraphAlignment(alignment) }
+
+    public fun setActiveHeadingLevel(boxId: String, level: Int) =
+        editBox(boxId, keepFocused = true) { it.setHeadingLevel(level) }
+
+    public fun changeActiveParagraphIndent(boxId: String, delta: Int) =
+        editBox(boxId, keepFocused = true) { it.changeIndent(delta) }
+
+    public fun insertRichContentTablePlaceholder(boxId: String, rows: Int = 2, columns: Int = 2) =
+        editBox(boxId, keepFocused = true) { it.insertTablePlaceholder(rows, columns) }
+
+    public fun insertNestedTable(boxId: String, address: TableCellAddress, rows: Int = 2, columns: Int = 2) =
+        editBox(boxId, keepFocused = true) { it.insertNestedTable(address, rows, columns) }
 
     public fun addActiveRichContentTableRow(boxId: String) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
-        val target = activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell ?: return
-        val blockIndex = target.address.blockIndex
-        var nextBox: RichContentBox? = null
-        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val table = box.content.blocks.getOrNull(blockIndex) as? TableNode ?: return@updateRichContentBox box
-            if (table.rows.size >= MaximumTableRows) return@updateRichContentBox box
-            val columnCount = (table.rows.maxOfOrNull { it.size } ?: 0).coerceAtLeast(1)
-            val normalizedRows = table.rows.map { row ->
-                row + List((columnCount - row.size).coerceAtLeast(0)) { TableCell() }
-            }
-            val updatedTable = table.copy(
-                rows = normalizedRows + listOf(List(columnCount) { TableCell() }),
-            )
-            val updatedBox = box.copy(
-                content = RichContent(
-                    blocks = box.content.blocks.mapIndexed { index, block ->
-                        if (index == blockIndex) updatedTable else block
-                    },
-                ),
-            )
-            richContentMeasurer.resizeBoxToMeasuredContent(updatedBox).also { nextBox = it }
-        }
-        nextBox?.let { editorSessionFor(boxId, it).focus(it) }
-        state = state.copy(
-            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)),
-            focusedRichContentBoxId = boxId,
-            currentTool = EditorTool.Text,
-        )
+        val address = (activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell)?.address ?: return
+        editBox(boxId, keepFocused = true) { it.addTableRow(address) }
+    }
+
+    public fun deleteActiveRichContentTableRow(boxId: String) {
+        val address = (activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell)?.address ?: return
+        editBox(boxId, keepFocused = true) { it.deleteTableRow(address) }
     }
 
     public fun addActiveRichContentTableColumn(boxId: String) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
-        val target = activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell ?: return
-        val blockIndex = target.address.blockIndex
-        var nextBox: RichContentBox? = null
-        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val table = box.content.blocks.getOrNull(blockIndex) as? TableNode ?: return@updateRichContentBox box
-            val currentColumnCount = table.rows.maxOfOrNull { it.size } ?: 0
-            if (currentColumnCount >= MaximumTableColumns) return@updateRichContentBox box
-            val sourceRows = table.rows.ifEmpty { listOf(emptyList()) }
-            val updatedTable = table.copy(rows = sourceRows.map { row -> row + TableCell() })
-            val updatedBox = box.copy(
-                content = RichContent(
-                    blocks = box.content.blocks.mapIndexed { index, block ->
-                        if (index == blockIndex) updatedTable else block
-                    },
-                ),
-            )
-            richContentMeasurer.resizeBoxToMeasuredContent(updatedBox).also { nextBox = it }
-        }
-        nextBox?.let { editorSessionFor(boxId, it).focus(it) }
-        state = state.copy(
-            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)),
-            focusedRichContentBoxId = boxId,
-            currentTool = EditorTool.Text,
-        )
+        val address = (activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell)?.address ?: return
+        editBox(boxId, keepFocused = true) { it.addTableColumn(address) }
     }
 
-    public fun insertRichContentFormulaPlaceholder(boxId: String, expression: String = "") {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
-
-        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val session = editorSessionFor(boxId, box)
-            richContentMeasurer.resizeBoxToMeasuredContent(session.insertBlockFormulaPlaceholder(expression = expression).box)
-        }
-        state = state.copy(
-            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)),
-            focusedRichContentBoxId = boxId,
-            currentTool = EditorTool.Text,
-        )
+    public fun deleteActiveRichContentTableColumn(boxId: String) {
+        val address = (activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell)?.address ?: return
+        editBox(boxId, keepFocused = true) { it.deleteTableColumn(address) }
     }
+
+    public fun setActiveRichContentTableColumnWidth(boxId: String, width: Float?) {
+        val address = (activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell)?.address ?: return
+        editBox(boxId, keepFocused = true) { it.setTableColumnWidth(address, width) }
+    }
+
+    public fun insertRichContentFormulaPlaceholder(boxId: String, expression: String = "") =
+        editBox(boxId, keepFocused = true) { it.insertBlockFormulaPlaceholder(expression) }
 
     public fun insertRichContentImagePlaceholder(
         boxId: String,
         assetId: String = "image-placeholder",
         altText: String? = "Image placeholder",
     ) {
-        if (state.currentTool != EditorTool.Text || state.selection.selectedRefs.isNotEmpty()) return
-
-        var insertedIndex: Int? = null
-        val updatedCanvas = currentCanvas.updateRichContentBox(boxId) { box ->
-            val session = editorSessionFor(boxId, box)
-            insertedIndex = session.activeBlockInsertionIndex()
-            richContentMeasurer.resizeBoxToMeasuredContent(
-                session.insertBlockImagePlaceholder(assetId = assetId, altText = altText).box,
-            )
+        var insertion = 0
+        editBox(boxId, keepFocused = true) { session ->
+            insertion = session.activeBlockInsertionIndex()
+            session.insertBlockImagePlaceholder(assetId, altText)
         }
-        insertedIndex?.let { selectedRichContentObjectBlocks[richContentSessionKey(boxId)] = it }
-        state = state.copy(
-            document = state.document.withCanvas(updatedCanvas.setFocusedRichContentBox(boxId)),
-            focusedRichContentBoxId = boxId,
-            currentTool = EditorTool.Text,
-        )
+        selectedRichContentObjectBlocks[richContentSessionKey(boxId)] = insertion
     }
 
+    public fun updateRichContentImage(
+        boxId: String,
+        blockIndex: Int,
+        width: Float? = null,
+        height: Float? = null,
+        rotationDegrees: Float? = null,
+        crop: ImageCrop? = null,
+        caption: String? = null,
+        replacementAssetId: String? = null,
+    ) = editBox(boxId, keepFocused = true) {
+        it.updateImage(blockIndex, replacementAssetId, width = width, height = height,
+            rotationDegrees = rotationDegrees, crop = crop, caption = caption)
+    }
+
+    public fun deleteRichContentBlock(boxId: String, blockIndex: Int) =
+        editBox(boxId, keepFocused = true) { it.deleteBlock(blockIndex) }
+
+    public fun moveRichContentBlock(boxId: String, fromIndex: Int, toIndex: Int) =
+        editBox(boxId, keepFocused = true) { it.moveBlock(fromIndex, toIndex) }
+
     public fun commitRichContentEditing(boxId: String) {
-        val box = currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId } ?: return
-        richContentSessions[richContentSessionKey(boxId)]?.blurCommit(box)
+        richContentBox(boxId)?.let { richContentSessions[richContentSessionKey(boxId)]?.blurCommit(it) }
+    }
+
+    private fun editBox(
+        boxId: String,
+        keepFocused: Boolean = false,
+        edit: (RichContentEditorSession) -> com.neonote.engine.RichContentEditorEdit,
+    ) {
+        if (!canEditRichContent()) return
+        var updatedBox: RichContentBox? = null
+        val canvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            val result = edit(editorSessionFor(boxId, box))
+            val measured = if (result.box.autoSizeHeight) {
+                val predicted = richContentMeasurer.resizeBoxToMeasuredContent(result.box)
+                predicted.copy(size = predicted.size.copy(
+                    height = maxOf(result.box.size.height, predicted.size.height),
+                ))
+            } else result.box
+            updatedBox = measured
+            measured
+        }
+        updatedBox?.let { editorSessionFor(boxId, it).focus(it) }
+        state = state.copy(
+            document = state.document.withCanvas(if (keepFocused) canvas.setFocusedRichContentBox(boxId) else canvas),
+            focusedRichContentBoxId = if (keepFocused) boxId else state.focusedRichContentBoxId,
+        )
+        richContentInteractionRevision++
+    }
+
+    public fun updateRichContentBoxMeasuredHeight(boxId: String, measuredHeight: Float) {
+        val targetHeight = measuredHeight.coerceAtLeast(MinimumTextBoxHeightDp * displayDensity)
+        val box = richContentBox(boxId) ?: return
+        if (!box.autoSizeHeight || kotlin.math.abs(box.size.height - targetHeight) < 1f) return
+        val canvas = currentCanvas.updateRichContentBox(boxId) { current ->
+            current.copy(size = current.size.copy(height = targetHeight))
+        }
+        replaceStateWithoutRecordingHistory {
+            state = state.copy(document = state.document.withCanvas(canvas))
+        }
     }
 
     private fun editorSessionFor(boxId: String, box: RichContentBox): RichContentEditorSession =
         richContentSessions.getOrPut(richContentSessionKey(boxId)) {
-            RichContentEditorSession(initialBox = box, engine = richContentEngine)
+            RichContentEditorSession(box, engine = richContentEngine)
         }.also { it.focus(box) }
 
+    private fun richContentBox(boxId: String): RichContentBox? =
+        currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == boxId }
+
     private fun richContentSessionKey(boxId: String): String = "${state.currentPageId}:$boxId"
+    private fun canEditRichContent(): Boolean = state.currentTool == EditorTool.Text && state.selection.selectedRefs.isEmpty()
 
     public fun selectCanvasObject(objectId: String) {
-        val result = selectionEngine.execute(
-            SelectionState(),
-            SelectionCommand.SelectCanvasObject(objectId),
-        ) as SelectionCommandResult.SelectionChanged
+        val result = selectionEngine.execute(SelectionState(), SelectionCommand.SelectCanvasObject(objectId))
+            as SelectionCommandResult.SelectionChanged
         state = state.copy(
             selection = result.selection,
             focusedRichContentBoxId = null,
@@ -946,10 +878,8 @@ public class NeoNoteEditorController(
 
     public fun selectWithLasso(documentPath: List<CanvasPoint>): SelectionState {
         val selection = selectionEngine.selectWithLasso(currentCanvas, documentPath)
-        val result = selectionEngine.execute(
-            state.selection,
-            SelectionCommand.ReplaceSelection(selection),
-        ) as SelectionCommandResult.SelectionChanged
+        val result = selectionEngine.execute(state.selection, SelectionCommand.ReplaceSelection(selection))
+            as SelectionCommandResult.SelectionChanged
         state = state.copy(
             selection = result.selection,
             focusedRichContentBoxId = null,
@@ -959,31 +889,27 @@ public class NeoNoteEditorController(
     }
 
     private fun beginSelectionGesture(screenPosition: CanvasPoint) {
-        val documentPosition = screenToDocument(screenPosition)
-        if (selectionHitBoundsContains(documentPosition)) {
-            activeSelectionGesture = ActiveSelectionGesture.Drag(lastScreenPosition = screenPosition)
+        val document = screenToDocument(screenPosition)
+        if (state.selection.selectedRefs.isNotEmpty() && selectedBounds?.contains(document) == true) {
+            activeSelectionGesture = ActiveSelectionGesture.Drag(screenPosition)
             return
         }
-
-        val hitRef = hitSelectableAt(documentPosition)
-        if (hitRef != null) {
-            if (hitRef !in state.selection.selectedRefs) {
-                replaceSelection(SelectionState(selectedRefs = setOf(hitRef)))
-            }
-            activeSelectionGesture = ActiveSelectionGesture.Drag(lastScreenPosition = screenPosition)
+        val hit = hitSelectableAt(document)
+        if (hit != null) {
+            if (hit !in state.selection.selectedRefs) replaceSelection(SelectionState(setOf(hit)))
+            activeSelectionGesture = ActiveSelectionGesture.Drag(screenPosition)
         } else {
-            activeSelectionGesture = ActiveSelectionGesture.Lasso(path = listOf(documentPosition))
+            activeSelectionGesture = ActiveSelectionGesture.Lasso(listOf(document))
         }
     }
 
     private fun updateSelectionGesture(screenPosition: CanvasPoint) {
         when (val gesture = activeSelectionGesture) {
             is ActiveSelectionGesture.Drag -> {
-                val screenDelta = Offset(
-                    x = screenPosition.x - gesture.lastScreenPosition.x,
-                    y = screenPosition.y - gesture.lastScreenPosition.y,
-                )
-                moveSelectedObjectsByScreenDelta(screenDelta)
+                moveSelectedObjectsByScreenDelta(Offset(
+                    screenPosition.x - gesture.lastScreenPosition.x,
+                    screenPosition.y - gesture.lastScreenPosition.y,
+                ))
                 activeSelectionGesture = gesture.copy(lastScreenPosition = screenPosition)
             }
             is ActiveSelectionGesture.Lasso -> {
@@ -997,15 +923,8 @@ public class NeoNoteEditorController(
 
     private fun endActiveInteraction() {
         when (val gesture = activeSelectionGesture) {
-            is ActiveSelectionGesture.Lasso -> {
-                if (gesture.path.size < 2) {
-                    clearSelection()
-                } else {
-                    selectWithLasso(gesture.path)
-                }
-            }
-            is ActiveSelectionGesture.Drag,
-            null -> endInkIfActive()
+            is ActiveSelectionGesture.Lasso -> if (gesture.path.size < 2) clearSelection() else selectWithLasso(gesture.path)
+            is ActiveSelectionGesture.Drag, null -> endInkIfActive()
         }
         activeSelectionGesture = null
     }
@@ -1016,141 +935,125 @@ public class NeoNoteEditorController(
     }
 
     private fun replaceSelection(selection: SelectionState) {
-        val result = selectionEngine.execute(
-            state.selection,
-            SelectionCommand.ReplaceSelection(selection),
-        ) as SelectionCommandResult.SelectionChanged
         state = state.copy(
-            selection = result.selection,
+            selection = selection,
             focusedRichContentBoxId = null,
             document = state.document.withCanvas(currentCanvas.setFocusedRichContentBox(null)),
         )
     }
 
-    private fun selectionHitBoundsContains(documentPosition: CanvasPoint): Boolean =
-        state.selection.selectedRefs.isNotEmpty() && selectedBounds?.contains(documentPosition) == true
-
-    private fun hitSelectableAt(documentPosition: CanvasPoint): com.neonote.model.SelectableRef? {
-        val objectHit = selectionEngine.hitTestCanvasObjects(currentCanvas, documentPosition).firstOrNull()
-        if (objectHit != null) return CanvasObjectRef(objectHit.id)
-        val strokeHit = selectionEngine.hitTestInkStrokes(currentCanvas, documentPosition).firstOrNull()
-        if (strokeHit != null) return InkStrokeRef(strokeHit.id)
+    private fun hitSelectableAt(position: CanvasPoint): com.neonote.model.SelectableRef? {
+        selectionEngine.hitTestCanvasObjects(currentCanvas, position).firstOrNull()?.let { return CanvasObjectRef(it.id) }
+        selectionEngine.hitTestInkStrokes(currentCanvas, position).firstOrNull()?.let { return InkStrokeRef(it.id) }
         return null
     }
 
     public fun moveSelectedObjectsByScreenDelta(screenDelta: Offset) {
         if (state.selection.selectedRefs.isEmpty()) return
-        val documentDelta = screenDeltaToDocumentDelta(screenDelta)
-        val movedCanvas = selectionEngine.moveSelection(
-            canvas = currentCanvas,
-            selection = state.selection,
-            dx = documentDelta.x,
-            dy = documentDelta.y,
-        )
-        state = state.copy(document = state.document.withCanvas(movedCanvas))
+        val delta = screenDeltaToDocumentDelta(screenDelta)
+        applyCanvas(selectionEngine.moveSelection(currentCanvas, state.selection, delta.x, delta.y))
     }
 
     public fun screenToDocument(screenPosition: CanvasPoint): CanvasPoint = state.viewport.screenToDocument(screenPosition)
-
     public fun documentToScreen(documentPosition: CanvasPoint): CanvasPoint = state.viewport.documentToScreen(documentPosition)
-
     public fun screenDeltaToDocumentDelta(screenDelta: Offset): Offset = state.viewport.screenDeltaToDocumentDelta(screenDelta)
 
-    private fun restoreDocumentFromHistory(document: NeoNoteDocument) {
-        val measuredDocument = document.withMeasuredRichContentBoxHeights()
-        val nextPageId = state.currentPageId
-            .takeIf { currentId -> measuredDocument.pages.any { it.id == currentId } }
-            ?: measuredDocument.pages.firstOrNull()?.id
+    private fun applyCanvas(
+        canvas: InfiniteCanvas,
+        clearSelection: Boolean = false,
+        selection: SelectionState = state.selection,
+    ) {
+        if (canvas == currentCanvas && (!clearSelection || state.selection.selectedRefs.isEmpty())) return
+        state = state.copy(
+            document = state.document.withCanvas(canvas),
+            selection = if (clearSelection) SelectionState() else selection,
+            focusedRichContentBoxId = if (clearSelection) null else state.focusedRichContentBoxId,
+        )
+        inkSession = InkSession.fromCanvas(canvas)
+    }
 
+    private fun restoreDocumentFromHistory(document: NeoNoteDocument) {
+        val measured = document.withMeasuredRichContentBoxHeights().ensurePageDocument()
+        val pageId = state.currentPageId.takeIf { id -> measured.pages.any { it.id == id } } ?: measured.pages.first().id
         replaceStateWithoutRecordingHistory {
-            state = state.copy(
-                document = measuredDocument,
-                currentPageId = nextPageId,
-                focusedRichContentBoxId = null,
-                selection = SelectionState(),
-            )
+            state = state.copy(document = measured, currentPageId = pageId, focusedRichContentBoxId = null, selection = SelectionState())
         }
+        resetTransientEditingState()
+    }
+
+    private fun resetTransientEditingState() {
         richContentSessions.clear()
         selectedRichContentObjectBlocks.clear()
         activeSelectionGesture = null
         richContentInteractionRevision++
-        inkSession = measuredDocument.pages
-            .firstOrNull { it.id == nextPageId }
-            ?.canvas
-            ?.let(InkSession::fromCanvas)
-            ?: InkSession()
+        inkSession = InkSession.fromCanvas(currentCanvas)
     }
 
     private inline fun replaceStateWithoutRecordingHistory(block: () -> Unit) {
         historyMutationInProgress = true
-        try {
-            block()
-        } finally {
-            historyMutationInProgress = false
-        }
+        try { block() } finally { historyMutationInProgress = false }
     }
 
+    private fun nextRichContentBoxId(): String = idGenerator.nextId("rich-content")
+
+    private fun NeoNoteDocument.withMeasuredRichContentBoxHeights(): NeoNoteDocument = copy(pages = pages.map { page ->
+        page.copy(canvas = page.canvas.copy(objects = page.canvas.objects.map { objectValue ->
+            if (objectValue is RichContentBox && objectValue.autoSizeHeight) {
+                val measured = richContentMeasurer.resizeBoxToMeasuredContent(objectValue)
+                measured.copy(size = measured.size.copy(
+                    height = maxOf(objectValue.size.height, measured.size.height),
+                ))
+            } else objectValue
+        }))
+    })
+
+    private fun NeoNoteDocument.withCanvas(canvas: InfiniteCanvas): NeoNoteDocument =
+        withCanvasForPage(state.currentPageId, canvas)
+
+    private fun NeoNoteDocument.withCanvasForPage(pageId: String?, canvas: InfiniteCanvas): NeoNoteDocument {
+        val page = pages.firstOrNull { it.id == pageId } ?: return this
+        if (page.canvas == canvas) return this
+        val now = System.currentTimeMillis()
+        return copy(
+            pages = pages.map { current -> if (current.id == page.id) current.copy(canvas = canvas, updatedAtEpochMillis = now) else current },
+            revision = revision + 1,
+            updatedAtEpochMillis = now,
+        )
+    }
+
+    private fun EditorState.ensurePage(): EditorState {
+        val document = document.ensurePageDocument()
+        return copy(document = document, currentPageId = currentPageId?.takeIf { id -> document.pages.any { it.id == id } } ?: document.pages.first().id)
+    }
+
+    private fun NeoNoteDocument.ensurePageDocument(): NeoNoteDocument = if (pages.isNotEmpty()) this else copy(
+        pages = listOf(NotePage(id = "page-1", title = "Page 1")),
+    )
+
     private fun NeoNoteDocument.historySnapshot(): NeoNoteDocument = copy(
-        pages = pages.map { page ->
-            page.copy(
-                canvas = page.canvas.copy(
-                    objects = page.canvas.objects.map { canvasObject ->
-                        if (canvasObject is RichContentBox) {
-                            canvasObject.copy(isFocused = false)
-                        } else {
-                            canvasObject
-                        }
-                    },
-                ),
-            )
-        },
+        pages = pages.map { page -> page.copy(canvas = page.canvas.copy(objects = page.canvas.objects.map { objectValue ->
+            if (objectValue is RichContentBox) objectValue.copy(isFocused = false) else objectValue
+        })) },
     )
 
     private fun NeoNoteDocument.hasSameHistoryContentAs(other: NeoNoteDocument): Boolean =
-        copy(revision = 0L) == other.copy(revision = 0L)
+        copy(revision = 0L, updatedAtEpochMillis = 0L) == other.copy(revision = 0L, updatedAtEpochMillis = 0L)
 
     private fun ArrayDeque<NeoNoteDocument>.trimToHistoryLimit() {
         while (size > HistoryLimit) removeFirst()
     }
+}
 
-    private fun nextRichContentBoxId(): String {
-        val next = currentCanvas.objects
-            .filterIsInstance<RichContentBox>()
-            .mapNotNull { it.id.removePrefix("rich-content-").toIntOrNull() }
-            .maxOrNull()
-            ?.plus(1) ?: 1
-        return "rich-content-$next"
-    }
-
-    private fun NeoNoteDocument.withMeasuredRichContentBoxHeights(): NeoNoteDocument = copy(
-        pages = pages.map { page ->
-            page.copy(
-                canvas = page.canvas.copy(
-                    objects = page.canvas.objects.map { canvasObject ->
-                        if (canvasObject is RichContentBox) {
-                            richContentMeasurer.resizeBoxToMeasuredContent(canvasObject)
-                        } else {
-                            canvasObject
-                        }
-                    },
-                ),
-            )
-        },
+public fun createInitialEditorState(): EditorState {
+    val generator = SequentialIdGenerator()
+    val document = DocumentEngine(generator).createDocument(
+        title = "Untitled Note",
+        assetStoreId = "local-assets",
+        documentId = "default-document",
+        firstPageId = "page-initial",
+        firstSectionId = "section-initial",
     )
-
-    private fun NeoNoteDocument.withCanvas(canvas: InfiniteCanvas): NeoNoteDocument = withCanvasForPage(
-        pageId = state.currentPageId,
-        canvas = canvas,
-    )
-
-    private fun NeoNoteDocument.withCanvasForPage(pageId: String?, canvas: InfiniteCanvas): NeoNoteDocument {
-        val current = pages.firstOrNull { it.id == pageId } ?: return this
-        if (current.canvas == canvas) return this
-        return copy(
-            pages = pages.map { page -> if (page.id == pageId) page.copy(canvas = canvas) else page },
-            revision = revision + 1,
-        )
-    }
+    return EditorState(document = document, currentTool = EditorTool.Pen)
 }
 
 public fun createTestEditorState(): EditorState = EditorState(
@@ -1158,30 +1061,21 @@ public fun createTestEditorState(): EditorState = EditorState(
         id = "test-document-v2",
         title = "NeoNote v2 Test Document",
         assetStoreId = "test-assets",
-        pages = listOf(NotePage(id = "test-page-1", canvas = InfiniteCanvas())),
+        pages = listOf(NotePage(id = "test-page-1")),
     ),
     currentTool = EditorTool.Text,
 )
 
-private fun InfiniteCanvas.updateRichContentBox(
-    boxId: String,
-    edit: (RichContentBox) -> RichContentBox,
-): InfiniteCanvas = copy(
-    objects = objects.map { canvasObject ->
-        if (canvasObject.id == boxId && canvasObject is RichContentBox) edit(canvasObject) else canvasObject
-    },
-)
+private fun InfiniteCanvas.updateRichContentBox(boxId: String, edit: (RichContentBox) -> RichContentBox): InfiniteCanvas =
+    copy(objects = objects.map { objectValue -> if (objectValue is RichContentBox && objectValue.id == boxId) edit(objectValue) else objectValue })
 
-public fun InfiniteCanvas.topMostObjectAt(position: CanvasPoint): CanvasObject? = objects
-    .sortedWith(compareBy<CanvasObject> { it.zIndex }.thenBy { it.id })
-    .lastOrNull { it.bounds.contains(position) }
+public fun InfiniteCanvas.topMostObjectAt(position: CanvasPoint): CanvasObject? =
+    objects.sortedWith(compareBy<CanvasObject> { it.zIndex }.thenBy { it.id }).lastOrNull { it.bounds.contains(position) }
 
-private fun InfiniteCanvas.setFocusedRichContentBox(focusedId: String?): InfiniteCanvas = copy(
-    objects = objects.map { canvasObject ->
-        if (canvasObject is RichContentBox) canvasObject.copy(isFocused = canvasObject.id == focusedId) else canvasObject
-    },
-)
-
+private fun InfiniteCanvas.setFocusedRichContentBox(focusedId: String?): InfiniteCanvas =
+    copy(objects = objects.map { objectValue ->
+        if (objectValue is RichContentBox) objectValue.copy(isFocused = objectValue.id == focusedId) else objectValue
+    })
 
 private sealed interface ActiveSelectionGesture {
     data class Lasso(val path: List<CanvasPoint>) : ActiveSelectionGesture
@@ -1189,15 +1083,8 @@ private sealed interface ActiveSelectionGesture {
 }
 
 private class SequentialIdGenerator : IdGenerator {
-    private var nextId = 1
-
+    private var nextId = 1L
     override fun nextId(prefix: String): String = "$prefix-${nextId++}"
 }
 
 private fun PersistenceDiagnostics?.toStatusSuffix(): String = this?.let { " (${it.toDebugSummary()})" }.orEmpty()
-
-private fun elapsedMillis(block: () -> Unit): Double {
-    val startNanos = System.nanoTime()
-    block()
-    return (System.nanoTime() - startNanos) / 1_000_000.0
-}

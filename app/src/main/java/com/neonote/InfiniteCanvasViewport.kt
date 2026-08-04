@@ -8,7 +8,11 @@ import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -29,7 +33,11 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import com.neonote.engine.InputAction
 import com.neonote.engine.InputMode
 import com.neonote.engine.InputRouter
 import com.neonote.engine.PointerEventType
@@ -44,6 +52,7 @@ import com.neonote.input.withPressureSamples
 import com.neonote.model.CanvasObject
 import com.neonote.model.CanvasPoint
 import com.neonote.model.EditorTool
+import com.neonote.model.FloatingImage
 import com.neonote.model.RichContentBox
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -56,8 +65,11 @@ internal fun InfiniteCanvasViewport(
     val router = remember { InputRouter() }
     val inputAdapter = remember { ComposeInputAdapter() }
     val platformSnapshotStore = remember { PlatformSnapshotStore() }
+    val density = LocalDensity.current
     val inputMode = when (controller.state.currentTool) {
-        EditorTool.Pen -> InputMode.Navigate
+        // Unified OneNote-like surface: the stylus writes, a finger drag pans,
+        // and a finger tap creates or focuses text without switching tools first.
+        EditorTool.Pen -> InputMode.Write
         EditorTool.Text -> InputMode.Write
         EditorTool.Selection -> InputMode.Selection
         EditorTool.Eraser -> InputMode.Erase
@@ -66,21 +78,16 @@ internal fun InfiniteCanvasViewport(
     Box(
         modifier = modifier
             .background(Color(0xFFF9F8FC))
+            .onSizeChanged { controller.updateViewportMetrics(it.width, density.density) }
             .pointerInteropFilter { motionEvent ->
                 if (AndroidStylusInputAdapter.isStylusOrEraser(motionEvent)) {
                     val inputEvent = AndroidStylusInputAdapter.toInputEvent(motionEvent)
                     controller.updateInputDiagnostics(
-                        diagnostics = AndroidStylusInputAdapter.toDiagnostics(motionEvent),
+                        AndroidStylusInputAdapter.toDiagnostics(motionEvent),
                         eventTimeMillis = motionEvent.eventTime,
                         force = motionEvent.actionMasked != MotionEvent.ACTION_MOVE,
                     )
-                    if (inputEvent != null) {
-                        controller.routeInputEvent(
-                            router = router,
-                            event = inputEvent,
-                            mode = inputMode,
-                        )
-                    }
+                    inputEvent?.let { controller.routeInputEvent(router, it, inputMode) }
                     true
                 } else {
                     platformSnapshotStore.latest = motionEvent.toAndroidPointerSnapshot()
@@ -114,7 +121,7 @@ internal fun InfiniteCanvasViewport(
                 activeStroke = controller.activeInkStroke,
                 modifier = Modifier.fillMaxSize(),
             )
-            controller.currentCanvas.objects.forEach { canvasObject ->
+            controller.currentCanvas.objects.sortedBy(CanvasObject::zIndex).forEach { canvasObject ->
                 CanvasObjectView(
                     canvasObject = canvasObject,
                     selected = controller.state.selection.isObjectSelected(canvasObject.id),
@@ -129,11 +136,27 @@ internal fun InfiniteCanvasViewport(
             )
         }
 
+        val focusedBoxId = controller.state.focusedRichContentBoxId
+        if (controller.state.currentTool == EditorTool.Text && focusedBoxId != null) {
+            RichContentToolbar(
+                boxId = focusedBoxId,
+                controller = controller,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .fillMaxWidth()
+                    .widthIn(max = 960.dp)
+                    .wrapContentHeight()
+                    .heightIn(min = 106.dp)
+                    .zIndex(50f),
+            )
+        }
+
         if (controller.currentCanvas.objects.isEmpty() && controller.currentCanvas.inkLayer.strokes.isEmpty()) {
             Text(
                 text = when (controller.state.currentTool) {
                     EditorTool.Text -> "Tap anywhere to start typing"
-                    EditorTool.Pen -> "Write with S Pen · Drag with one finger · Pinch to zoom"
+                    EditorTool.Pen -> "S Pen writes · Tap to type · Drag with one finger · Pinch to zoom"
                     EditorTool.Selection -> "Draw around ink or objects to select them"
                     EditorTool.Eraser -> "Erase with S Pen or the pen eraser"
                 },
@@ -161,13 +184,8 @@ private fun CanvasObjectView(
     controller: NeoNoteEditorController,
 ) {
     when (canvasObject) {
-        is RichContentBox -> RichContentBoxView(
-            box = canvasObject,
-            selected = selected,
-            selectionMode = selectionMode,
-            controller = controller,
-        )
-        else -> Unit
+        is RichContentBox -> RichContentBoxView(canvasObject, selected, selectionMode, controller)
+        is FloatingImage -> FloatingImageView(canvasObject, selected, selectionMode, controller)
     }
 }
 
@@ -181,63 +199,59 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
         if (down.isConsumed) return@awaitEachGesture
-
         routePointerEvent(
-            router = router,
-            inputAdapter = inputAdapter,
-            controller = controller,
-            type = PointerEventType.Down,
-            changes = listOf(down),
-            platformSnapshot = platformSnapshotProvider(),
-            mode = mode,
+            router,
+            inputAdapter,
+            controller,
+            PointerEventType.Down,
+            listOf(down),
+            platformSnapshotProvider(),
+            mode,
         )
 
         while (true) {
             val event = awaitPointerEvent(pass = PointerEventPass.Final)
             val platformSnapshot = platformSnapshotProvider()
             if (event.changes.any { it.isConsumed }) return@awaitEachGesture
-
-            val pressedChanges = event.changes.filter { it.pressed }
-            if (pressedChanges.size >= 2) {
-                val zoomChange = event.calculateZoom()
+            val pressed = event.changes.filter { it.pressed }
+            if (pressed.size >= 2) {
+                val zoom = event.calculateZoom()
                 val centroid = event.calculateCentroid(useCurrent = true)
                 routePointerEvent(
-                    router = router,
-                    inputAdapter = inputAdapter,
-                    controller = controller,
-                    type = PointerEventType.Move,
-                    changes = pressedChanges,
-                    platformSnapshot = platformSnapshot,
-                    mode = mode,
+                    router,
+                    inputAdapter,
+                    controller,
+                    PointerEventType.Move,
+                    pressed,
+                    platformSnapshot,
+                    mode,
                 )
-                controller.zoomViewportBy(zoomChange, CanvasPoint(centroid.x, centroid.y))
+                controller.zoomViewportBy(zoom, CanvasPoint(centroid.x, centroid.y))
                 event.changes.forEach { it.consume() }
                 continue
             }
-
             val primary = event.changes.firstOrNull() ?: return@awaitEachGesture
             if (primary.changedToUpIgnoreConsumed()) {
                 routePointerEvent(
-                    router = router,
-                    inputAdapter = inputAdapter,
-                    controller = controller,
-                    type = PointerEventType.Up,
-                    changes = listOf(primary),
-                    platformSnapshot = platformSnapshot,
-                    mode = mode,
+                    router,
+                    inputAdapter,
+                    controller,
+                    PointerEventType.Up,
+                    listOf(primary),
+                    platformSnapshot,
+                    mode,
                 )
                 return@awaitEachGesture
             }
-
             if (primary.pressed && primary.positionChange() != Offset.Zero) {
                 routePointerEvent(
-                    router = router,
-                    inputAdapter = inputAdapter,
-                    controller = controller,
-                    type = PointerEventType.Move,
-                    changes = listOf(primary),
-                    platformSnapshot = platformSnapshot,
-                    mode = mode,
+                    router,
+                    inputAdapter,
+                    controller,
+                    PointerEventType.Move,
+                    listOf(primary),
+                    platformSnapshot,
+                    mode,
                 )
             }
         }
@@ -253,11 +267,7 @@ private fun routePointerEvent(
     platformSnapshot: AndroidPointerSnapshot?,
     mode: InputMode,
 ) {
-    val inputEvent = inputAdapter.toInputEvent(
-        type = type,
-        changes = changes,
-        platformSnapshot = platformSnapshot,
-    ) ?: return
+    val inputEvent = inputAdapter.toInputEvent(type, changes, platformSnapshot) ?: return
     controller.updateInputDiagnostics(
         InputDiagnostics(
             tool = inputEvent.pointers.first().tool,
@@ -273,9 +283,13 @@ private fun routePointerEvent(
         ).withPressureSamples(inputEvent.primaryInkSamples),
         force = type != PointerEventType.Move,
     )
-    controller.routeInputEvent(
-        router = router,
-        event = inputEvent,
-        mode = mode,
-    )
+    val result = controller.routeInputEvent(router, inputEvent, mode)
+
+    // In unified Pen mode a finger tap on an existing text box should enter
+    // editing just like a blank-canvas tap creates a new text box.
+    val focus = result.action as? InputAction.FocusExisting
+    if (focus?.objectId != null && controller.state.currentTool == EditorTool.Pen) {
+        controller.setTool(EditorTool.Text)
+        controller.activateRichContentBox(focus.objectId)
+    }
 }

@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -21,14 +20,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.neonote.engine.MathExpressionFormatter
 import com.neonote.engine.RichContentLayoutDefaults
 import com.neonote.model.BlockFormula
 import com.neonote.model.BlockImage
@@ -41,6 +43,7 @@ import com.neonote.model.ListKind
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
 import com.neonote.model.TableNode
+import com.neonote.model.TextAlignment
 
 @Composable
 internal fun RichContentRenderer(
@@ -54,71 +57,62 @@ internal fun RichContentRenderer(
     selectedObjectBlockIndex: Int? = null,
     onObjectBlockFocus: (Int) -> Unit = { onFocus() },
 ) {
-    val focusModifier = if (!selectionMode && !selected) {
-        Modifier.clickable(onClick = onFocus)
-    } else {
-        Modifier
-    }
-    val paddingModifier = if (applyContentPadding) {
-        Modifier.padding(
-            horizontal = RichContentLayoutDefaults.RendererHorizontalPadding.dp,
-            vertical = RichContentLayoutDefaults.RendererVerticalPadding.dp,
-        )
-    } else {
-        Modifier
-    }
+    val focusModifier = if (!selectionMode && !selected) Modifier.clickable(onClick = onFocus) else Modifier
+    val paddingModifier = if (applyContentPadding) Modifier.padding(
+        horizontal = RichContentLayoutDefaults.RendererHorizontalPadding.dp,
+        vertical = RichContentLayoutDefaults.RendererVerticalPadding.dp,
+    ) else Modifier
     Column(
-        modifier = modifier
-            .then(focusModifier)
-            .then(paddingModifier),
+        modifier = modifier.then(focusModifier).then(paddingModifier),
         verticalArrangement = Arrangement.spacedBy(RichContentLayoutDefaults.BlockSpacing.dp),
     ) {
-        if (content.blocks.isEmpty()) {
-            Text("Start typing…", color = Color(0xFF94A3B8), style = richContentBodyTextStyle())
-        }
+        if (content.blocks.isEmpty()) Text("Start typing…", color = Color(0xFF94A3B8))
         var numberedIndex = 0
         var previousNumbered = false
         content.blocks.forEachIndexed { blockIndex, block ->
             when (block) {
                 is ParagraphNode -> {
-                    val metadata = block.listMetadata
-                    val markerNumber = if (metadata?.kind == ListKind.Numbered) {
+                    val marker = if (block.listMetadata?.kind == ListKind.Numbered) {
                         numberedIndex = if (previousNumbered) numberedIndex + 1 else 1
                         previousNumbered = true
                         numberedIndex
                     } else {
-                        previousNumbered = false
                         numberedIndex = 0
+                        previousNumbered = false
                         0
                     }
-                    RichParagraphRenderer(
-                        paragraph = block,
-                        markerNumber = markerNumber,
-                        blockIndex = blockIndex,
-                        selectionMode = selectionMode,
-                        selected = selected,
-                        onToggleTodoChecked = onToggleTodoChecked,
-                    )
+                    RichParagraphRenderer(block, marker, blockIndex, selectionMode, selected, onToggleTodoChecked)
                 }
                 is BlockFormula -> {
-                    previousNumbered = false
                     numberedIndex = 0
-                    RichBlockCard(label = "Formula", accent = "ƒ", text = block.expression.ifBlank { "empty expression" }, height = RichContentLayoutDefaults.FormulaCardHeight)
+                    previousNumbered = false
+                    val rendered = MathExpressionFormatter.render(block.expression)
+                    StaticBlockCard(
+                        label = if (rendered.isValid) "Formula" else "Formula error",
+                        accent = "ƒx",
+                        text = rendered.displayText.ifBlank { "Enter formula" } + if (block.numbered) "  (${blockIndex + 1})" else "",
+                        error = !rendered.isValid,
+                    )
                 }
                 is BlockImage -> {
-                    previousNumbered = false
                     numberedIndex = 0
-                    ImageBlockView(
-                        block = block,
+                    previousNumbered = false
+                    StaticBlockCard(
+                        label = "Image",
+                        accent = "▧",
+                        text = listOfNotNull(
+                            block.caption?.takeIf(String::isNotBlank),
+                            block.altText?.takeIf(String::isNotBlank),
+                            "${block.rotationDegrees.toInt()}°",
+                        ).joinToString(" · "),
                         selected = selectedObjectBlockIndex == blockIndex,
-                        enabled = !selectionMode && !selected,
                         onClick = { onObjectBlockFocus(blockIndex) },
                     )
                 }
                 is TableNode -> {
-                    previousNumbered = false
                     numberedIndex = 0
-                    StaticTableGrid(table = block)
+                    previousNumbered = false
+                    StaticTableGrid(block)
                 }
             }
         }
@@ -135,27 +129,15 @@ private fun RichParagraphRenderer(
     onToggleTodoChecked: (Int) -> Unit,
 ) {
     val metadata = paragraph.listMetadata
+    val indent = (paragraph.style.indentLevel * 20).dp
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = Modifier.fillMaxWidth().padding(start = indent)
             .heightIn(min = RichContentLayoutDefaults.LineHeight.dp),
         verticalAlignment = Alignment.Top,
     ) {
         when (metadata?.kind) {
-            ListKind.Bullet -> Text(
-                "•",
-                modifier = Modifier
-                    .padding(end = 8.dp)
-                    .widthIn(min = 18.dp),
-                color = Color(0xFF334155),
-            )
-            ListKind.Numbered -> Text(
-                "$markerNumber.",
-                modifier = Modifier
-                    .padding(end = 8.dp)
-                    .widthIn(min = 24.dp),
-                color = Color(0xFF334155),
-            )
+            ListKind.Bullet -> Text("•", Modifier.padding(end = 8.dp).widthIn(min = 18.dp), color = Color(0xFF334155))
+            ListKind.Numbered -> Text("$markerNumber.", Modifier.padding(end = 8.dp).widthIn(min = 24.dp), color = Color(0xFF334155))
             ListKind.Todo -> Checkbox(
                 checked = metadata.checked,
                 onCheckedChange = { onToggleTodoChecked(blockIndex) },
@@ -165,61 +147,77 @@ private fun RichParagraphRenderer(
         }
         Text(
             text = paragraph.toDisplayAnnotatedString(),
+            modifier = Modifier.weight(1f),
             color = Color(0xFF0F172A),
-            style = richContentBodyTextStyle(),
+            style = MaterialTheme.typography.bodyMedium.copy(
+                lineHeight = RichContentLayoutDefaults.LineHeight.sp,
+                fontSize = when (paragraph.style.headingLevel) {
+                    1 -> 24.sp
+                    2 -> 20.sp
+                    3 -> 17.sp
+                    else -> 14.sp
+                },
+                fontWeight = if (paragraph.style.headingLevel > 0) FontWeight.SemiBold else FontWeight.Normal,
+                textAlign = when (paragraph.style.alignment) {
+                    TextAlignment.Start -> TextAlign.Start
+                    TextAlignment.Center -> TextAlign.Center
+                    TextAlignment.End -> TextAlign.End
+                },
+            ),
         )
     }
 }
 
 @Composable
-private fun RichBlockCard(label: String, accent: String, text: String, height: Float) {
+private fun StaticBlockCard(
+    label: String,
+    accent: String,
+    text: String,
+    selected: Boolean = false,
+    error: Boolean = false,
+    onClick: () -> Unit = {},
+) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(height.dp)
+        modifier = Modifier.fillMaxWidth().heightIn(min = 58.dp)
+            .clickable(onClick = onClick)
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFFF8FAFC))
-            .border(width = 1.dp, color = Color(0xFFCBD5E1), shape = RoundedCornerShape(10.dp))
+            .border(
+                if (selected) 2.dp else 1.dp,
+                when { error -> Color(0xFFDC2626); selected -> Color(0xFF6D4AFF); else -> Color(0xFFCBD5E1) },
+                RoundedCornerShape(10.dp),
+            )
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = accent,
-            modifier = Modifier
-                .padding(end = 8.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .background(Color(0xFFE0E7FF))
-                .padding(horizontal = 7.dp, vertical = 3.dp),
+            accent,
+            modifier = Modifier.padding(end = 8.dp).clip(RoundedCornerShape(7.dp))
+                .background(Color(0xFFE0E7FF)).padding(horizontal = 7.dp, vertical = 3.dp),
             color = Color(0xFF3730A3),
-            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
         )
         Column {
-            Text(text = label, color = Color(0xFF475569), style = MaterialTheme.typography.labelSmall)
-            Text(text = text, color = Color(0xFF0F172A), style = MaterialTheme.typography.bodySmall)
+            Text(label, color = if (error) Color(0xFFB42318) else Color(0xFF475569), style = MaterialTheme.typography.labelSmall)
+            Text(text.ifBlank { " " }, color = Color(0xFF0F172A), style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
 
 @Composable
 private fun StaticTableGrid(table: TableNode) {
-    val rowCount = table.rows.size.coerceAtLeast(RichContentLayoutDefaults.TableMinimumLayoutRows)
-    val columnCount = (table.rows.maxOfOrNull { it.size } ?: 0).coerceAtLeast(RichContentLayoutDefaults.TableMinimumLayoutColumns)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(width = 1.dp, color = Color(0xFFCBD5E1)),
-    ) {
-        repeat(rowCount) { rowIndex ->
+    val rows = table.rows.size.coerceAtLeast(1)
+    val columns = (table.rows.maxOfOrNull { it.size } ?: 0).coerceAtLeast(1)
+    Column(modifier = Modifier.fillMaxWidth().border(1.dp, Color(0xFFCBD5E1))) {
+        repeat(rows) { rowIndex ->
             Row(modifier = Modifier.fillMaxWidth()) {
-                repeat(columnCount) { columnIndex ->
+                repeat(columns) { columnIndex ->
                     val cell = table.rows.getOrNull(rowIndex)?.getOrNull(columnIndex)
                     Text(
-                        text = cell?.content?.previewTextForTableCell().orEmpty().ifBlank { " " },
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = RichContentLayoutDefaults.TableMinCellHeight.dp)
-                            .border(width = 1.dp, color = Color(0xFFE2E8F0))
-                            .padding(horizontal = 6.dp, vertical = 6.dp),
+                        cell?.content?.previewTextForTableCell().orEmpty().ifBlank { " " },
+                        modifier = Modifier.weight(1f).heightIn(min = 36.dp)
+                            .background(if (rowIndex < table.headerRowCount) Color(0xFFF1EEF9) else Color.Transparent)
+                            .border(1.dp, Color(0xFFE2E8F0)).padding(6.dp),
                         color = Color(0xFF334155),
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -229,60 +227,40 @@ private fun StaticTableGrid(table: TableNode) {
     }
 }
 
-
-
-@Composable
-private fun richContentBodyTextStyle() = MaterialTheme.typography.bodyMedium.copy(
-    lineHeight = RichContentLayoutDefaults.LineHeight.sp,
-)
-
 internal fun ParagraphNode.toDisplayAnnotatedString(): AnnotatedString = buildAnnotatedString {
-    inlines.forEach { inline -> appendInlineNode(inline) }
+    withStyle(ParagraphStyle()) { inlines.forEach { appendInlineNode(it) } }
 }
 
 private fun AnnotatedString.Builder.appendInlineNode(inline: InlineNode) {
     when (inline) {
         is InlineText -> withStyle(inline.textSpanStyle()) { append(inline.text) }
         InlineLineBreak -> append("\n")
-        is InlineFormula -> withStyle(inlineChipStyle) { append(inline.formulaChipText()) }
-        is InlineImage -> withStyle(inlineChipStyle) { append(inline.imageChipText()) }
+        is InlineFormula -> withStyle(inlineChipStyle) {
+            append(" ƒ ${MathExpressionFormatter.render(inline.expression).displayText.ifBlank { "empty" }} ")
+        }
+        is InlineImage -> withStyle(inlineChipStyle) {
+            append(" Image: ${inline.altText?.takeIf(String::isNotBlank) ?: "asset:${inline.assetId}"} ")
+        }
     }
 }
 
-private fun InlineText.textSpanStyle(): SpanStyle = SpanStyle(
-    fontWeight = if (bold) FontWeight.Bold else null,
-    fontStyle = if (italic) FontStyle.Italic else null,
-    textDecoration = if (underline) TextDecoration.Underline else null,
-)
+private fun InlineText.textSpanStyle(): SpanStyle {
+    val decorations = buildList {
+        if (underline) add(TextDecoration.Underline)
+        if (strikethrough) add(TextDecoration.LineThrough)
+    }
+    return SpanStyle(
+        fontWeight = if (bold) FontWeight.Bold else null,
+        fontStyle = if (italic) FontStyle.Italic else null,
+        textDecoration = decorations.takeIf(List<TextDecoration>::isNotEmpty)?.let(TextDecoration::combine),
+        color = textColorArgb?.let(::Color) ?: Color.Unspecified,
+        background = highlightColorArgb?.let(::Color) ?: Color.Unspecified,
+        fontSize = (14f * fontScale.coerceIn(0.5f, 4f)).sp,
+    )
+}
 
 private val inlineChipStyle = SpanStyle(
     color = Color(0xFF1E3A8A),
     background = Color(0xFFE0F2FE),
     fontWeight = FontWeight.Medium,
 )
-
-internal fun InlineFormula.formulaChipText(): String = " ƒ ${expression.ifBlank { "empty" }} "
-
-internal fun InlineImage.imageChipText(): String = " Image: ${imagePlaceholderText()} "
-
-private fun InlineImage.imagePlaceholderText(): String = altText?.takeIf { it.isNotBlank() } ?: "asset:$assetId"
-
-private fun BlockImage.imagePlaceholderText(): String = altText?.takeIf { it.isNotBlank() } ?: "asset:$assetId"
-
-private fun ParagraphNode.previewText(): String = inlines.joinToString("") { inline ->
-    when (inline) {
-        is InlineText -> inline.text
-        InlineLineBreak -> "\n"
-        is InlineFormula -> inline.formulaChipText().trim()
-        is InlineImage -> inline.imageChipText().trim()
-    }
-}
-
-private fun RichContent.previewText(): String = blocks.firstOrNull()?.let { block ->
-    when (block) {
-        is ParagraphNode -> block.previewText().ifBlank { " " }
-        is BlockFormula -> block.expression.ifBlank { "formula" }
-        is BlockImage -> block.imagePlaceholderText()
-        is TableNode -> "nested table"
-    }
-} ?: " "
