@@ -41,6 +41,7 @@ import com.neonote.engine.InputAction
 import com.neonote.engine.InputMode
 import com.neonote.engine.InputRouter
 import com.neonote.engine.PointerEventType
+import com.neonote.engine.SelectionEngine
 import com.neonote.input.AndroidPointerSnapshot
 import com.neonote.input.AndroidStylusInputAdapter
 import com.neonote.input.AndroidToolTypes
@@ -57,6 +58,7 @@ import com.neonote.model.RichContentBox
 
 private const val FocusedObjectScreenMargin = 22f
 private const val FocusedTextToolbarClearance = 72f
+private const val FingerInkHitToleranceScreenPx = 14f
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -67,6 +69,7 @@ internal fun InfiniteCanvasViewport(
 ) {
     val router = remember { InputRouter() }
     val inputAdapter = remember { ComposeInputAdapter() }
+    val selectionEngine = remember { SelectionEngine() }
     val platformSnapshotStore = remember { PlatformSnapshotStore() }
     val density = LocalDensity.current
     val inputMode = when (controller.state.currentTool) {
@@ -99,6 +102,7 @@ internal fun InfiniteCanvasViewport(
                 handleCanvasPointerInput(
                     router = router,
                     inputAdapter = inputAdapter,
+                    selectionEngine = selectionEngine,
                     platformSnapshotProvider = { platformSnapshotStore.latest },
                     controller = controller,
                     mode = inputMode,
@@ -199,6 +203,7 @@ private fun CanvasObjectView(
 private suspend fun PointerInputScope.handleCanvasPointerInput(
     router: InputRouter,
     inputAdapter: ComposeInputAdapter,
+    selectionEngine: SelectionEngine,
     platformSnapshotProvider: () -> AndroidPointerSnapshot?,
     controller: NeoNoteEditorController,
     mode: InputMode,
@@ -209,6 +214,7 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
         routePointerEvent(
             router = router,
             inputAdapter = inputAdapter,
+            selectionEngine = selectionEngine,
             controller = controller,
             type = PointerEventType.Down,
             changes = listOf(down),
@@ -228,6 +234,7 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
                 routePointerEvent(
                     router = router,
                     inputAdapter = inputAdapter,
+                    selectionEngine = selectionEngine,
                     controller = controller,
                     type = PointerEventType.Move,
                     changes = pressed,
@@ -244,6 +251,7 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
                 routePointerEvent(
                     router = router,
                     inputAdapter = inputAdapter,
+                    selectionEngine = selectionEngine,
                     controller = controller,
                     type = PointerEventType.Up,
                     changes = listOf(primary),
@@ -257,6 +265,7 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
                 routePointerEvent(
                     router = router,
                     inputAdapter = inputAdapter,
+                    selectionEngine = selectionEngine,
                     controller = controller,
                     type = PointerEventType.Move,
                     changes = listOf(primary),
@@ -272,6 +281,7 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
 private fun routePointerEvent(
     router: InputRouter,
     inputAdapter: ComposeInputAdapter,
+    selectionEngine: SelectionEngine,
     controller: NeoNoteEditorController,
     type: PointerEventType,
     changes: List<PointerInputChange>,
@@ -279,7 +289,27 @@ private fun routePointerEvent(
     mode: InputMode,
     viewportSize: IntSize,
 ) {
-    val inputEvent = inputAdapter.toInputEvent(type, changes, platformSnapshot) ?: return
+    val screenPosition = changes.firstOrNull()?.position ?: return
+    val documentPosition = controller.screenToDocument(CanvasPoint(screenPosition.x, screenPosition.y))
+    val targetObjectId = selectionEngine.hitTestCanvasObjects(controller.currentCanvas, documentPosition)
+        .firstOrNull()
+        ?.id
+    val targetStrokeId = if (targetObjectId == null) {
+        selectionEngine.hitTestInkStrokes(
+            canvas = controller.currentCanvas,
+            point = documentPosition,
+            tolerance = FingerInkHitToleranceScreenPx / controller.state.viewport.zoomScale.coerceAtLeast(0.2f),
+        ).firstOrNull()?.id
+    } else {
+        null
+    }
+    val inputEvent = inputAdapter.toInputEvent(
+        type = type,
+        changes = changes,
+        platformSnapshot = platformSnapshot,
+        targetObjectId = targetObjectId,
+        targetStrokeId = targetStrokeId,
+    ) ?: return
     controller.updateInputDiagnostics(
         InputDiagnostics(
             tool = inputEvent.pointers.first().tool,
