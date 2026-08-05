@@ -70,7 +70,7 @@ internal fun SelectionTransformOverlay(
                         role = Role.Button
                         contentDescription = "Resize selection"
                     }
-                    .pointerInput(controller.state.selection.selectedRefs, widthPx, heightPx) {
+                    .pointerInput(controller.state.selection.selectedRefs) {
                         detectDragGestures { change, dragAmount ->
                             change.consume()
                             val horizontal = (widthPx + dragAmount.x) / widthPx
