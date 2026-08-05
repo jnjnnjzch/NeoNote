@@ -102,7 +102,7 @@ public class SelectionEngine {
         selection: SelectionState,
         scaleX: Float,
         scaleY: Float = scaleX,
-        anchor: CanvasPoint = selectedBounds(canvas, selection)?.center ?: CanvasPoint.Zero,
+        anchor: CanvasPoint = selectedBounds(canvas, selection)?.let { CanvasPoint(it.left, it.top) } ?: CanvasPoint.Zero,
     ): InfiniteCanvas {
         val sx = scaleX.coerceIn(0.05f, 20f)
         val sy = scaleY.coerceIn(0.05f, 20f)
