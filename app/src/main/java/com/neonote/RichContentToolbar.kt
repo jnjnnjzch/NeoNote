@@ -196,8 +196,17 @@ internal fun RichContentToolbar(
                     }
                 }
 
-                if (activeTableCell != null) {
-                    ToolbarDivider()
+
+            }
+
+            if (activeTableCell != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     ToolbarAction("+ Row", "Add table row", compact = false) {
                         controller.addActiveRichContentTableRow(boxId)
                     }
@@ -215,6 +224,27 @@ internal fun RichContentToolbar(
                     }
                     ToolbarAction("Auto", "Automatic column width", compact = false) {
                         controller.setActiveRichContentTableColumnWidth(boxId, null)
+                    }
+                    ToolbarAction("Merge →", "Merge cell with the cell to the right", compact = false) {
+                        controller.mergeActiveTableCellRight(boxId)
+                    }
+                    ToolbarAction("Merge ↓", "Merge cell with the cell below", compact = false) {
+                        controller.mergeActiveTableCellDown(boxId)
+                    }
+                    ToolbarAction("Split", "Split merged cell", compact = false) {
+                        controller.splitActiveTableCell(boxId)
+                    }
+                    ToolbarAction("Header", "Toggle header row", compact = false) {
+                        controller.toggleActiveTableHeader(boxId)
+                    }
+                    ToolbarAction("Borders", "Toggle table borders", compact = false) {
+                        controller.toggleActiveTableBorders(boxId)
+                    }
+                    ToolbarAction("Shade", "Toggle cell shading", compact = false) {
+                        controller.toggleActiveTableCellShade(boxId)
+                    }
+                    ToolbarAction("V Align", "Cycle vertical cell alignment", compact = false) {
+                        controller.cycleActiveTableCellAlignment(boxId)
                     }
                     ToolbarAction("Nested", "Insert nested table", compact = false) {
                         controller.insertNestedTable(boxId, activeTableCell.address, 2, 2)
