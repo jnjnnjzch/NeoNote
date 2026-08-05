@@ -49,6 +49,7 @@ import com.neonote.model.EditorTool
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.util.UUID
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
@@ -388,7 +389,7 @@ internal fun NeoNoteEditorScreen(
     }
 
     if (libraryVisible) {
-        DocumentLibraryDialog(
+        NaturalDocumentLibraryDialog(
             documents = documents,
             showTrash = showTrash,
             currentDocumentId = state.document.id,
@@ -433,25 +434,27 @@ private fun preferredFloatingImageScreenSize(
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
     val sourceWidth = options.outWidth.takeIf { it > 0 }?.toFloat()
     val sourceHeight = options.outHeight.takeIf { it > 0 }?.toFloat()
-    val availableWidth = if (viewport.width > 0) {
-        min(viewport.width * 0.72f, maximumWidthPx)
-    } else {
-        defaultWidthPx
-    }
-    val availableHeight = if (viewport.height > 0) {
-        min(viewport.height * 0.58f, maximumHeightPx)
-    } else {
-        defaultHeightPx
-    }
+    val availableWidth = if (viewport.width > 0) min(viewport.width * 0.72f, maximumWidthPx) else defaultWidthPx
+    val availableHeight = if (viewport.height > 0) min(viewport.height * 0.58f, maximumHeightPx) else defaultHeightPx
     if (sourceWidth == null || sourceHeight == null) {
         return FloatingImageScreenSize(availableWidth, min(defaultHeightPx, availableHeight))
     }
-    val fit = min(availableWidth / sourceWidth, availableHeight / sourceHeight).coerceAtMost(1f)
-    val width = (sourceWidth * fit).coerceAtLeast(min(defaultWidthPx * 0.55f, availableWidth))
-    val height = (sourceHeight * fit).coerceAtLeast(min(defaultHeightPx * 0.55f, availableHeight))
-    val secondFit = min(availableWidth / width, availableHeight / height).coerceAtMost(1f)
-    return FloatingImageScreenSize(width * secondFit, height * secondFit)
+
+    var scale = min(availableWidth / sourceWidth, availableHeight / sourceHeight).coerceAtMost(1f)
+    var width = sourceWidth * scale
+    var height = sourceHeight * scale
+    val minimumLongEdge = min(defaultImageLongEdge(defaultWidthPx, defaultHeightPx) * 0.55f, max(availableWidth, availableHeight))
+    val currentLongEdge = max(width, height)
+    if (currentLongEdge < minimumLongEdge && currentLongEdge > 0f) {
+        val availableScale = min(availableWidth / width, availableHeight / height)
+        scale = min(minimumLongEdge / currentLongEdge, availableScale)
+        width *= scale
+        height *= scale
+    }
+    return FloatingImageScreenSize(width.coerceAtLeast(1f), height.coerceAtLeast(1f))
 }
+
+private fun defaultImageLongEdge(width: Float, height: Float): Float = max(width, height)
 
 private class UuidIdGenerator : IdGenerator {
     override fun nextId(prefix: String): String = "$prefix-${UUID.randomUUID()}"
