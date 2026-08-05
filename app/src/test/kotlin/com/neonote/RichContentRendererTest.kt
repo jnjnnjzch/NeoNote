@@ -55,13 +55,14 @@ class RichContentRendererTest {
     }
 
     @Test
-    fun `inline placeholders fall back to stable labels`() {
+    fun `inline placeholders fall back to stable user-facing labels`() {
         val annotated = ParagraphNode(
             inlines = listOf(
                 InlineFormula(""),
                 InlineImage(assetId = "asset-42"),
             ),
         ).toDisplayAnnotatedString()
-        assertEquals(" ƒ empty  Image: asset:asset-42 ", annotated.text)
+        assertEquals(" ƒ empty  Image: embedded ", annotated.text)
+        assertTrue("asset-42" !in annotated.text)
     }
 }
