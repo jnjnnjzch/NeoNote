@@ -41,6 +41,7 @@ import com.neonote.engine.DocumentEngine
 import com.neonote.engine.DocumentSummary
 import com.neonote.engine.FileAssetStore
 import com.neonote.engine.FileDocumentLibrary
+import com.neonote.engine.FileDocumentSearchIndex
 import com.neonote.engine.IdGenerator
 import com.neonote.engine.NeoNoteArchiveCodec
 import com.neonote.model.CanvasPoint
@@ -75,6 +76,10 @@ internal fun NeoNoteEditorScreen(
     val assetStore = remember(context) { FileAssetStore(FileAssetStore.defaultDirectory(context.filesDir)) }
     val archiveCodec = remember(assetStore) { NeoNoteArchiveCodec(assetStore) }
     val documentEngine = remember { DocumentEngine(UuidIdGenerator()) }
+    val searchIndex = remember(context) { FileDocumentSearchIndex(context.filesDir) }
+    val searchCoordinator = remember(searchIndex, library, controller) {
+        DocumentSearchCoordinator(searchIndex, library, controller)
+    }
     val defaultImageScreenWidthPx = with(density) { 320.dp.toPx() }
     val defaultImageScreenHeightPx = with(density) { 220.dp.toPx() }
     val maximumImageScreenWidthPx = with(density) { 420.dp.toPx() }
@@ -82,6 +87,7 @@ internal fun NeoNoteEditorScreen(
 
     var libraryReady by rememberSaveable { mutableStateOf(false) }
     var libraryVisible by rememberSaveable { mutableStateOf(false) }
+    var searchVisible by rememberSaveable { mutableStateOf(false) }
     var showTrash by rememberSaveable { mutableStateOf(false) }
     var settingsVisible by rememberSaveable { mutableStateOf(false) }
     var documents by remember { mutableStateOf<List<DocumentSummary>>(emptyList()) }
@@ -399,6 +405,13 @@ internal fun NeoNoteEditorScreen(
             onTrash = ::trashDocument,
             onRestore = { id -> coroutineScope.launch { library.restore(id); refreshLibrary() } },
             onDeleteForever = { id -> coroutineScope.launch { library.permanentlyDelete(id); refreshLibrary() } },
+            onSearchAllNotes = {
+                libraryVisible = false
+                coroutineScope.launch {
+                    controller.saveDocument(library)
+                    searchVisible = true
+                }
+            },
             onImport = {
                 importLauncher.launch(
                     arrayOf(
@@ -409,6 +422,22 @@ internal fun NeoNoteEditorScreen(
                 )
             },
             onDismiss = { libraryVisible = false },
+        )
+    }
+    if (searchVisible) {
+        DocumentSearchDialog(
+            searchIndex = searchIndex,
+            onOpenResult = { hit ->
+                coroutineScope.launch {
+                    if (searchCoordinator.open(hit)) {
+                        refreshLibrary()
+                        searchVisible = false
+                    } else {
+                        statusMessage = "That note is no longer available"
+                    }
+                }
+            },
+            onDismiss = { searchVisible = false },
         )
     }
     if (settingsVisible) {
@@ -443,18 +472,15 @@ private fun preferredFloatingImageScreenSize(
     var scale = min(availableWidth / sourceWidth, availableHeight / sourceHeight).coerceAtMost(1f)
     var width = sourceWidth * scale
     var height = sourceHeight * scale
-    val minimumLongEdge = min(defaultImageLongEdge(defaultWidthPx, defaultHeightPx) * 0.55f, max(availableWidth, availableHeight))
+    val minimumLongEdge = min(max(defaultWidthPx, defaultHeightPx) * 0.55f, max(availableWidth, availableHeight))
     val currentLongEdge = max(width, height)
     if (currentLongEdge < minimumLongEdge && currentLongEdge > 0f) {
-        val availableScale = min(availableWidth / width, availableHeight / height)
-        scale = min(minimumLongEdge / currentLongEdge, availableScale)
+        scale = min(minimumLongEdge / currentLongEdge, min(availableWidth / width, availableHeight / height))
         width *= scale
         height *= scale
     }
     return FloatingImageScreenSize(width.coerceAtLeast(1f), height.coerceAtLeast(1f))
 }
-
-private fun defaultImageLongEdge(width: Float, height: Float): Float = max(width, height)
 
 private class UuidIdGenerator : IdGenerator {
     override fun nextId(prefix: String): String = "$prefix-${UUID.randomUUID()}"
