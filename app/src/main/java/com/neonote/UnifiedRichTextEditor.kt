@@ -58,7 +58,8 @@ import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContentBox
 import com.neonote.model.TextAlignment
 
-private val MinimumUnifiedEditorHeight = 72.dp
+private val MinimumUnifiedEditorHeight = 48.dp
+private val UnifiedBodyLineHeight = 24.sp
 
 /** One platform text field for a paragraph-only box, enabling native cross-paragraph selection. */
 @Composable
@@ -73,7 +74,9 @@ internal fun UnifiedRichTextEditor(
     val clipboard = remember(context) { context.getSystemService(ClipboardManager::class.java) }
     val requester = remember { FocusRequester() }
     val modelText = box.content.toUnifiedPlatformText()
-    var value by remember(box.id) { mutableStateOf(TextFieldValue(modelText)) }
+    var value by remember(box.id) {
+        mutableStateOf(TextFieldValue(modelText, TextRange(modelText.length)))
+    }
     val editable = !selectionMode && !selected
 
     LaunchedEffect(box.isFocused, editable) {
@@ -124,15 +127,16 @@ internal fun UnifiedRichTextEditor(
         },
         enabled = editable,
         singleLine = false,
-        minLines = 3,
+        minLines = 1,
         maxLines = Int.MAX_VALUE,
         keyboardOptions = KeyboardOptions(
             capitalization = KeyboardCapitalization.Sentences,
             imeAction = ImeAction.Default,
         ),
-        textStyle = MaterialTheme.typography.bodyMedium.copy(
+        textStyle = MaterialTheme.typography.bodyLarge.copy(
             color = MaterialTheme.colorScheme.onSurface,
-            lineHeight = 22.sp,
+            fontSize = 16.sp,
+            lineHeight = UnifiedBodyLineHeight,
         ),
         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
         visualTransformation = remember(box.content) {
@@ -189,8 +193,11 @@ internal fun UnifiedRichTextEditor(
                 if (value.text.isEmpty()) {
                     Text(
                         "Start typing…",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontSize = 16.sp,
+                            lineHeight = UnifiedBodyLineHeight,
+                        ),
                     )
                 }
                 inner()
@@ -240,9 +247,9 @@ private class UnifiedRichTextVisualTransformation(
                     builder.addStyle(
                         SpanStyle(
                             fontSize = when (paragraph.style.headingLevel) {
-                                1 -> 24.sp
-                                2 -> 20.sp
-                                else -> 17.sp
+                                1 -> 26.sp
+                                2 -> 22.sp
+                                else -> 18.sp
                             },
                             fontWeight = FontWeight.SemiBold,
                         ),
@@ -272,7 +279,7 @@ private fun ParagraphNode.toUnifiedParagraphStyle(): ParagraphStyle = ParagraphS
         firstLine = (style.indentLevel * 20).sp,
         restLine = (style.indentLevel * 20).sp,
     ),
-    lineHeight = 22.sp,
+    lineHeight = UnifiedBodyLineHeight,
 )
 
 private fun InlineText.toUnifiedSpanStyle(): SpanStyle {
@@ -286,7 +293,7 @@ private fun InlineText.toUnifiedSpanStyle(): SpanStyle {
         textDecoration = if (decorations.isEmpty()) null else TextDecoration.combine(decorations),
         color = textColorArgb?.let(::Color) ?: Color.Unspecified,
         background = highlightColorArgb?.let(::Color) ?: Color.Unspecified,
-        fontSize = (14f * fontScale.coerceIn(0.5f, 4f)).sp,
+        fontSize = (16f * fontScale.coerceIn(0.5f, 4f)).sp,
     )
 }
 
