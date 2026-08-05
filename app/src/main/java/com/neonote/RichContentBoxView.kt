@@ -31,7 +31,7 @@ import com.neonote.model.EditorTool
 import com.neonote.model.RichContentBox
 import kotlin.math.roundToInt
 
-private val MinimumRichContentBoxHeight = 64.dp
+private val MinimumRichContentBoxHeight = 96.dp
 
 @Composable
 internal fun RichContentBoxView(
