@@ -69,7 +69,9 @@ import com.neonote.model.TableCellAddress
 import com.neonote.model.TableNode
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun TableCellEditor(
