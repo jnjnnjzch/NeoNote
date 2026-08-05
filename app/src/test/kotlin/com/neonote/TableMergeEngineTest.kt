@@ -79,6 +79,22 @@ class TableMergeEngineTest {
     }
 
     @Test
+    fun `column insertion safely clears spans instead of leaving stale anchors`() {
+        val engine = RichContentEngine()
+        val merged = TableMergeEngine.merge(tableWithLabels(2, 2), 0, 1, 0, 1)
+        val box = RichContentBox(id = "box", content = RichContent(listOf(merged)))
+        val edited = engine.execute(
+            box,
+            RichContentCommand.AddTableColumn(TableCellAddress(0, 0, 0)),
+        ) as RichContentCommandResult.ContentEdited
+        val result = edited.box.content.blocks.single() as TableNode
+
+        assertEquals(3, result.rows.first().size)
+        assertEquals(1, result.rows[0][0].columnSpan)
+        assertNull(result.rows[1][1].mergedInto)
+    }
+
+    @Test
     fun `invalid continuation anchor is ignored during normalization`() {
         val malformed = TableNode(
             rows = listOf(listOf(TableCell(mergedInto = com.neonote.model.TableCellMergeAnchor(9, 9)))),
