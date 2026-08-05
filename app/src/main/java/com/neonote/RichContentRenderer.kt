@@ -45,6 +45,9 @@ import com.neonote.model.RichContent
 import com.neonote.model.TableNode
 import com.neonote.model.TextAlignment
 
+private val DisplayBodyFontSize = 16.sp
+private val DisplayLineHeight = 24.sp
+
 @Composable
 internal fun RichContentRenderer(
     content: RichContent,
@@ -57,7 +60,8 @@ internal fun RichContentRenderer(
     selectedObjectBlockIndex: Int? = null,
     onObjectBlockFocus: (Int) -> Unit = { onFocus() },
 ) {
-    val focusModifier = if (!selectionMode && !selected) Modifier.clickable(onClick = onFocus) else Modifier
+    val editable = !selectionMode && !selected
+    val focusModifier = if (editable) Modifier.clickable(onClick = onFocus) else Modifier
     val paddingModifier = if (applyContentPadding) Modifier.padding(
         horizontal = RichContentLayoutDefaults.RendererHorizontalPadding.dp,
         vertical = RichContentLayoutDefaults.RendererVerticalPadding.dp,
@@ -66,7 +70,16 @@ internal fun RichContentRenderer(
         modifier = modifier.then(focusModifier).then(paddingModifier),
         verticalArrangement = Arrangement.spacedBy(RichContentLayoutDefaults.BlockSpacing.dp),
     ) {
-        if (content.blocks.isEmpty()) Text("Start typing…", color = Color(0xFF94A3B8))
+        if (content.blocks.isEmpty()) {
+            Text(
+                "Start typing…",
+                color = Color(0xFF94A3B8),
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = DisplayBodyFontSize,
+                    lineHeight = DisplayLineHeight,
+                ),
+            )
+        }
         var numberedIndex = 0
         var previousNumbered = false
         content.blocks.forEachIndexed { blockIndex, block ->
@@ -81,7 +94,14 @@ internal fun RichContentRenderer(
                         previousNumbered = false
                         0
                     }
-                    RichParagraphRenderer(block, marker, blockIndex, selectionMode, selected, onToggleTodoChecked)
+                    RichParagraphRenderer(
+                        paragraph = block,
+                        markerNumber = marker,
+                        blockIndex = blockIndex,
+                        selectionMode = selectionMode,
+                        selected = selected,
+                        onToggleTodoChecked = onToggleTodoChecked,
+                    )
                 }
                 is BlockFormula -> {
                     numberedIndex = 0
@@ -90,7 +110,8 @@ internal fun RichContentRenderer(
                     StaticBlockCard(
                         label = if (rendered.isValid) "Formula" else "Formula error",
                         accent = "ƒx",
-                        text = rendered.displayText.ifBlank { "Enter formula" } + if (block.numbered) "  (${blockIndex + 1})" else "",
+                        text = rendered.displayText.ifBlank { "Enter formula" } +
+                            if (block.numbered) "  (${blockIndex + 1})" else "",
                         error = !rendered.isValid,
                     )
                 }
@@ -106,7 +127,7 @@ internal fun RichContentRenderer(
                             "${block.rotationDegrees.toInt()}°",
                         ).joinToString(" · "),
                         selected = selectedObjectBlockIndex == blockIndex,
-                        onClick = { onObjectBlockFocus(blockIndex) },
+                        onClick = if (editable) ({ onObjectBlockFocus(blockIndex) }) else null,
                     )
                 }
                 is TableNode -> {
@@ -131,13 +152,25 @@ private fun RichParagraphRenderer(
     val metadata = paragraph.listMetadata
     val indent = (paragraph.style.indentLevel * 20).dp
     Row(
-        modifier = Modifier.fillMaxWidth().padding(start = indent)
-            .heightIn(min = RichContentLayoutDefaults.LineHeight.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = indent)
+            .heightIn(min = DisplayLineHeight.value.dp),
         verticalAlignment = Alignment.Top,
     ) {
         when (metadata?.kind) {
-            ListKind.Bullet -> Text("•", Modifier.padding(end = 8.dp).widthIn(min = 18.dp), color = Color(0xFF334155))
-            ListKind.Numbered -> Text("$markerNumber.", Modifier.padding(end = 8.dp).widthIn(min = 24.dp), color = Color(0xFF334155))
+            ListKind.Bullet -> Text(
+                "•",
+                Modifier.padding(end = 8.dp).widthIn(min = 18.dp),
+                color = Color(0xFF334155),
+                fontSize = DisplayBodyFontSize,
+            )
+            ListKind.Numbered -> Text(
+                "$markerNumber.",
+                Modifier.padding(end = 8.dp).widthIn(min = 24.dp),
+                color = Color(0xFF334155),
+                fontSize = DisplayBodyFontSize,
+            )
             ListKind.Todo -> Checkbox(
                 checked = metadata.checked,
                 onCheckedChange = { onToggleTodoChecked(blockIndex) },
@@ -149,13 +182,13 @@ private fun RichParagraphRenderer(
             text = paragraph.toDisplayAnnotatedString(),
             modifier = Modifier.weight(1f),
             color = Color(0xFF0F172A),
-            style = MaterialTheme.typography.bodyMedium.copy(
-                lineHeight = RichContentLayoutDefaults.LineHeight.sp,
+            style = MaterialTheme.typography.bodyLarge.copy(
+                lineHeight = DisplayLineHeight,
                 fontSize = when (paragraph.style.headingLevel) {
-                    1 -> 24.sp
-                    2 -> 20.sp
-                    3 -> 17.sp
-                    else -> 14.sp
+                    1 -> 26.sp
+                    2 -> 22.sp
+                    3 -> 18.sp
+                    else -> DisplayBodyFontSize
                 },
                 fontWeight = if (paragraph.style.headingLevel > 0) FontWeight.SemiBold else FontWeight.Normal,
                 textAlign = when (paragraph.style.alignment) {
@@ -175,16 +208,23 @@ private fun StaticBlockCard(
     text: String,
     selected: Boolean = false,
     error: Boolean = false,
-    onClick: () -> Unit = {},
+    onClick: (() -> Unit)? = null,
 ) {
+    val interaction = onClick?.let { action -> Modifier.clickable(onClick = action) } ?: Modifier
     Row(
-        modifier = Modifier.fillMaxWidth().heightIn(min = 58.dp)
-            .clickable(onClick = onClick)
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 58.dp)
+            .then(interaction)
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFFF8FAFC))
             .border(
                 if (selected) 2.dp else 1.dp,
-                when { error -> Color(0xFFDC2626); selected -> Color(0xFF6D4AFF); else -> Color(0xFFCBD5E1) },
+                when {
+                    error -> Color(0xFFDC2626)
+                    selected -> Color(0xFF6D4AFF)
+                    else -> Color(0xFFCBD5E1)
+                },
                 RoundedCornerShape(10.dp),
             )
             .padding(horizontal = 10.dp, vertical = 8.dp),
@@ -192,14 +232,25 @@ private fun StaticBlockCard(
     ) {
         Text(
             accent,
-            modifier = Modifier.padding(end = 8.dp).clip(RoundedCornerShape(7.dp))
-                .background(Color(0xFFE0E7FF)).padding(horizontal = 7.dp, vertical = 3.dp),
+            modifier = Modifier
+                .padding(end = 8.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(Color(0xFFE0E7FF))
+                .padding(horizontal = 7.dp, vertical = 3.dp),
             color = Color(0xFF3730A3),
             fontWeight = FontWeight.SemiBold,
         )
         Column {
-            Text(label, color = if (error) Color(0xFFB42318) else Color(0xFF475569), style = MaterialTheme.typography.labelSmall)
-            Text(text.ifBlank { " " }, color = Color(0xFF0F172A), style = MaterialTheme.typography.bodyMedium)
+            Text(
+                label,
+                color = if (error) Color(0xFFB42318) else Color(0xFF475569),
+                style = MaterialTheme.typography.labelSmall,
+            )
+            Text(
+                text.ifBlank { " " },
+                color = Color(0xFF0F172A),
+                style = MaterialTheme.typography.bodyLarge.copy(fontSize = DisplayBodyFontSize),
+            )
         }
     }
 }
@@ -215,9 +266,12 @@ private fun StaticTableGrid(table: TableNode) {
                     val cell = table.rows.getOrNull(rowIndex)?.getOrNull(columnIndex)
                     Text(
                         cell?.content?.previewTextForTableCell().orEmpty().ifBlank { " " },
-                        modifier = Modifier.weight(1f).heightIn(min = 36.dp)
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 38.dp)
                             .background(if (rowIndex < table.headerRowCount) Color(0xFFF1EEF9) else Color.Transparent)
-                            .border(1.dp, Color(0xFFE2E8F0)).padding(6.dp),
+                            .border(1.dp, Color(0xFFE2E8F0))
+                            .padding(7.dp),
                         color = Color(0xFF334155),
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -239,7 +293,7 @@ private fun AnnotatedString.Builder.appendInlineNode(inline: InlineNode) {
             append(" ƒ ${MathExpressionFormatter.render(inline.expression).displayText.ifBlank { "empty" }} ")
         }
         is InlineImage -> withStyle(inlineChipStyle) {
-            append(" Image: ${inline.altText?.takeIf(String::isNotBlank) ?: "asset:${inline.assetId}"} ")
+            append(" Image: ${inline.altText?.takeIf(String::isNotBlank) ?: "embedded"} ")
         }
     }
 }
@@ -255,7 +309,7 @@ private fun InlineText.textSpanStyle(): SpanStyle {
         textDecoration = decorations.takeIf(List<TextDecoration>::isNotEmpty)?.let(TextDecoration::combine),
         color = textColorArgb?.let(::Color) ?: Color.Unspecified,
         background = highlightColorArgb?.let(::Color) ?: Color.Unspecified,
-        fontSize = (14f * fontScale.coerceIn(0.5f, 4f)).sp,
+        fontSize = (16f * fontScale.coerceIn(0.5f, 4f)).sp,
     )
 }
 
