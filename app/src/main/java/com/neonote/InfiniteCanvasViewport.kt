@@ -9,7 +9,6 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -67,8 +66,6 @@ internal fun InfiniteCanvasViewport(
     val platformSnapshotStore = remember { PlatformSnapshotStore() }
     val density = LocalDensity.current
     val inputMode = when (controller.state.currentTool) {
-        // Unified OneNote-like surface: the stylus writes, a finger drag pans,
-        // and a finger tap creates or focuses text without switching tools first.
         EditorTool.Pen -> InputMode.Write
         EditorTool.Text -> InputMode.Write
         EditorTool.Selection -> InputMode.Selection
@@ -77,7 +74,7 @@ internal fun InfiniteCanvasViewport(
 
     Box(
         modifier = modifier
-            .background(Color(0xFFF9F8FC))
+            .background(Color(0xFFFAF9FC))
             .onSizeChanged { controller.updateViewportMetrics(it.width, density.density) }
             .pointerInteropFilter { motionEvent ->
                 if (AndroidStylusInputAdapter.isStylusOrEraser(motionEvent)) {
@@ -143,11 +140,10 @@ internal fun InfiniteCanvasViewport(
                 controller = controller,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .padding(horizontal = 8.dp, vertical = 8.dp)
                     .fillMaxWidth()
-                    .widthIn(max = 960.dp)
+                    .widthIn(max = 980.dp)
                     .wrapContentHeight()
-                    .heightIn(min = 106.dp)
                     .zIndex(50f),
             )
         }
@@ -156,14 +152,14 @@ internal fun InfiniteCanvasViewport(
             Text(
                 text = when (controller.state.currentTool) {
                     EditorTool.Text -> "Tap anywhere to start typing"
-                    EditorTool.Pen -> "S Pen writes · Tap to type · Drag with one finger · Pinch to zoom"
-                    EditorTool.Selection -> "Draw around ink or objects to select them"
+                    EditorTool.Pen -> "Write with S Pen · tap to type · drag to move the page"
+                    EditorTool.Selection -> "Drag around ink or objects to select"
                     EditorTool.Eraser -> "Erase with S Pen or the pen eraser"
                 },
                 modifier = Modifier
                     .align(Alignment.Center)
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color.White.copy(alpha = 0.92f))
+                    .background(Color.White.copy(alpha = 0.9f))
                     .padding(horizontal = 18.dp, vertical = 12.dp),
                 color = Color(0xFF746D82),
                 style = MaterialTheme.typography.bodyMedium,
@@ -284,12 +280,21 @@ private fun routePointerEvent(
         force = type != PointerEventType.Move,
     )
     val result = controller.routeInputEvent(router, inputEvent, mode)
-
-    // In unified Pen mode a finger tap on an existing text box should enter
-    // editing just like a blank-canvas tap creates a new text box.
-    val focus = result.action as? InputAction.FocusExisting
-    if (focus?.objectId != null && controller.state.currentTool == EditorTool.Pen) {
-        controller.setTool(EditorTool.Text)
-        controller.activateRichContentBox(focus.objectId)
+    val focusedObjectId = (result.action as? InputAction.FocusExisting)?.objectId ?: return
+    val focusedObject = controller.currentCanvas.objects.firstOrNull { it.id == focusedObjectId }
+    when (focusedObject) {
+        is RichContentBox -> {
+            if (controller.state.currentTool != EditorTool.Eraser) {
+                controller.setTool(EditorTool.Text)
+                controller.activateRichContentBox(focusedObjectId)
+            }
+        }
+        is FloatingImage -> {
+            if (controller.state.currentTool != EditorTool.Eraser) {
+                controller.setTool(EditorTool.Selection)
+                controller.selectCanvasObject(focusedObjectId)
+            }
+        }
+        null -> Unit
     }
 }
