@@ -6,7 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.matchParentSize
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -52,7 +52,7 @@ internal fun SelectionTransformOverlay(
                 .offset { IntOffset(topLeft.x.roundToInt(), topLeft.y.roundToInt()) }
                 .size(widthDp, heightDp),
         ) {
-            Canvas(Modifier.matchParentSize()) {
+            Canvas(Modifier.fillMaxSize()) {
                 drawRoundRect(
                     color = Color(0xFF2563EB),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx()),
@@ -97,8 +97,8 @@ internal fun SelectionTransformOverlay(
             shadowElevation = 6.dp,
         ) {
             Row {
-                SelectionQuickAction("⧉", "Duplicate selection", controller::duplicateSelection)
-                SelectionQuickAction("×", "Delete selection", controller::deleteSelection, destructive = true)
+                SelectionQuickAction("Copy", "Duplicate selection", controller::duplicateSelection)
+                SelectionQuickAction("Delete", "Delete selection", controller::deleteSelection, destructive = true)
             }
         }
     }
@@ -113,7 +113,7 @@ private fun SelectionQuickAction(
 ) {
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(52.dp)
             .clickable(role = Role.Button, onClick = onClick)
             .semantics {
                 role = Role.Button
@@ -125,6 +125,7 @@ private fun SelectionQuickAction(
             label,
             color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.labelSmall,
         )
     }
 }
