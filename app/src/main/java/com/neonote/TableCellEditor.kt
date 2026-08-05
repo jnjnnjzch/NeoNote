@@ -40,6 +40,12 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
@@ -181,7 +187,13 @@ private fun TableCellParagraphEditor(
         textStyle = LocalTextStyle.current.copy(color = Color(0xFF0F172A), lineHeight = RichContentLayoutDefaults.LineHeight.sp),
         cursorBrush = SolidColor(Color(0xFF6D4AFF)),
         modifier = modifier.heightIn(min = RichContentLayoutDefaults.LineHeight.dp).focusRequester(requester)
-            .onFocusChanged { if (it.isFocused && enabled) controller.focusRichContentTableCell(boxId, address) },
+            .onFocusChanged { if (it.isFocused && enabled) controller.focusRichContentTableCell(boxId, address) }
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.Tab) {
+                    controller.navigateRichContentTableCell(boxId, address, backwards = event.isShiftPressed)
+                    true
+                } else false
+            },
         decorationBox = { inner ->
             Box(Modifier.fillMaxWidth()) {
                 if (value.text.isEmpty()) Text(" ", color = Color(0xFF94A3B8))
