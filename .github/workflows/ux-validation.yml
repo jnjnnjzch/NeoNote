@@ -1,0 +1,39 @@
+name: NeoNote UX validation
+
+on:
+  push:
+    branches:
+      - codex/ux-natural-editor-loop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate tests, lint, and release candidate
+        run: ./gradlew --no-daemon testReleaseCandidateUnitTest lintReleaseCandidate assembleReleaseCandidate
+
+      - name: Upload release candidate APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeoNote-natural-ux-release-candidate
+          path: app/build/outputs/apk/releaseCandidate/*.apk
+          if-no-files-found: error
+          retention-days: 14
