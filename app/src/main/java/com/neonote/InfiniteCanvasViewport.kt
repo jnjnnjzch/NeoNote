@@ -82,7 +82,15 @@ internal fun InfiniteCanvasViewport(
     Box(
         modifier = modifier
             .background(Color(0xFFFAF9FC))
-            .onSizeChanged { controller.updateViewportMetrics(it.width, density.density) }
+            .onSizeChanged { viewportSize ->
+                controller.updateViewportMetrics(viewportSize.width, density.density)
+                controller.state.focusedRichContentBoxId
+                    ?.let { focusedId ->
+                        controller.currentCanvas.objects.filterIsInstance<RichContentBox>()
+                            .firstOrNull { it.id == focusedId }
+                    }
+                    ?.let { focusedBox -> keepObjectVisible(controller, focusedBox, viewportSize) }
+            }
             .pointerInteropFilter { motionEvent ->
                 if (AndroidStylusInputAdapter.isStylusOrEraser(motionEvent)) {
                     val inputEvent = AndroidStylusInputAdapter.toInputEvent(motionEvent)
