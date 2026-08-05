@@ -4,8 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -15,6 +17,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,6 +34,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neonote.engine.MathExpressionFormatter
+import com.neonote.engine.MathExpressionParser
 import com.neonote.engine.RichContentLayoutDefaults
 import com.neonote.model.BlockFormula
 import com.neonote.model.BlockImage
@@ -42,6 +46,7 @@ import com.neonote.model.InlineText
 import com.neonote.model.ListKind
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
+import com.neonote.model.TableCellVerticalAlignment
 import com.neonote.model.TableNode
 import com.neonote.model.TextAlignment
 
@@ -86,13 +91,7 @@ internal fun RichContentRenderer(
                 is BlockFormula -> {
                     numberedIndex = 0
                     previousNumbered = false
-                    val rendered = MathExpressionFormatter.render(block.expression)
-                    StaticBlockCard(
-                        label = if (rendered.isValid) "Formula" else "Formula error",
-                        accent = "ƒx",
-                        text = rendered.displayText.ifBlank { "Enter formula" } + if (block.numbered) "  (${blockIndex + 1})" else "",
-                        error = !rendered.isValid,
-                    )
+                    StaticFormulaCard(block, blockIndex)
                 }
                 is BlockImage -> {
                     numberedIndex = 0
@@ -169,6 +168,33 @@ private fun RichParagraphRenderer(
 }
 
 @Composable
+private fun StaticFormulaCard(formula: BlockFormula, blockIndex: Int) {
+    val parsed = remember(formula.expression) { MathExpressionParser.parse(formula.expression) }
+    Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 58.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFFF8FAFC))
+            .border(1.dp, if (parsed.isValid) Color(0xFFCBD5E1) else Color(0xFFDC2626), RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "ƒx",
+            modifier = Modifier.padding(end = 8.dp).clip(RoundedCornerShape(7.dp))
+                .background(Color(0xFFE0E7FF)).padding(horizontal = 7.dp, vertical = 3.dp),
+            color = Color(0xFF3730A3),
+            fontWeight = FontWeight.SemiBold,
+        )
+        MathExpressionView(
+            formula.expression,
+            modifier = Modifier.weight(1f),
+            fontSize = if (formula.displayMode == com.neonote.model.FormulaDisplayMode.Display) 21.sp else 17.sp,
+        )
+        if (formula.numbered) Text("(${blockIndex + 1})", color = Color(0xFF817A8E))
+    }
+}
+
+@Composable
 private fun StaticBlockCard(
     label: String,
     accent: String,
@@ -206,23 +232,28 @@ private fun StaticBlockCard(
 
 @Composable
 private fun StaticTableGrid(table: TableNode) {
-    val rows = table.rows.size.coerceAtLeast(1)
-    val columns = (table.rows.maxOfOrNull { it.size } ?: 0).coerceAtLeast(1)
-    Column(modifier = Modifier.fillMaxWidth().border(1.dp, Color(0xFFCBD5E1))) {
-        repeat(rows) { rowIndex ->
-            Row(modifier = Modifier.fillMaxWidth()) {
-                repeat(columns) { columnIndex ->
-                    val cell = table.rows.getOrNull(rowIndex)?.getOrNull(columnIndex)
-                    Text(
-                        cell?.content?.previewTextForTableCell().orEmpty().ifBlank { " " },
-                        modifier = Modifier.weight(1f).heightIn(min = 36.dp)
-                            .background(if (rowIndex < table.headerRowCount) Color(0xFFF1EEF9) else Color.Transparent)
-                            .border(1.dp, Color(0xFFE2E8F0)).padding(6.dp),
-                        color = Color(0xFF334155),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
+    SpanAwareTableGrid(table = table, modifier = Modifier.fillMaxWidth()) { rowIndex, _, cell ->
+        val borderModifier = if (table.showBorders) Modifier.border(1.dp, Color(0xFFE2E8F0)) else Modifier
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    if (rowIndex < table.headerRowCount) Color(0xFFF1EEF9)
+                    else cell.backgroundColorArgb?.let(::Color) ?: Color.Transparent,
+                )
+                .then(borderModifier)
+                .padding(6.dp),
+            contentAlignment = when (cell.verticalAlignment) {
+                TableCellVerticalAlignment.Top -> Alignment.TopStart
+                TableCellVerticalAlignment.Center -> Alignment.CenterStart
+                TableCellVerticalAlignment.Bottom -> Alignment.BottomStart
+            },
+        ) {
+            Text(
+                cell.content.previewTextForTableCell().ifBlank { " " },
+                color = Color(0xFF334155),
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

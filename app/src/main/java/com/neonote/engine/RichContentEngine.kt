@@ -338,35 +338,36 @@ public class RichContentEngine {
         box: RichContentBox,
         address: TableCellAddress,
         after: Boolean = true,
-    ): RichContentCommandResult.ContentEdited = updateTable(box, address) { table ->
-        val columns = table.rows.maxOfOrNull(List<TableCell>::size)?.coerceAtLeast(1) ?: 1
-        val normalized = table.rows.map { row -> row + List((columns - row.size).coerceAtLeast(0)) { TableCell() } }
-        val rowIndex = address.path.last().rowIndex.coerceIn(0, normalized.lastIndex.coerceAtLeast(0))
-        val insertion = (rowIndex + if (after) 1 else 0).coerceIn(0, normalized.size)
-        table.copy(rows = normalized.take(insertion) + listOf(List(columns) { TableCell() }) + normalized.drop(insertion))
+    ): RichContentCommandResult.ContentEdited = updateTable(box, address) { source ->
+        val table = TableMergeEngine.splitAll(source).normalizedGrid()
+        val columns = table.gridColumnCount().coerceAtLeast(1)
+        val rowIndex = address.path.last().rowIndex.coerceIn(0, table.rows.lastIndex.coerceAtLeast(0))
+        val insertion = (rowIndex + if (after) 1 else 0).coerceIn(0, table.rows.size)
+        table.copy(rows = table.rows.take(insertion) + listOf(List(columns) { TableCell() }) + table.rows.drop(insertion))
     }
 
     public fun deleteTableRow(
         box: RichContentBox,
         address: TableCellAddress,
-    ): RichContentCommandResult.ContentEdited = updateTable(box, address) { table ->
+    ): RichContentCommandResult.ContentEdited = updateTable(box, address) { source ->
+        val table = TableMergeEngine.splitAll(source).normalizedGrid()
         if (table.rows.size <= 1) table
-        else table.copy(rows = table.rows.filterIndexed { index, _ -> index != address.path.last().rowIndex })
+        else {
+            val target = address.path.last().rowIndex.coerceIn(table.rows.indices)
+            table.copy(rows = table.rows.filterIndexed { index, _ -> index != target })
+        }
     }
 
     public fun addTableColumn(
         box: RichContentBox,
         address: TableCellAddress,
         after: Boolean = true,
-    ): RichContentCommandResult.ContentEdited = updateTable(box, address) { table ->
-        val source = table.rows.ifEmpty { listOf(emptyList()) }
-        val currentColumns = source.maxOfOrNull(List<TableCell>::size) ?: 0
-        val column = address.path.last().columnIndex.coerceIn(0, currentColumns.coerceAtLeast(1) - 1)
+    ): RichContentCommandResult.ContentEdited = updateTable(box, address) { source ->
+        val table = TableMergeEngine.splitAll(source).normalizedGrid()
+        val currentColumns = table.gridColumnCount().coerceAtLeast(1)
+        val column = address.path.last().columnIndex.coerceIn(0, currentColumns - 1)
         val insertion = (column + if (after) 1 else 0).coerceIn(0, currentColumns)
-        val rows = source.map { row ->
-            val normalized = row + List((currentColumns - row.size).coerceAtLeast(0)) { TableCell() }
-            normalized.take(insertion) + TableCell() + normalized.drop(insertion)
-        }
+        val rows = table.rows.map { row -> row.take(insertion) + TableCell() + row.drop(insertion) }
         val policies = table.columnPolicies.normalizedPolicies(currentColumns)
         table.copy(
             rows = rows,
@@ -377,8 +378,9 @@ public class RichContentEngine {
     public fun deleteTableColumn(
         box: RichContentBox,
         address: TableCellAddress,
-    ): RichContentCommandResult.ContentEdited = updateTable(box, address) { table ->
-        val columns = table.rows.maxOfOrNull(List<TableCell>::size) ?: 0
+    ): RichContentCommandResult.ContentEdited = updateTable(box, address) { source ->
+        val table = TableMergeEngine.splitAll(source).normalizedGrid()
+        val columns = table.gridColumnCount()
         if (columns <= 1) table
         else {
             val target = address.path.last().columnIndex.coerceIn(0, columns - 1)

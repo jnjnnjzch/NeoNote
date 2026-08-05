@@ -12,7 +12,10 @@ import com.neonote.model.InkStroke
 import com.neonote.model.InkStrokeRef
 import com.neonote.model.RichContentBox
 import com.neonote.model.SelectionState
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.sin
 
 /** Mixed selection and geometry transforms for handwriting and canvas objects. */
 public class SelectionEngine {
@@ -106,12 +109,85 @@ public class SelectionEngine {
     ): InfiniteCanvas {
         val sx = scaleX.coerceIn(0.05f, 20f)
         val sy = scaleY.coerceIn(0.05f, 20f)
-        return transformSelection(canvas, selection) { point ->
-            CanvasPoint(
-                anchor.x + (point.x - anchor.x) * sx,
-                anchor.y + (point.y - anchor.y) * sy,
+        fun scale(point: CanvasPoint): CanvasPoint = CanvasPoint(
+            anchor.x + (point.x - anchor.x) * sx,
+            anchor.y + (point.y - anchor.y) * sy,
+        )
+        val objects = canvas.objects.map { objectValue ->
+            if (!selection.isObjectSelected(objectValue.id) || objectValue.isLocked()) return@map objectValue
+            val topLeft = scale(objectValue.position)
+            val bottomRight = scale(CanvasPoint(
+                objectValue.position.x + objectValue.size.width,
+                objectValue.position.y + objectValue.size.height,
+            ))
+            val position = CanvasPoint(minOf(topLeft.x, bottomRight.x), minOf(topLeft.y, bottomRight.y))
+            val width = kotlin.math.abs(bottomRight.x - topLeft.x).coerceAtLeast(48f)
+            val height = kotlin.math.abs(bottomRight.y - topLeft.y).coerceAtLeast(48f)
+            when (objectValue) {
+                is RichContentBox -> objectValue.copy(
+                    position = position,
+                    size = objectValue.size.copy(width = width, height = height),
+                    autoSizeHeight = objectValue.autoSizeHeight && kotlin.math.abs(sy - 1f) < 0.001f,
+                )
+                is FloatingImage -> objectValue.copy(position = position, size = objectValue.size.copy(width = width, height = height))
+            }
+        }
+        val strokes = canvas.inkLayer.strokes.map { stroke ->
+            if (!selection.isStrokeSelected(stroke.id)) stroke
+            else stroke.copy(points = stroke.points.map { point ->
+                scale(CanvasPoint(point.x, point.y)).let { point.copy(x = it.x, y = it.y) }
+            })
+        }
+        return canvas.copy(objects = objects, inkLayer = InkLayer(strokes))
+    }
+
+    public fun rotateSelection(
+        canvas: InfiniteCanvas,
+        selection: SelectionState,
+        deltaDegrees: Float,
+        anchor: CanvasPoint = selectedBounds(canvas, selection)?.center ?: CanvasPoint.Zero,
+    ): InfiniteCanvas {
+        if (!deltaDegrees.isFinite() || kotlin.math.abs(deltaDegrees) < 0.01f) return canvas
+        val radians = deltaDegrees / 180f * PI.toFloat()
+        val cosine = cos(radians)
+        val sine = sin(radians)
+        fun rotate(point: CanvasPoint): CanvasPoint {
+            val dx = point.x - anchor.x
+            val dy = point.y - anchor.y
+            return CanvasPoint(
+                anchor.x + dx * cosine - dy * sine,
+                anchor.y + dx * sine + dy * cosine,
             )
         }
+        val objects = canvas.objects.map { objectValue ->
+            if (!selection.isObjectSelected(objectValue.id) || objectValue.isLocked()) return@map objectValue
+            val center = CanvasPoint(
+                objectValue.position.x + objectValue.size.width / 2f,
+                objectValue.position.y + objectValue.size.height / 2f,
+            )
+            val rotatedCenter = rotate(center)
+            val position = CanvasPoint(
+                rotatedCenter.x - objectValue.size.width / 2f,
+                rotatedCenter.y - objectValue.size.height / 2f,
+            )
+            when (objectValue) {
+                is RichContentBox -> objectValue.copy(
+                    position = position,
+                    rotationDegrees = normalizeDegrees(objectValue.rotationDegrees + deltaDegrees),
+                )
+                is FloatingImage -> objectValue.copy(
+                    position = position,
+                    rotationDegrees = normalizeDegrees(objectValue.rotationDegrees + deltaDegrees),
+                )
+            }
+        }
+        val strokes = canvas.inkLayer.strokes.map { stroke ->
+            if (!selection.isStrokeSelected(stroke.id)) stroke
+            else stroke.copy(points = stroke.points.map { point ->
+                rotate(CanvasPoint(point.x, point.y)).let { point.copy(x = it.x, y = it.y) }
+            })
+        }
+        return canvas.copy(objects = objects, inkLayer = InkLayer(strokes))
     }
 
     public fun resizeSelectedObjects(
@@ -340,3 +416,5 @@ public sealed interface SelectionCommand {
 public sealed interface SelectionCommandResult {
     public data class SelectionChanged(val selection: SelectionState) : SelectionCommandResult
 }
+
+private fun normalizeDegrees(value: Float): Float = ((value % 360f) + 360f) % 360f

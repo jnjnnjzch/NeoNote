@@ -35,7 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.neonote.engine.MathExpressionFormatter
+import com.neonote.engine.MathExpressionParser
 import com.neonote.model.BlockFormula
 import com.neonote.model.FormulaDisplayMode
 import com.neonote.model.RichContentBox
@@ -52,7 +52,7 @@ internal fun FormulaBlockEditor(
     modifier: Modifier = Modifier,
 ) {
     val enabled = !selectionMode && !selected
-    val rendered = remember(formula.expression) { MathExpressionFormatter.render(formula.expression) }
+    val parsed = remember(formula.expression) { MathExpressionParser.parse(formula.expression) }
     val openModifier = if (!active && enabled) Modifier.clickable {
         controller.focusRichContentFormulaBlock(box.id, blockIndex)
     } else Modifier
@@ -65,7 +65,7 @@ internal fun FormulaBlockEditor(
             .background(Color(0xFFFAFAFF))
             .border(
                 1.dp,
-                if (active) Color(0xFF6D4AFF) else if (rendered.isValid) Color(0xFFD9D4E7) else Color(0xFFDC2626),
+                if (active) Color(0xFF6D4AFF) else if (parsed.isValid) Color(0xFFD9D4E7) else Color(0xFFDC2626),
                 RoundedCornerShape(12.dp),
             )
             .padding(horizontal = 14.dp, vertical = 10.dp),
@@ -96,13 +96,11 @@ internal fun FormulaBlockEditor(
             modifier = Modifier.fillMaxWidth().heightIn(min = 42.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = rendered.displayText.ifBlank { "Enter a formula" },
+            MathExpressionView(
+                expression = formula.expression,
                 modifier = Modifier.weight(1f),
-                color = if (rendered.displayText.isBlank()) Color(0xFF9B95A8) else Color(0xFF171326),
+                color = if (formula.expression.isBlank()) Color(0xFF9B95A8) else Color(0xFF171326),
                 fontSize = if (formula.displayMode == FormulaDisplayMode.Display) 24.sp else 18.sp,
-                fontFamily = FontFamily.Serif,
-                fontWeight = FontWeight.Medium,
             )
             if (formula.numbered) {
                 Text("(${blockIndex + 1})", color = Color(0xFF817A8E), style = MaterialTheme.typography.bodyMedium)
@@ -125,7 +123,7 @@ internal fun FormulaBlockEditor(
             }
         }
 
-        rendered.errors.forEach { error ->
+        parsed.errors.forEach { error ->
             Text(error, color = Color(0xFFB42318), style = MaterialTheme.typography.labelSmall)
         }
     }

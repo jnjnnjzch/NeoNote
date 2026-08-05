@@ -1,5 +1,6 @@
 package com.neonote
 
+import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import androidx.compose.foundation.layout.Box
@@ -15,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -47,8 +49,11 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.neonote.engine.FileAssetStore
 import com.neonote.engine.InlineStyle
 import com.neonote.engine.MathExpressionFormatter
+import com.neonote.engine.RichClipboardFragment
+import com.neonote.engine.RichContentClipboardEngine
 import com.neonote.model.InlineFormula
 import com.neonote.model.InlineImage
 import com.neonote.model.InlineLineBreak
@@ -57,8 +62,10 @@ import com.neonote.model.ListKind
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContentBox
 import com.neonote.model.TextAlignment
+import kotlinx.coroutines.launch
 
 private val MinimumUnifiedEditorHeight = 72.dp
+private const val NeoNoteRichClipboardLabel = "NeoNote rich text"
 
 /** One platform text field for a paragraph-only box, enabling native cross-paragraph selection. */
 @Composable
@@ -71,6 +78,8 @@ internal fun UnifiedRichTextEditor(
 ) {
     val context = LocalContext.current
     val clipboard = remember(context) { context.getSystemService(ClipboardManager::class.java) }
+    val assetStore = remember(context) { FileAssetStore(FileAssetStore.defaultDirectory(context.filesDir)) }
+    val coroutineScope = rememberCoroutineScope()
     val requester = remember { FocusRequester() }
     val modelText = box.content.toUnifiedPlatformText()
     var value by remember(box.id) { mutableStateOf(TextFieldValue(modelText)) }
@@ -149,23 +158,57 @@ internal fun UnifiedRichTextEditor(
             .onPreviewKeyEvent { event ->
                 val style = event.unifiedStyleShortcut()
                 val list = event.unifiedListShortcut()
-                val paste = event.unifiedPlainTextPaste(clipboard, context)
+                val clipboardAction = event.unifiedClipboardAction()
+                val imageUri = if (clipboardAction == UnifiedClipboardAction.Paste) clipboard?.primaryImageUri(context) else null
+                val paste = if (clipboardAction == UnifiedClipboardAction.Paste) event.unifiedPlainTextPaste(clipboard, context) else null
                 when {
+                    clipboardAction == UnifiedClipboardAction.Copy || clipboardAction == UnifiedClipboardAction.Cut -> {
+                        val fragment = RichContentClipboardEngine.copy(
+                            box.content,
+                            value.selection.start,
+                            value.selection.end,
+                        ) ?: return@onPreviewKeyEvent false
+                        val plainText = fragment.plainText()
+                        NeoNoteRichClipboardCache.store(plainText, fragment)
+                        clipboard?.setPrimaryClip(ClipData.newPlainText(NeoNoteRichClipboardLabel, plainText))
+                        if (clipboardAction == UnifiedClipboardAction.Cut) {
+                            val result = controller.replaceRichContentSelection(
+                                box.id,
+                                value.selection.start,
+                                value.selection.end,
+                                RichClipboardFragment(),
+                            ) ?: return@onPreviewKeyEvent false
+                            val nextText = result.content.toUnifiedPlatformText()
+                            value = TextFieldValue(nextText, TextRange(result.cursorOffset))
+                        }
+                        true
+                    }
+                    imageUri != null -> {
+                        coroutineScope.launch {
+                            val draft = context.contentResolver.readClipboardImageDraft(imageUri) ?: return@launch
+                            val reference = assetStore.put(draft)
+                            controller.insertRichContentImagePlaceholder(
+                                boxId = box.id,
+                                assetId = reference.id,
+                                altText = reference.fileName ?: "Pasted image",
+                            )
+                        }
+                        true
+                    }
                     paste != null -> {
-                        val start = minOf(value.selection.start, value.selection.end)
-                        val end = maxOf(value.selection.start, value.selection.end)
-                        val nextText = value.text.replaceRange(start, end, paste)
-                        val cursor = start + paste.length
-                        val previous = value
-                        value = TextFieldValue(nextText, TextRange(cursor))
-                        controller.updateRichContentFromPlatformInput(
+                        val fragment = (
+                            if (clipboard?.primaryClipDescription?.label?.toString() == NeoNoteRichClipboardLabel) {
+                                NeoNoteRichClipboardCache.resolve(paste)
+                            } else null
+                        ) ?: RichClipboardFragment.fromPlainText(paste)
+                        val result = controller.replaceRichContentSelection(
                             box.id,
-                            previous.text,
-                            nextText,
-                            cursor,
-                            cursor,
-                            hasActiveComposition = false,
-                        )
+                            value.selection.start,
+                            value.selection.end,
+                            fragment,
+                        ) ?: return@onPreviewKeyEvent false
+                        val nextText = result.content.toUnifiedPlatformText()
+                        value = TextFieldValue(nextText, TextRange(result.cursorOffset))
                         true
                     }
                     style != null -> {
@@ -307,11 +350,26 @@ private fun com.neonote.model.RichContent.toUnifiedPlatformText(): String =
         }
     }
 
+private enum class UnifiedClipboardAction { Copy, Cut, Paste }
+
+private fun androidx.compose.ui.input.key.KeyEvent.unifiedClipboardAction(): UnifiedClipboardAction? {
+    if (type != KeyEventType.KeyDown || !isCtrlPressed || isShiftPressed) return null
+    return when (key) {
+        Key.C -> UnifiedClipboardAction.Copy
+        Key.X -> UnifiedClipboardAction.Cut
+        Key.V -> UnifiedClipboardAction.Paste
+        else -> null
+    }
+}
+
+private fun androidx.compose.ui.input.key.KeyEvent.isUnifiedPasteShortcut(): Boolean =
+    unifiedClipboardAction() == UnifiedClipboardAction.Paste
+
 private fun androidx.compose.ui.input.key.KeyEvent.unifiedPlainTextPaste(
     clipboard: ClipboardManager?,
     context: android.content.Context,
 ): String? {
-    if (type != KeyEventType.KeyDown || !isCtrlPressed || isShiftPressed || key != Key.V) return null
+    if (!isUnifiedPasteShortcut()) return null
     val clip = clipboard?.primaryClip ?: return null
     if (!clip.description.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) || clip.itemCount == 0) return null
     return clip.getItemAt(0).coerceToText(context)?.toString()?.replace("\r\n", "\n")?.replace('\r', '\n')

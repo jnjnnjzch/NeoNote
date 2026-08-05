@@ -1,7 +1,5 @@
 package com.neonote
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,7 +20,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -35,11 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.neonote.engine.FileAssetStore
 import com.neonote.model.FloatingImage
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
-
-private const val FloatingImageMaximumDecodedDimension = 2_048
 
 @Composable
 internal fun FloatingImageView(
@@ -50,10 +43,10 @@ internal fun FloatingImageView(
 ) {
     val context = LocalContext.current
     val store = FileAssetStore(FileAssetStore.defaultDirectory(context.filesDir))
-    val bitmap by produceState<ImageBitmap?>(null, image.assetId, context.filesDir.absolutePath) {
-        value = withContext(Dispatchers.IO) {
-            store.get(image.assetId)?.uri?.let(::decodeFloatingBitmap)?.asImageBitmap()
-        }
+    val requestedWidth = image.size.width.roundToInt().coerceAtLeast(1)
+    val requestedHeight = image.size.height.roundToInt().coerceAtLeast(1)
+    val bitmap by produceState<ImageBitmap?>(null, image.assetId, requestedWidth, requestedHeight, context.filesDir.absolutePath) {
+        value = AssetImageLoader.load(store, image.assetId, requestedWidth, requestedHeight)
     }
     var destinationSize = IntSize(
         image.size.width.roundToInt().coerceAtLeast(1),
@@ -123,14 +116,3 @@ internal fun FloatingImageView(
     }
 }
 
-private fun decodeFloatingBitmap(path: String): Bitmap? {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeFile(path, bounds)
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-    var sample = 1
-    while (
-        bounds.outWidth / sample > FloatingImageMaximumDecodedDimension ||
-        bounds.outHeight / sample > FloatingImageMaximumDecodedDimension
-    ) sample *= 2
-    return BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
-}

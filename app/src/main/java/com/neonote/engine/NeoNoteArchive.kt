@@ -124,27 +124,6 @@ public class NeoNoteArchiveCodec(
     }
 }
 
-public fun NeoNoteDocument.referencedAssetIds(): Set<String> = buildSet {
-    pages.forEach { page ->
-        page.canvas.objects.forEach { objectValue ->
-            when (objectValue) {
-                is FloatingImage -> add(objectValue.assetId)
-                is RichContentBox -> addAll(objectValue.content.referencedAssetIds())
-            }
-        }
-    }
-}
-
-private fun RichContent.referencedAssetIds(): Set<String> = buildSet {
-    blocks.forEach { block ->
-        when (block) {
-            is BlockImage -> add(block.assetId)
-            is ParagraphNode -> block.inlines.forEach { inline -> if (inline is InlineImage) add(inline.assetId) }
-            is TableNode -> block.rows.flatten().forEach { addAll(it.content.referencedAssetIds()) }
-            else -> Unit
-        }
-    }
-}
 
 private fun NeoNoteDocument.remapAssetIds(mapping: Map<String, String>): NeoNoteDocument = copy(
     pages = pages.map { page -> page.copy(

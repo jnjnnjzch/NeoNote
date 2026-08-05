@@ -1,5 +1,6 @@
 package com.neonote
 
+import android.content.ClipboardManager
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -73,6 +74,7 @@ internal fun RichContentToolbar(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val clipboard = remember(context) { context.getSystemService(ClipboardManager::class.java) }
     val activeTableCell = controller.activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell
     val assetStore = remember(context) { FileAssetStore(FileAssetStore.defaultDirectory(context.filesDir)) }
     var linkDialogVisible by remember { mutableStateOf(false) }
@@ -179,9 +181,32 @@ internal fun RichContentToolbar(
                 }
                 ToolbarAction("fx", "Insert formula") { controller.insertRichContentFormulaPlaceholder(boxId) }
                 ToolbarAction("Image", "Import image", compact = false) { imagePicker.launch("image/*") }
+                ToolbarAction("Paste", "Paste image from clipboard", compact = false) {
+                    val imageUri = clipboard?.primaryImageUri(context)
+                    if (imageUri != null) {
+                        coroutineScope.launch {
+                            val draft = context.contentResolver.readClipboardImageDraft(imageUri) ?: return@launch
+                            val reference = assetStore.put(draft)
+                            controller.insertRichContentImagePlaceholder(
+                                boxId = boxId,
+                                assetId = reference.id,
+                                altText = reference.fileName ?: "Pasted image",
+                            )
+                        }
+                    }
+                }
 
-                if (activeTableCell != null) {
-                    ToolbarDivider()
+
+            }
+
+            if (activeTableCell != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     ToolbarAction("+ Row", "Add table row", compact = false) {
                         controller.addActiveRichContentTableRow(boxId)
                     }
@@ -199,6 +224,27 @@ internal fun RichContentToolbar(
                     }
                     ToolbarAction("Auto", "Automatic column width", compact = false) {
                         controller.setActiveRichContentTableColumnWidth(boxId, null)
+                    }
+                    ToolbarAction("Merge →", "Merge cell with the cell to the right", compact = false) {
+                        controller.mergeActiveTableCellRight(boxId)
+                    }
+                    ToolbarAction("Merge ↓", "Merge cell with the cell below", compact = false) {
+                        controller.mergeActiveTableCellDown(boxId)
+                    }
+                    ToolbarAction("Split", "Split merged cell", compact = false) {
+                        controller.splitActiveTableCell(boxId)
+                    }
+                    ToolbarAction("Header", "Toggle header row", compact = false) {
+                        controller.toggleActiveTableHeader(boxId)
+                    }
+                    ToolbarAction("Borders", "Toggle table borders", compact = false) {
+                        controller.toggleActiveTableBorders(boxId)
+                    }
+                    ToolbarAction("Shade", "Toggle cell shading", compact = false) {
+                        controller.toggleActiveTableCellShade(boxId)
+                    }
+                    ToolbarAction("V Align", "Cycle vertical cell alignment", compact = false) {
+                        controller.cycleActiveTableCellAlignment(boxId)
                     }
                     ToolbarAction("Nested", "Insert nested table", compact = false) {
                         controller.insertNestedTable(boxId, activeTableCell.address, 2, 2)

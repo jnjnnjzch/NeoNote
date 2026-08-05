@@ -39,4 +39,36 @@ class TableControlsTest {
         assertEquals(3, activeTable().rows.size)
         assertTrue(activeTable().rows.all { it.size == 2 })
     }
+
+    @Test
+    fun `merged cell edits preserve viewport and undo redo`() {
+        val controller = NeoNoteEditorController()
+        controller.setTool(EditorTool.Text)
+        controller.focusOrCreateRichContentBox(CanvasPoint(120f, 160f))
+        val boxId = (controller.currentCanvas.objects.single() as RichContentBox).id
+        controller.insertRichContentTablePlaceholder(boxId = boxId, rows = 2, columns = 2)
+        controller.panViewportBy(screenDx = 96f, screenDy = -44f)
+        val viewportBefore = controller.state.viewport
+
+        fun activeTable(): TableNode = (controller.currentCanvas.objects.single() as RichContentBox)
+            .content
+            .blocks
+            .filterIsInstance<TableNode>()
+            .single()
+
+        controller.mergeActiveTableCellRight(boxId)
+
+        assertEquals(2, activeTable().rows[0][0].columnSpan)
+        assertEquals(viewportBefore, controller.state.viewport)
+        assertTrue(controller.canUndo)
+
+        controller.undo()
+        assertEquals(1, activeTable().rows[0][0].columnSpan)
+        assertEquals(viewportBefore, controller.state.viewport)
+        assertTrue(controller.canRedo)
+
+        controller.redo()
+        assertEquals(2, activeTable().rows[0][0].columnSpan)
+        assertEquals(viewportBefore, controller.state.viewport)
+    }
 }

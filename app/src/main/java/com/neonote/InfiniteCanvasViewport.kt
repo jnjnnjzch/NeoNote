@@ -17,7 +17,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -35,6 +38,7 @@ import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.neonote.engine.InputAction
@@ -51,6 +55,7 @@ import com.neonote.input.toAndroidPointerSnapshot
 import com.neonote.input.withPressureSamples
 import com.neonote.model.CanvasObject
 import com.neonote.model.CanvasPoint
+import com.neonote.model.CanvasRect
 import com.neonote.model.EditorTool
 import com.neonote.model.FloatingImage
 import com.neonote.model.RichContentBox
@@ -66,6 +71,7 @@ internal fun InfiniteCanvasViewport(
     val inputAdapter = remember { ComposeInputAdapter() }
     val platformSnapshotStore = remember { PlatformSnapshotStore() }
     val density = LocalDensity.current
+    var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     val inputMode = when (controller.state.currentTool) {
         // Unified OneNote-like surface: the stylus writes, a finger drag pans,
         // and a finger tap creates or focuses text without switching tools first.
@@ -78,7 +84,10 @@ internal fun InfiniteCanvasViewport(
     Box(
         modifier = modifier
             .background(Color(0xFFF9F8FC))
-            .onSizeChanged { controller.updateViewportMetrics(it.width, density.density) }
+            .onSizeChanged {
+                viewportSize = it
+                controller.updateViewportMetrics(it.width, density.density)
+            }
             .pointerInteropFilter { motionEvent ->
                 if (AndroidStylusInputAdapter.isStylusOrEraser(motionEvent)) {
                     val inputEvent = AndroidStylusInputAdapter.toInputEvent(motionEvent)
@@ -121,7 +130,28 @@ internal fun InfiniteCanvasViewport(
                 activeStroke = controller.activeInkStroke,
                 modifier = Modifier.fillMaxSize(),
             )
-            controller.currentCanvas.objects.sortedBy(CanvasObject::zIndex).forEach { canvasObject ->
+            val visibleRect = remember(
+                viewportSize,
+                controller.state.viewport.panOffsetX,
+                controller.state.viewport.panOffsetY,
+                controller.state.viewport.zoomScale,
+                density.density,
+            ) {
+                val topLeft = controller.screenToDocument(CanvasPoint(0f, 0f))
+                val bottomRight = controller.screenToDocument(CanvasPoint(viewportSize.width.toFloat(), viewportSize.height.toFloat()))
+                val margin = 240f * density.density / controller.state.viewport.zoomScale.coerceAtLeast(0.2f)
+                CanvasRect(
+                    left = minOf(topLeft.x, bottomRight.x),
+                    top = minOf(topLeft.y, bottomRight.y),
+                    right = maxOf(topLeft.x, bottomRight.x),
+                    bottom = maxOf(topLeft.y, bottomRight.y),
+                ).expanded(margin)
+            }
+            controller.currentCanvas.objects
+                .asSequence()
+                .filter { it.bounds.intersects(visibleRect) }
+                .sortedBy(CanvasObject::zIndex)
+                .forEach { canvasObject ->
                 CanvasObjectView(
                     canvasObject = canvasObject,
                     selected = controller.state.selection.isObjectSelected(canvasObject.id),
@@ -132,6 +162,7 @@ internal fun InfiniteCanvasViewport(
             SelectionOverlay(
                 activeLassoPath = controller.activeLassoPath,
                 selectedBounds = controller.selectedBounds,
+                controller = controller,
                 modifier = Modifier.fillMaxSize(),
             )
         }
