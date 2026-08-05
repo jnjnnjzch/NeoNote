@@ -1,6 +1,5 @@
 package com.neonote
 
-import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -40,7 +39,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -71,9 +69,7 @@ import com.neonote.model.TableCellAddress
 import com.neonote.model.TableNode
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @Composable
 internal fun TableCellEditor(
@@ -249,10 +245,15 @@ private fun NestedImageEditor(
 ) {
     val context = LocalContext.current
     val store = remember(context) { FileAssetStore(FileAssetStore.defaultDirectory(context.filesDir)) }
-    val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, image.assetId) {
-        value = withContext(Dispatchers.IO) {
-            store.get(image.assetId)?.uri?.let { BitmapFactory.decodeFile(it)?.asImageBitmap() }
-        }
+    val requestedWidthPx = (image.width ?: 320f).toInt().coerceAtLeast(72)
+    val requestedHeightPx = (image.height ?: 160f).toInt().coerceAtLeast(60)
+    val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+        null,
+        image.assetId,
+        requestedWidthPx,
+        requestedHeightPx,
+    ) {
+        value = AssetImageLoader.load(store, image.assetId, requestedWidthPx, requestedHeightPx)
     }
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))

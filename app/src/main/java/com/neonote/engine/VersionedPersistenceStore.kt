@@ -92,7 +92,7 @@ public class VersionedPersistenceStore(
 
 private fun File.copyAtomically(destination: File) {
     destination.parentFile?.mkdirs()
-    val temporary = destination.parentFile.resolve("${destination.name}.tmp")
+    val temporary = requireNotNull(destination.parentFile).resolve("${destination.name}.tmp")
     copyTo(temporary, overwrite = true)
     try {
         Files.move(

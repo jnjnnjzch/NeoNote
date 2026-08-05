@@ -812,6 +812,47 @@ public class NeoNoteEditorController(
         richContentBox(boxId)?.let { richContentSessions[richContentSessionKey(boxId)]?.blurCommit(it) }
     }
 
+    /**
+     * Applies a structural RichContent mutation through the normal controller history path.
+     *
+     * Nested table-cell object editors use this instead of [replaceDocument], because replacing
+     * the whole document resets the viewport and clears undo/redo even for a local cell edit.
+     */
+    internal fun mutateRichContentBoxContent(
+        boxId: String,
+        keepFocused: Boolean = true,
+        transform: (RichContent) -> RichContent,
+    ): Boolean {
+        if (!canEditRichContent()) return false
+        var updatedBox: RichContentBox? = null
+        val canvas = currentCanvas.updateRichContentBox(boxId) { box ->
+            if (box.isLocked) return@updateRichContentBox box
+            val nextContent = transform(box.content)
+            if (nextContent == box.content) return@updateRichContentBox box
+            val changed = box.copy(content = nextContent)
+            val measured = if (changed.autoSizeHeight) {
+                val predicted = richContentMeasurer.resizeBoxToMeasuredContent(changed)
+                predicted.copy(size = predicted.size.copy(
+                    height = maxOf(changed.size.height, predicted.size.height),
+                ))
+            } else changed
+            updatedBox = measured
+            measured
+        }
+        val nextBox = updatedBox ?: return false
+        val sessionKey = richContentSessionKey(boxId)
+        richContentSessions.remove(sessionKey)
+        selectedRichContentObjectBlocks.remove(sessionKey)
+        state = state.copy(
+            document = state.document.withCanvas(if (keepFocused) canvas.setFocusedRichContentBox(boxId) else canvas),
+            focusedRichContentBoxId = if (keepFocused) boxId else state.focusedRichContentBoxId,
+            selection = SelectionState(),
+        )
+        editorSessionFor(boxId, nextBox).focus(nextBox)
+        richContentInteractionRevision++
+        return true
+    }
+
     private fun editBox(
         boxId: String,
         keepFocused: Boolean = false,
