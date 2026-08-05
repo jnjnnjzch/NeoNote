@@ -44,5 +44,12 @@ class ProductHardeningNestedContentTest {
         assertEquals(viewportBefore, controller.state.viewport)
         assertEquals(pageBefore, controller.state.currentPageId)
         assertTrue(controller.canRedo)
+
+        controller.redo()
+
+        val redoneBox = assertIs<RichContentBox>(controller.currentCanvas.objects.single())
+        assertIs<BlockFormula>(RichContentTree.block(redoneBox.content, address))
+        assertEquals(viewportBefore, controller.state.viewport)
+        assertEquals(pageBefore, controller.state.currentPageId)
     }
 }
