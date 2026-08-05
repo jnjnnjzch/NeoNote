@@ -2,9 +2,11 @@ package com.neonote
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -15,7 +17,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -44,7 +45,6 @@ internal fun SelectionTransformOverlay(
     val widthDp = with(density) { widthPx.toDp() }
     val heightDp = with(density) { heightPx.toDp() }
     val handleSize = 30.dp
-    val handleRadiusPx = with(density) { handleSize.toPx() / 2f }
 
     Box(modifier) {
         Box(
@@ -88,8 +88,8 @@ internal fun SelectionTransformOverlay(
         Surface(
             modifier = Modifier.offset {
                 IntOffset(
-                    x = (bottomRight.x - with(density) { 88.dp.toPx() }).roundToInt(),
-                    y = (topLeft.y - with(density) { 48.dp.toPx() }).roundToInt(),
+                    x = max(4f, bottomRight.x - with(density) { 88.dp.toPx() }).roundToInt(),
+                    y = max(4f, topLeft.y - with(density) { 48.dp.toPx() }).roundToInt(),
                 )
             },
             shape = RoundedCornerShape(13.dp),
@@ -114,12 +114,10 @@ private fun SelectionQuickAction(
     Box(
         modifier = Modifier
             .size(44.dp)
+            .clickable(role = Role.Button, onClick = onClick)
             .semantics {
                 role = Role.Button
                 contentDescription = description
-            }
-            .pointerInput(description) {
-                detectTapGestures(onTap = { onClick() })
             },
         contentAlignment = Alignment.Center,
     ) {
