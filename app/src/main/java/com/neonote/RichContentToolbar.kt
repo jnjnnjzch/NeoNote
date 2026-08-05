@@ -4,6 +4,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +54,7 @@ import com.neonote.engine.ActiveRichContentTarget
 import com.neonote.engine.AssetDraft
 import com.neonote.engine.FileAssetStore
 import com.neonote.engine.InlineStyle
+import com.neonote.model.EditorTool
 import com.neonote.model.ListKind
 import com.neonote.model.TextAlignment
 import java.io.ByteArrayOutputStream
@@ -77,6 +81,7 @@ internal fun RichContentToolbar(
     val assetStore = remember(context) { FileAssetStore(FileAssetStore.defaultDirectory(context.filesDir)) }
     var linkDialogVisible by remember { mutableStateOf(false) }
     var linkText by remember { mutableStateOf("") }
+    var expanded by rememberSaveable(boxId) { mutableStateOf(false) }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) coroutineScope.launch {
             val draft = context.contentResolver.readImageAssetDraft(uri) ?: return@launch
@@ -93,115 +98,141 @@ internal fun RichContentToolbar(
         modifier = modifier
             .fillMaxWidth()
             .focusProperties { canFocus = false },
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(15.dp),
         color = ToolbarSurface,
-        shadowElevation = 10.dp,
-        tonalElevation = 3.dp,
+        shadowElevation = 9.dp,
+        tonalElevation = 2.dp,
         border = BorderStroke(1.dp, ToolbarDividerColor),
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
             verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ToolbarAction("B", "Bold", fontWeight = FontWeight.Bold) {
-                    controller.toggleActiveRichContentStyle(boxId, InlineStyle.Bold)
-                }
-                ToolbarAction("I", "Italic", fontStyle = FontStyle.Italic) {
-                    controller.toggleActiveRichContentStyle(boxId, InlineStyle.Italic)
-                }
-                ToolbarAction("U", "Underline", textDecoration = TextDecoration.Underline) {
-                    controller.toggleActiveRichContentStyle(boxId, InlineStyle.Underline)
-                }
-                ToolbarAction("S", "Strikethrough", textDecoration = TextDecoration.LineThrough) {
-                    controller.toggleActiveRichContentStyle(boxId, InlineStyle.Strikethrough)
+                StickyToolbarAction("Done", "Finish text editing", compact = false) {
+                    controller.setTool(EditorTool.Pen)
                 }
                 ToolbarDivider()
-                ToolbarAction("A−", "Smaller text") { controller.setActiveRichContentFontScale(boxId, 0.85f) }
-                ToolbarAction("A", "Normal text") { controller.setActiveRichContentFontScale(boxId, 1f) }
-                ToolbarAction("A+", "Larger text") { controller.setActiveRichContentFontScale(boxId, 1.25f) }
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    ToolbarAction("B", "Bold", fontWeight = FontWeight.Bold) {
+                        controller.toggleActiveRichContentStyle(boxId, InlineStyle.Bold)
+                    }
+                    ToolbarAction("I", "Italic", fontStyle = FontStyle.Italic) {
+                        controller.toggleActiveRichContentStyle(boxId, InlineStyle.Italic)
+                    }
+                    ToolbarAction("U", "Underline", textDecoration = TextDecoration.Underline) {
+                        controller.toggleActiveRichContentStyle(boxId, InlineStyle.Underline)
+                    }
+                    ToolbarAction("S", "Strikethrough", textDecoration = TextDecoration.LineThrough) {
+                        controller.toggleActiveRichContentStyle(boxId, InlineStyle.Strikethrough)
+                    }
+                    ToolbarDivider()
+                    ToolbarAction("•", "Bullet list") { controller.toggleActiveRichContentList(boxId, ListKind.Bullet) }
+                    ToolbarAction("1.", "Numbered list") { controller.toggleActiveRichContentList(boxId, ListKind.Numbered) }
+                    ToolbarAction("☐", "Checklist") { controller.toggleActiveRichContentList(boxId, ListKind.Todo) }
+                    ToolbarDivider()
+                    ColorAction(Color(0xFF171326), "Black text") {
+                        controller.setActiveRichContentTextColor(boxId, 0xFF171326.toInt())
+                    }
+                    ColorAction(Color(0xFF5B3FD1), "Purple text") {
+                        controller.setActiveRichContentTextColor(boxId, 0xFF5B3FD1.toInt())
+                    }
+                    HighlightAction(Color(0xFFFFF59D), "Yellow highlight") {
+                        controller.setActiveRichContentHighlight(boxId, 0xFFFFF59D.toInt())
+                    }
+                }
                 ToolbarDivider()
-                ToolbarAction("•", "Bullet list") { controller.toggleActiveRichContentList(boxId, ListKind.Bullet) }
-                ToolbarAction("1.", "Numbered list") { controller.toggleActiveRichContentList(boxId, ListKind.Numbered) }
-                ToolbarAction("☐", "Checklist") { controller.toggleActiveRichContentList(boxId, ListKind.Todo) }
-                ToolbarDivider()
-                ToolbarAction("Link", "Add or edit link", compact = false) { linkDialogVisible = true }
-                ToolbarAction("Unlink", "Remove link", compact = false) { controller.setActiveRichContentLink(boxId, null) }
+                StickyToolbarAction(if (expanded) "Less" else "More", "Show more formatting", compact = false) {
+                    expanded = !expanded
+                }
             }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ColorAction(Color(0xFF171326), "Black text") {
-                    controller.setActiveRichContentTextColor(boxId, 0xFF171326.toInt())
-                }
-                ColorAction(Color(0xFF5B3FD1), "Purple text") {
-                    controller.setActiveRichContentTextColor(boxId, 0xFF5B3FD1.toInt())
-                }
-                ColorAction(Color(0xFFC62828), "Red text") {
-                    controller.setActiveRichContentTextColor(boxId, 0xFFC62828.toInt())
-                }
-                ColorAction(Color(0xFF1565C0), "Blue text") {
-                    controller.setActiveRichContentTextColor(boxId, 0xFF1565C0.toInt())
-                }
-                HighlightAction(Color(0xFFFFF59D), "Yellow highlight") {
-                    controller.setActiveRichContentHighlight(boxId, 0xFFFFF59D.toInt())
-                }
-                HighlightAction(Color(0xFFC8E6C9), "Green highlight") {
-                    controller.setActiveRichContentHighlight(boxId, 0xFFC8E6C9.toInt())
-                }
-                ToolbarAction("×HL", "Clear highlight", compact = false) {
-                    controller.setActiveRichContentHighlight(boxId, null)
-                }
-                ToolbarDivider()
-                ToolbarAction("Body", "Body paragraph", compact = false) { controller.setActiveHeadingLevel(boxId, 0) }
-                ToolbarAction("H1", "Heading level one") { controller.setActiveHeadingLevel(boxId, 1) }
-                ToolbarAction("H2", "Heading level two") { controller.setActiveHeadingLevel(boxId, 2) }
-                ToolbarAction("H3", "Heading level three") { controller.setActiveHeadingLevel(boxId, 3) }
-                ToolbarAction("≡←", "Align left") { controller.setActiveParagraphAlignment(boxId, TextAlignment.Start) }
-                ToolbarAction("≡↔", "Align center") { controller.setActiveParagraphAlignment(boxId, TextAlignment.Center) }
-                ToolbarAction("≡→", "Align right") { controller.setActiveParagraphAlignment(boxId, TextAlignment.End) }
-                ToolbarAction("←", "Decrease indent") { controller.changeActiveParagraphIndent(boxId, -1) }
-                ToolbarAction("→", "Increase indent") { controller.changeActiveParagraphIndent(boxId, 1) }
-                ToolbarDivider()
-                ToolbarAction("Table", "Insert table", compact = false) {
-                    controller.insertRichContentTablePlaceholder(boxId)
-                }
-                ToolbarAction("fx", "Insert formula") { controller.insertRichContentFormulaPlaceholder(boxId) }
-                ToolbarAction("Image", "Import image", compact = false) { imagePicker.launch("image/*") }
+            AnimatedVisibility(visible = expanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ToolbarAction("A−", "Smaller text") { controller.setActiveRichContentFontScale(boxId, 0.85f) }
+                        ToolbarAction("A", "Normal text") { controller.setActiveRichContentFontScale(boxId, 1f) }
+                        ToolbarAction("A+", "Larger text") { controller.setActiveRichContentFontScale(boxId, 1.25f) }
+                        ToolbarDivider()
+                        ColorAction(Color(0xFFC62828), "Red text") {
+                            controller.setActiveRichContentTextColor(boxId, 0xFFC62828.toInt())
+                        }
+                        ColorAction(Color(0xFF1565C0), "Blue text") {
+                            controller.setActiveRichContentTextColor(boxId, 0xFF1565C0.toInt())
+                        }
+                        HighlightAction(Color(0xFFC8E6C9), "Green highlight") {
+                            controller.setActiveRichContentHighlight(boxId, 0xFFC8E6C9.toInt())
+                        }
+                        ToolbarAction("×HL", "Clear highlight", compact = false) {
+                            controller.setActiveRichContentHighlight(boxId, null)
+                        }
+                        ToolbarDivider()
+                        ToolbarAction("Body", "Body paragraph", compact = false) { controller.setActiveHeadingLevel(boxId, 0) }
+                        ToolbarAction("H1", "Heading level one") { controller.setActiveHeadingLevel(boxId, 1) }
+                        ToolbarAction("H2", "Heading level two") { controller.setActiveHeadingLevel(boxId, 2) }
+                        ToolbarAction("H3", "Heading level three") { controller.setActiveHeadingLevel(boxId, 3) }
+                        ToolbarDivider()
+                        ToolbarAction("Link", "Add or edit link", compact = false) { linkDialogVisible = true }
+                        ToolbarAction("Unlink", "Remove link", compact = false) { controller.setActiveRichContentLink(boxId, null) }
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ToolbarAction("≡←", "Align left") { controller.setActiveParagraphAlignment(boxId, TextAlignment.Start) }
+                        ToolbarAction("≡↔", "Align center") { controller.setActiveParagraphAlignment(boxId, TextAlignment.Center) }
+                        ToolbarAction("≡→", "Align right") { controller.setActiveParagraphAlignment(boxId, TextAlignment.End) }
+                        ToolbarAction("←", "Decrease indent") { controller.changeActiveParagraphIndent(boxId, -1) }
+                        ToolbarAction("→", "Increase indent") { controller.changeActiveParagraphIndent(boxId, 1) }
+                        ToolbarDivider()
+                        ToolbarAction("Table", "Insert table", compact = false) {
+                            controller.insertRichContentTablePlaceholder(boxId)
+                        }
+                        ToolbarAction("fx", "Insert formula") { controller.insertRichContentFormulaPlaceholder(boxId) }
+                        ToolbarAction("Image", "Import image", compact = false) { imagePicker.launch("image/*") }
 
-                if (activeTableCell != null) {
-                    ToolbarDivider()
-                    ToolbarAction("+ Row", "Add table row", compact = false) {
-                        controller.addActiveRichContentTableRow(boxId)
-                    }
-                    ToolbarAction("− Row", "Delete table row", compact = false) {
-                        controller.deleteActiveRichContentTableRow(boxId)
-                    }
-                    ToolbarAction("+ Col", "Add table column", compact = false) {
-                        controller.addActiveRichContentTableColumn(boxId)
-                    }
-                    ToolbarAction("− Col", "Delete table column", compact = false) {
-                        controller.deleteActiveRichContentTableColumn(boxId)
-                    }
-                    ToolbarAction("160", "Set column width") {
-                        controller.setActiveRichContentTableColumnWidth(boxId, 160f)
-                    }
-                    ToolbarAction("Auto", "Automatic column width", compact = false) {
-                        controller.setActiveRichContentTableColumnWidth(boxId, null)
-                    }
-                    ToolbarAction("Nested", "Insert nested table", compact = false) {
-                        controller.insertNestedTable(boxId, activeTableCell.address, 2, 2)
+                        if (activeTableCell != null) {
+                            ToolbarDivider()
+                            ToolbarAction("+ Row", "Add table row", compact = false) {
+                                controller.addActiveRichContentTableRow(boxId)
+                            }
+                            ToolbarAction("− Row", "Delete table row", compact = false) {
+                                controller.deleteActiveRichContentTableRow(boxId)
+                            }
+                            ToolbarAction("+ Col", "Add table column", compact = false) {
+                                controller.addActiveRichContentTableColumn(boxId)
+                            }
+                            ToolbarAction("− Col", "Delete table column", compact = false) {
+                                controller.deleteActiveRichContentTableColumn(boxId)
+                            }
+                            ToolbarAction("160", "Set column width") {
+                                controller.setActiveRichContentTableColumnWidth(boxId, 160f)
+                            }
+                            ToolbarAction("Auto", "Automatic column width", compact = false) {
+                                controller.setActiveRichContentTableColumnWidth(boxId, null)
+                            }
+                            ToolbarAction("Nested", "Insert nested table", compact = false) {
+                                controller.insertNestedTable(boxId, activeTableCell.address, 2, 2)
+                            }
+                        }
                     }
                 }
             }
@@ -230,10 +261,12 @@ internal fun RichContentToolbar(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    controller.setActiveRichContentLink(boxId, linkText)
-                    linkDialogVisible = false
-                }) { Text("Apply") }
+                TextButton(
+                    onClick = {
+                        controller.setActiveRichContentLink(boxId, linkText)
+                        linkDialogVisible = false
+                    },
+                ) { Text("Apply") }
             },
             dismissButton = {
                 TextButton(onClick = { linkDialogVisible = false }) { Text("Cancel") }
@@ -248,8 +281,24 @@ private fun ToolbarDivider() {
         Modifier
             .padding(horizontal = 2.dp)
             .width(1.dp)
-            .height(30.dp)
+            .height(28.dp)
             .background(ToolbarDividerColor),
+    )
+}
+
+@Composable
+private fun StickyToolbarAction(
+    label: String,
+    contentDescription: String,
+    compact: Boolean = true,
+    onAction: () -> Unit,
+) {
+    ToolbarAction(
+        label = label,
+        contentDescription = contentDescription,
+        compact = compact,
+        emphasized = true,
+        onAction = onAction,
     )
 }
 
@@ -258,6 +307,7 @@ private fun ToolbarAction(
     label: String,
     contentDescription: String,
     compact: Boolean = true,
+    emphasized: Boolean = false,
     fontWeight: FontWeight? = null,
     fontStyle: FontStyle? = null,
     textDecoration: TextDecoration? = null,
@@ -266,15 +316,15 @@ private fun ToolbarAction(
     Box(
         modifier = Modifier
             .focusProperties { canFocus = false }
-            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-            .clip(RoundedCornerShape(11.dp))
-            .background(ToolbarActionBackground)
+            .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (emphasized) Color(0xFFE9E3FF) else ToolbarActionBackground)
             .clickable(role = Role.Button, onClick = onAction)
             .semantics {
                 this.contentDescription = contentDescription
                 role = Role.Button
             }
-            .padding(horizontal = if (compact) 11.dp else 14.dp, vertical = 10.dp),
+            .padding(horizontal = if (compact) 10.dp else 12.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -285,6 +335,7 @@ private fun ToolbarAction(
                 fontStyle = fontStyle,
                 textDecoration = textDecoration,
             ),
+            maxLines = 1,
         )
     }
 }
@@ -293,8 +344,8 @@ private fun ToolbarAction(
 private fun ColorAction(color: Color, description: String, onAction: () -> Unit) {
     Box(
         modifier = Modifier
-            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-            .clip(RoundedCornerShape(11.dp))
+            .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
+            .clip(RoundedCornerShape(10.dp))
             .clickable(role = Role.Button, onClick = onAction)
             .semantics {
                 contentDescription = description
@@ -302,7 +353,7 @@ private fun ColorAction(color: Color, description: String, onAction: () -> Unit)
             },
         contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.size(30.dp).clip(CircleShape).background(color))
+        Box(Modifier.size(27.dp).clip(CircleShape).background(color))
     }
 }
 
@@ -310,8 +361,8 @@ private fun ColorAction(color: Color, description: String, onAction: () -> Unit)
 private fun HighlightAction(color: Color, description: String, onAction: () -> Unit) {
     Box(
         modifier = Modifier
-            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-            .clip(RoundedCornerShape(11.dp))
+            .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
+            .clip(RoundedCornerShape(10.dp))
             .clickable(role = Role.Button, onClick = onAction)
             .semantics {
                 contentDescription = description
@@ -321,8 +372,8 @@ private fun HighlightAction(color: Color, description: String, onAction: () -> U
     ) {
         Box(
             Modifier
-                .size(32.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .size(29.dp)
+                .clip(RoundedCornerShape(7.dp))
                 .background(color),
             contentAlignment = Alignment.Center,
         ) {
