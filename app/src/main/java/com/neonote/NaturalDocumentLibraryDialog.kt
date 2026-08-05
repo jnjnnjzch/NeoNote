@@ -46,6 +46,7 @@ internal fun NaturalDocumentLibraryDialog(
     onTrash: (String) -> Unit,
     onRestore: (String) -> Unit,
     onDeleteForever: (String) -> Unit,
+    onSearchAllNotes: () -> Unit,
     onImport: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -85,6 +86,15 @@ internal fun NaturalDocumentLibraryDialog(
                             expanded = menuExpanded,
                             onDismissRequest = { menuExpanded = false },
                         ) {
+                            if (!showTrash) {
+                                DropdownMenuItem(
+                                    text = { Text("Search all note contents") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onSearchAllNotes()
+                                    },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text(if (showTrash) "Show notes" else "Show trash") },
                                 onClick = {
@@ -119,7 +129,7 @@ internal fun NaturalDocumentLibraryDialog(
                     decorationBox = { inner ->
                         Box {
                             if (query.isBlank()) {
-                                Text("Search notes…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Search note titles…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             inner()
                         }
