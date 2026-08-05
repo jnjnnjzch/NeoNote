@@ -27,7 +27,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Validate tests, lint, and release candidate
-        run: ./gradlew --no-daemon testReleaseCandidateUnitTest lintReleaseCandidate assembleReleaseCandidate
+        run: ./gradlew --no-daemon test lintReleaseCandidate assembleReleaseCandidate
 
       - name: Upload release candidate APK
         if: success()
