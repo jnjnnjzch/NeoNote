@@ -33,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.neonote.engine.DocumentSummary
 
 @Composable
@@ -57,7 +58,10 @@ internal fun NaturalDocumentLibraryDialog(
         it.isTrashed == showTrash && it.title.contains(query.trim(), ignoreCase = true)
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
         Surface(
             modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.9f),
             shape = RoundedCornerShape(22.dp),
@@ -77,6 +81,8 @@ internal fun NaturalDocumentLibraryDialog(
                             else "${visible.size} ${if (visible.size == 1) "note" else "notes"}",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.labelMedium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                     TextButton(onClick = onDismiss) { Text("Done") }
