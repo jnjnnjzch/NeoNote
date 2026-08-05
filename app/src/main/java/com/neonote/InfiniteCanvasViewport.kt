@@ -34,6 +34,7 @@ import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.neonote.engine.InputAction
@@ -53,6 +54,9 @@ import com.neonote.model.CanvasPoint
 import com.neonote.model.EditorTool
 import com.neonote.model.FloatingImage
 import com.neonote.model.RichContentBox
+
+private const val FocusedObjectScreenMargin = 22f
+private const val FocusedTextToolbarClearance = 72f
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -128,8 +132,15 @@ internal fun InfiniteCanvasViewport(
             }
             SelectionOverlay(
                 activeLassoPath = controller.activeLassoPath,
-                selectedBounds = controller.selectedBounds,
+                selectedBounds = null,
                 modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        if (selectionMode && controller.selectedBounds != null) {
+            SelectionTransformOverlay(
+                controller = controller,
+                modifier = Modifier.fillMaxSize().zIndex(45f),
             )
         }
 
@@ -196,13 +207,14 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
         if (down.isConsumed) return@awaitEachGesture
         routePointerEvent(
-            router,
-            inputAdapter,
-            controller,
-            PointerEventType.Down,
-            listOf(down),
-            platformSnapshotProvider(),
-            mode,
+            router = router,
+            inputAdapter = inputAdapter,
+            controller = controller,
+            type = PointerEventType.Down,
+            changes = listOf(down),
+            platformSnapshot = platformSnapshotProvider(),
+            mode = mode,
+            viewportSize = size,
         )
 
         while (true) {
@@ -214,13 +226,14 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
                 val zoom = event.calculateZoom()
                 val centroid = event.calculateCentroid(useCurrent = true)
                 routePointerEvent(
-                    router,
-                    inputAdapter,
-                    controller,
-                    PointerEventType.Move,
-                    pressed,
-                    platformSnapshot,
-                    mode,
+                    router = router,
+                    inputAdapter = inputAdapter,
+                    controller = controller,
+                    type = PointerEventType.Move,
+                    changes = pressed,
+                    platformSnapshot = platformSnapshot,
+                    mode = mode,
+                    viewportSize = size,
                 )
                 controller.zoomViewportBy(zoom, CanvasPoint(centroid.x, centroid.y))
                 event.changes.forEach { it.consume() }
@@ -229,25 +242,27 @@ private suspend fun PointerInputScope.handleCanvasPointerInput(
             val primary = event.changes.firstOrNull() ?: return@awaitEachGesture
             if (primary.changedToUpIgnoreConsumed()) {
                 routePointerEvent(
-                    router,
-                    inputAdapter,
-                    controller,
-                    PointerEventType.Up,
-                    listOf(primary),
-                    platformSnapshot,
-                    mode,
+                    router = router,
+                    inputAdapter = inputAdapter,
+                    controller = controller,
+                    type = PointerEventType.Up,
+                    changes = listOf(primary),
+                    platformSnapshot = platformSnapshot,
+                    mode = mode,
+                    viewportSize = size,
                 )
                 return@awaitEachGesture
             }
             if (primary.pressed && primary.positionChange() != Offset.Zero) {
                 routePointerEvent(
-                    router,
-                    inputAdapter,
-                    controller,
-                    PointerEventType.Move,
-                    listOf(primary),
-                    platformSnapshot,
-                    mode,
+                    router = router,
+                    inputAdapter = inputAdapter,
+                    controller = controller,
+                    type = PointerEventType.Move,
+                    changes = listOf(primary),
+                    platformSnapshot = platformSnapshot,
+                    mode = mode,
+                    viewportSize = size,
                 )
             }
         }
@@ -262,6 +277,7 @@ private fun routePointerEvent(
     changes: List<PointerInputChange>,
     platformSnapshot: AndroidPointerSnapshot?,
     mode: InputMode,
+    viewportSize: IntSize,
 ) {
     val inputEvent = inputAdapter.toInputEvent(type, changes, platformSnapshot) ?: return
     controller.updateInputDiagnostics(
@@ -280,6 +296,14 @@ private fun routePointerEvent(
         force = type != PointerEventType.Move,
     )
     val result = controller.routeInputEvent(router, inputEvent, mode)
+
+    if (result.action is InputAction.CreateOrFocusRichContentBox) {
+        controller.state.focusedRichContentBoxId
+            ?.let { id -> controller.currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == id } }
+            ?.let { keepObjectVisible(controller, it, viewportSize) }
+        return
+    }
+
     val focusedObjectId = (result.action as? InputAction.FocusExisting)?.objectId ?: return
     val focusedObject = controller.currentCanvas.objects.firstOrNull { it.id == focusedObjectId }
     when (focusedObject) {
@@ -287,6 +311,7 @@ private fun routePointerEvent(
             if (controller.state.currentTool != EditorTool.Eraser) {
                 controller.setTool(EditorTool.Text)
                 controller.activateRichContentBox(focusedObjectId)
+                keepObjectVisible(controller, focusedObject, viewportSize)
             }
         }
         is FloatingImage -> {
@@ -297,4 +322,32 @@ private fun routePointerEvent(
         }
         null -> Unit
     }
+}
+
+private fun keepObjectVisible(
+    controller: NeoNoteEditorController,
+    box: RichContentBox,
+    viewportSize: IntSize,
+) {
+    if (viewportSize.width <= 0 || viewportSize.height <= 0) return
+    val topLeft = controller.documentToScreen(box.position)
+    val bottomRight = controller.documentToScreen(
+        CanvasPoint(box.position.x + box.size.width, box.position.y + box.size.height),
+    )
+    val topClearance = if (controller.state.currentTool == EditorTool.Text) {
+        FocusedTextToolbarClearance
+    } else {
+        FocusedObjectScreenMargin
+    }
+    var dx = 0f
+    var dy = 0f
+    if (topLeft.x < FocusedObjectScreenMargin) dx = FocusedObjectScreenMargin - topLeft.x
+    if (bottomRight.x > viewportSize.width - FocusedObjectScreenMargin) {
+        dx = viewportSize.width - FocusedObjectScreenMargin - bottomRight.x
+    }
+    if (topLeft.y < topClearance) dy = topClearance - topLeft.y
+    if (bottomRight.y > viewportSize.height - FocusedObjectScreenMargin) {
+        dy = viewportSize.height - FocusedObjectScreenMargin - bottomRight.y
+    }
+    if (dx != 0f || dy != 0f) controller.panViewportBy(dx, dy)
 }
