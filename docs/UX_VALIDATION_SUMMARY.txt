@@ -1,1 +1,0 @@
-Natural editor UX accepted; JVM tests, RC lint, and RC APK assembly passed.
