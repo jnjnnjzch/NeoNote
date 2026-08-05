@@ -1,5 +1,6 @@
 package com.neonote
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -9,6 +10,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -75,6 +78,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+private const val MaximumNestedDecodedImageDimension = 1_024
+
 @Composable
 internal fun TableCellEditor(
     boxId: String,
@@ -91,7 +96,7 @@ internal fun TableCellEditor(
     val activeAddress = (controller.activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell)?.address
     val activeCell = activeAddress?.path == address.path
     Column(
-        modifier = modifier.padding(horizontal = 6.dp, vertical = 5.dp),
+        modifier = modifier.padding(horizontal = 7.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(RichContentLayoutDefaults.BlockSpacing.dp),
     ) {
         blocks.forEachIndexed { contentBlockIndex, block ->
@@ -99,17 +104,24 @@ internal fun TableCellEditor(
             when (block) {
                 is ParagraphNode -> if (block.isPlatformEditable()) {
                     TableCellParagraphEditor(
+                        boxId = boxId,
+                        address = blockAddress,
+                        paragraph = block,
+                        active = activeContentBlockIndex == contentBlockIndex,
+                        selectionMode = selectionMode,
+                        selected = selected,
+                        controller = controller,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    TableCellStaticBlock(
                         boxId,
                         blockAddress,
-                        block,
-                        activeContentBlockIndex == contentBlockIndex,
+                        RichContent(listOf(block)),
                         selectionMode,
                         selected,
                         controller,
-                        Modifier.fillMaxWidth(),
                     )
-                } else {
-                    TableCellStaticBlock(boxId, blockAddress, RichContent(listOf(block)), selectionMode, selected, controller)
                 }
                 is BlockFormula -> NestedFormulaEditor(
                     boxId = boxId,
@@ -162,10 +174,18 @@ private fun TableCellParagraphEditor(
     val enabled = !selectionMode && !selected
     val requester = remember { FocusRequester() }
     val modelText = paragraph.plainTextForCellEditor()
-    var value by remember(boxId, address) { mutableStateOf(TextFieldValue(modelText)) }
-    LaunchedEffect(active, enabled) { if (active && enabled) requester.requestFocus() }
+    var value by remember(boxId, address) {
+        mutableStateOf(TextFieldValue(modelText, TextRange(modelText.length)))
+    }
+    LaunchedEffect(active, enabled) {
+        if (active && enabled) requester.requestFocus()
+    }
     LaunchedEffect(modelText) {
-        if (value.text != modelText) value = TextFieldValue(modelText, TextRange(modelText.length))
+        if (value.text != modelText) {
+            val start = value.selection.start.coerceIn(0, modelText.length)
+            val end = value.selection.end.coerceIn(0, modelText.length)
+            value = TextFieldValue(modelText, TextRange(start, end))
+        }
     }
     BasicTextField(
         value = value,
@@ -180,13 +200,27 @@ private fun TableCellParagraphEditor(
             capitalization = KeyboardCapitalization.Sentences,
             imeAction = ImeAction.Default,
         ),
-        textStyle = LocalTextStyle.current.copy(color = Color(0xFF0F172A), lineHeight = RichContentLayoutDefaults.LineHeight.sp),
+        textStyle = LocalTextStyle.current.copy(
+            color = Color(0xFF0F172A),
+            fontSize = 15.sp,
+            lineHeight = 22.sp,
+        ),
         cursorBrush = SolidColor(Color(0xFF6D4AFF)),
-        modifier = modifier.heightIn(min = RichContentLayoutDefaults.LineHeight.dp).focusRequester(requester)
-            .onFocusChanged { if (it.isFocused && enabled) controller.focusRichContentTableCell(boxId, address) },
+        modifier = modifier
+            .heightIn(min = 28.dp)
+            .focusRequester(requester)
+            .onFocusChanged {
+                if (it.isFocused && enabled) controller.focusRichContentTableCell(boxId, address)
+            },
         decorationBox = { inner ->
             Box(Modifier.fillMaxWidth()) {
-                if (value.text.isEmpty()) Text(" ", color = Color(0xFF94A3B8))
+                if (value.text.isEmpty()) {
+                    Text(
+                        "Type…",
+                        color = Color(0xFF94A3B8),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
                 inner()
             }
         },
@@ -204,35 +238,61 @@ private fun NestedFormulaEditor(
 ) {
     val rendered = remember(formula.expression) { MathExpressionFormatter.render(formula.expression) }
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
             .background(Color(0xFFF8F7FC))
             .border(1.dp, if (active) Color(0xFF6D4AFF) else Color(0xFFD7D2E0), RoundedCornerShape(8.dp))
             .clickable(enabled = enabled) { controller.focusRichContentTableCell(boxId, address) }
-            .padding(7.dp),
+            .padding(8.dp),
     ) {
-        Text(rendered.displayText.ifBlank { "ƒ formula" }, fontFamily = FontFamily.Serif, color = Color(0xFF262130))
+        Text(
+            rendered.displayText.ifBlank { "ƒ formula" },
+            fontFamily = FontFamily.Serif,
+            color = Color(0xFF262130),
+        )
         if (active && enabled) {
             var source by remember(address) { mutableStateOf(formula.expression) }
-            LaunchedEffect(formula.expression) { if (source != formula.expression) source = formula.expression }
+            LaunchedEffect(formula.expression) {
+                if (source != formula.expression) source = formula.expression
+            }
             BasicTextField(
                 value = source,
                 onValueChange = {
                     source = it
                     controller.updateNestedFormula(boxId, address, expression = it)
                 },
-                modifier = Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(6.dp)).padding(6.dp),
-                textStyle = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF262130), fontFamily = FontFamily.Monospace),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White, RoundedCornerShape(6.dp))
+                    .padding(8.dp),
+                textStyle = MaterialTheme.typography.bodySmall.copy(
+                    color = Color(0xFF262130),
+                    fontFamily = FontFamily.Monospace,
+                ),
             )
-            Row {
-                TextButton(onClick = {
-                    controller.updateNestedFormula(
-                        boxId,
-                        address,
-                        displayMode = if (formula.displayMode == FormulaDisplayMode.Display) FormulaDisplayMode.Compact else FormulaDisplayMode.Display,
-                    )
-                }) { Text("Mode") }
-                TextButton(onClick = { controller.updateNestedFormula(boxId, address, numbered = !formula.numbered) }) { Text("Number") }
-                TextButton(onClick = { controller.deleteNestedBlock(boxId, address) }) { Text("Delete", color = Color(0xFFB42318)) }
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            ) {
+                TextButton(
+                    onClick = {
+                        controller.updateNestedFormula(
+                            boxId,
+                            address,
+                            displayMode = if (formula.displayMode == FormulaDisplayMode.Display) {
+                                FormulaDisplayMode.Compact
+                            } else {
+                                FormulaDisplayMode.Display
+                            },
+                        )
+                    },
+                ) { Text("Mode") }
+                TextButton(onClick = { controller.updateNestedFormula(boxId, address, numbered = !formula.numbered) }) {
+                    Text("Number")
+                }
+                TextButton(onClick = { controller.deleteNestedBlock(boxId, address) }) {
+                    Text("Delete", color = Color(0xFFB42318))
+                }
             }
         }
     }
@@ -251,11 +311,13 @@ private fun NestedImageEditor(
     val store = remember(context) { FileAssetStore(FileAssetStore.defaultDirectory(context.filesDir)) }
     val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, image.assetId) {
         value = withContext(Dispatchers.IO) {
-            store.get(image.assetId)?.uri?.let { BitmapFactory.decodeFile(it)?.asImageBitmap() }
+            store.get(image.assetId)?.uri?.let(::decodeNestedBitmap)?.asImageBitmap()
         }
     }
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
             .background(Color(0xFFF3F1F6))
             .border(1.dp, if (active) Color(0xFF6D4AFF) else Color(0xFFD7D2E0), RoundedCornerShape(8.dp))
             .clickable(enabled = enabled) { controller.focusRichContentTableCell(boxId, address) },
@@ -264,7 +326,9 @@ private fun NestedImageEditor(
             Image(
                 requireNotNull(bitmap),
                 contentDescription = image.altText,
-                modifier = Modifier.fillMaxWidth().height((image.height ?: 100f).coerceIn(60f, 260f).dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height((image.height ?: 100f).coerceIn(60f, 260f).dp)
                     .graphicsLayer(rotationZ = image.rotationDegrees),
                 contentScale = if (image.crop == ImageCrop()) ContentScale.Fit else ContentScale.Crop,
             )
@@ -272,17 +336,46 @@ private fun NestedImageEditor(
             Text("Image unavailable", Modifier.padding(10.dp), color = Color(0xFF756E83))
         }
         if (active && enabled) {
-            Row {
-                TextButton(onClick = { controller.updateNestedImage(boxId, address, height = (image.height ?: 100f) * 1.2f) }) { Text("Larger") }
-                TextButton(onClick = { controller.updateNestedImage(boxId, address, rotationDegrees = (image.rotationDegrees + 90f) % 360f) }) { Text("Rotate") }
-                TextButton(onClick = {
-                    controller.updateNestedImage(
-                        boxId,
-                        address,
-                        crop = if (image.crop == ImageCrop()) ImageCrop(0.1f, 0.1f, 0.9f, 0.9f) else ImageCrop(),
-                    )
-                }) { Text("Crop") }
-                TextButton(onClick = { controller.deleteNestedBlock(boxId, address) }) { Text("Delete", color = Color(0xFFB42318)) }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+            ) {
+                TextButton(
+                    onClick = {
+                        controller.updateNestedImage(boxId, address, height = (image.height ?: 100f) * 0.85f)
+                    },
+                ) { Text("Smaller") }
+                TextButton(
+                    onClick = {
+                        controller.updateNestedImage(boxId, address, height = (image.height ?: 100f) * 1.18f)
+                    },
+                ) { Text("Larger") }
+                TextButton(
+                    onClick = {
+                        controller.updateNestedImage(
+                            boxId,
+                            address,
+                            rotationDegrees = (image.rotationDegrees + 90f) % 360f,
+                        )
+                    },
+                ) { Text("Rotate") }
+                TextButton(
+                    onClick = {
+                        controller.updateNestedImage(
+                            boxId,
+                            address,
+                            crop = if (image.crop == ImageCrop()) {
+                                ImageCrop(0.1f, 0.1f, 0.9f, 0.9f)
+                            } else {
+                                ImageCrop()
+                            },
+                        )
+                    },
+                ) { Text(if (image.crop == ImageCrop()) "Crop" else "Fit") }
+                TextButton(onClick = { controller.deleteNestedBlock(boxId, address) }) {
+                    Text("Delete", color = Color(0xFFB42318))
+                }
             }
         }
     }
@@ -304,10 +397,13 @@ private fun CellInsertBar(
             controller.insertNestedImage(boxId, insertionAddress, reference.id, reference.fileName)
         }
     }
-    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-        TextButton(onClick = { controller.insertNestedFormula(boxId, insertionAddress) }) { Text("+ Formula") }
-        TextButton(onClick = { picker.launch("image/*") }) { Text("+ Image") }
-        TextButton(onClick = { controller.insertNestedTable(boxId, insertionAddress, 2, 2) }) { Text("+ Table") }
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        TextButton(onClick = { controller.insertNestedFormula(boxId, insertionAddress) }) { Text("＋ Formula") }
+        TextButton(onClick = { picker.launch("image/*") }) { Text("＋ Image") }
+        TextButton(onClick = { controller.insertNestedTable(boxId, insertionAddress, 2, 2) }) { Text("＋ Table") }
     }
 }
 
@@ -335,20 +431,36 @@ private fun TableCellStaticBlock(
 internal fun TableCell.firstEditableParagraphIndex(): Int =
     content.blocks.indexOfFirst { it is ParagraphNode && it.isPlatformEditable() }.takeIf { it >= 0 } ?: 0
 
-internal fun ParagraphNode.plainTextForCellEditor(): String = inlines.joinToString("") { inline -> when (inline) {
-    is InlineText -> inline.text
-    InlineLineBreak -> "\n"
-    is InlineFormula, is InlineImage -> InlineAtomPlaceholder
-} }
+internal fun ParagraphNode.plainTextForCellEditor(): String = inlines.joinToString("") { inline ->
+    when (inline) {
+        is InlineText -> inline.text
+        InlineLineBreak -> "\n"
+        is InlineFormula, is InlineImage -> InlineAtomPlaceholder
+    }
+}
 
 private fun ParagraphNode.isPlatformEditable(): Boolean = inlines.none { it is InlineFormula || it is InlineImage }
 
-internal fun RichContent.previewTextForTableCell(): String = blocks.firstOrNull()?.let { block -> when (block) {
-    is ParagraphNode -> block.plainTextForCellEditor()
-    is BlockFormula -> MathExpressionFormatter.render(block.expression).displayText.ifBlank { "formula" }
-    is BlockImage -> block.caption ?: block.altText?.takeIf(String::isNotBlank) ?: "image"
-    is TableNode -> "nested table"
-} }.orEmpty()
+internal fun RichContent.previewTextForTableCell(): String = blocks.firstOrNull()?.let { block ->
+    when (block) {
+        is ParagraphNode -> block.plainTextForCellEditor()
+        is BlockFormula -> MathExpressionFormatter.render(block.expression).displayText.ifBlank { "formula" }
+        is BlockImage -> block.caption ?: block.altText?.takeIf(String::isNotBlank) ?: "image"
+        is TableNode -> "nested table"
+    }
+}.orEmpty()
+
+private fun decodeNestedBitmap(path: String): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(path, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    while (
+        bounds.outWidth / sample > MaximumNestedDecodedImageDimension ||
+        bounds.outHeight / sample > MaximumNestedDecodedImageDimension
+    ) sample *= 2
+    return BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
+}
 
 private suspend fun android.content.ContentResolver.readNestedImageDraft(uri: Uri): AssetDraft? =
     withContext(Dispatchers.IO) {
