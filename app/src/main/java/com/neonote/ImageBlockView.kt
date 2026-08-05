@@ -6,19 +6,21 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -67,16 +69,22 @@ internal fun ImageBlockView(
     val shape = RoundedCornerShape(12.dp)
     val imageHeight = (block.height ?: 220f).coerceIn(96f, 640f).dp
     val cropEnabled = block.crop != ImageCrop()
+    val outline = when {
+        selected -> Color(0xFF5B3FD1)
+        else -> Color.Transparent
+    }
 
     Column(
         modifier = modifier
             .widthIn(min = 120.dp)
             .clip(shape)
-            .background(Color.White)
-            .border(if (selected) 2.dp else 1.dp, if (selected) Color(0xFF5B3FD1) else Color(0xFFD8D3E1), shape)
-            .then(if (enabled) Modifier.clickable {
-                controller.selectRichContentObjectBlock(box.id, blockIndex)
-            } else Modifier)
+            .background(if (selected) Color.White else Color.Transparent)
+            .border(if (selected) 1.5.dp else 0.dp, outline, shape)
+            .then(
+                if (enabled) Modifier.clickable {
+                    controller.selectRichContentObjectBlock(box.id, blockIndex)
+                } else Modifier,
+            )
             .semantics {
                 contentDescription = "Image block ${block.displayTitle()}"
                 role = Role.Button
@@ -103,51 +111,62 @@ internal fun ImageBlockView(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("▧", color = Color(0xFF756E83), style = MaterialTheme.typography.headlineMedium)
                     Text("Image unavailable", color = Color(0xFF756E83), style = MaterialTheme.typography.bodySmall)
-                    Text(block.assetId, color = Color(0xFF9A94A5), style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
 
         if (selected && enabled) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 6.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = {
-                    controller.updateRichContentImage(box.id, blockIndex, height = (block.height ?: 220f) * 0.8f)
-                }) { Text("Smaller") }
-                TextButton(onClick = {
-                    controller.updateRichContentImage(box.id, blockIndex, height = (block.height ?: 220f) * 1.25f)
-                }) { Text("Larger") }
-                TextButton(onClick = {
-                    controller.updateRichContentImage(box.id, blockIndex, rotationDegrees = (block.rotationDegrees + 90f) % 360f)
-                }) { Text("Rotate") }
-                TextButton(onClick = {
+                ImageContextAction("Smaller", "Make image smaller") {
+                    controller.updateRichContentImage(box.id, blockIndex, height = (block.height ?: 220f) * 0.85f)
+                }
+                ImageContextAction("Larger", "Make image larger") {
+                    controller.updateRichContentImage(box.id, blockIndex, height = (block.height ?: 220f) * 1.18f)
+                }
+                ImageContextAction("Rotate", "Rotate image clockwise") {
+                    controller.updateRichContentImage(
+                        box.id,
+                        blockIndex,
+                        rotationDegrees = (block.rotationDegrees + 90f) % 360f,
+                    )
+                }
+                ImageContextAction(if (cropEnabled) "Fit" else "Crop", "Toggle image crop") {
                     controller.updateRichContentImage(
                         box.id,
                         blockIndex,
                         crop = if (cropEnabled) ImageCrop() else ImageCrop(0.1f, 0.1f, 0.9f, 0.9f),
                     )
-                }) { Text(if (cropEnabled) "Fit" else "Crop") }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                BasicTextField(
-                    value = block.caption.orEmpty(),
-                    onValueChange = { controller.updateRichContentImage(box.id, blockIndex, caption = it.take(200)) },
-                    modifier = Modifier.weight(1f),
-                    textStyle = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF302B3A)),
-                    decorationBox = { inner ->
-                        if (block.caption.isNullOrBlank()) Text("Add caption…", color = Color(0xFF9A94A5), style = MaterialTheme.typography.bodySmall)
-                        inner()
-                    },
-                )
-                TextButton(onClick = { controller.deleteRichContentBlock(box.id, blockIndex) }) {
-                    Text("Delete", color = Color(0xFFB42318), fontWeight = FontWeight.SemiBold)
+                }
+                ImageContextAction("Delete", "Delete image", destructive = true) {
+                    controller.deleteRichContentBlock(box.id, blockIndex)
                 }
             }
+            BasicTextField(
+                value = block.caption.orEmpty(),
+                onValueChange = { controller.updateRichContentImage(box.id, blockIndex, caption = it.take(200)) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                textStyle = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF302B3A)),
+                decorationBox = { inner ->
+                    Box {
+                        if (block.caption.isNullOrBlank()) {
+                            Text(
+                                "Add caption…",
+                                color = Color(0xFF9A94A5),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        inner()
+                    }
+                },
+            )
         } else if (!block.caption.isNullOrBlank()) {
             Text(
                 block.caption,
@@ -159,12 +178,41 @@ internal fun ImageBlockView(
     }
 }
 
+@Composable
+private fun ImageContextAction(
+    label: String,
+    description: String,
+    destructive: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Text(
+        text = label,
+        modifier = Modifier
+            .defaultMinSize(minHeight = 42.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics {
+                role = Role.Button
+                contentDescription = description
+            }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+    )
+}
+
 private fun decodeSampledBitmap(path: String): Bitmap? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(path, bounds)
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
     var sample = 1
-    while (bounds.outWidth / sample > MaximumDecodedImageDimension || bounds.outHeight / sample > MaximumDecodedImageDimension) sample *= 2
+    while (
+        bounds.outWidth / sample > MaximumDecodedImageDimension ||
+        bounds.outHeight / sample > MaximumDecodedImageDimension
+    ) sample *= 2
     return BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
 }
 
