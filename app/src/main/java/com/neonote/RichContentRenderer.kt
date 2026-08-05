@@ -4,8 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -42,6 +44,7 @@ import com.neonote.model.InlineText
 import com.neonote.model.ListKind
 import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
+import com.neonote.model.TableCellVerticalAlignment
 import com.neonote.model.TableNode
 import com.neonote.model.TextAlignment
 
@@ -206,23 +209,28 @@ private fun StaticBlockCard(
 
 @Composable
 private fun StaticTableGrid(table: TableNode) {
-    val rows = table.rows.size.coerceAtLeast(1)
-    val columns = (table.rows.maxOfOrNull { it.size } ?: 0).coerceAtLeast(1)
-    Column(modifier = Modifier.fillMaxWidth().border(1.dp, Color(0xFFCBD5E1))) {
-        repeat(rows) { rowIndex ->
-            Row(modifier = Modifier.fillMaxWidth()) {
-                repeat(columns) { columnIndex ->
-                    val cell = table.rows.getOrNull(rowIndex)?.getOrNull(columnIndex)
-                    Text(
-                        cell?.content?.previewTextForTableCell().orEmpty().ifBlank { " " },
-                        modifier = Modifier.weight(1f).heightIn(min = 36.dp)
-                            .background(if (rowIndex < table.headerRowCount) Color(0xFFF1EEF9) else Color.Transparent)
-                            .border(1.dp, Color(0xFFE2E8F0)).padding(6.dp),
-                        color = Color(0xFF334155),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
+    SpanAwareTableGrid(table = table, modifier = Modifier.fillMaxWidth()) { rowIndex, _, cell ->
+        val borderModifier = if (table.showBorders) Modifier.border(1.dp, Color(0xFFE2E8F0)) else Modifier
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    if (rowIndex < table.headerRowCount) Color(0xFFF1EEF9)
+                    else cell.backgroundColorArgb?.let(::Color) ?: Color.Transparent,
+                )
+                .then(borderModifier)
+                .padding(6.dp),
+            contentAlignment = when (cell.verticalAlignment) {
+                TableCellVerticalAlignment.Top -> Alignment.TopStart
+                TableCellVerticalAlignment.Center -> Alignment.CenterStart
+                TableCellVerticalAlignment.Bottom -> Alignment.BottomStart
+            },
+        ) {
+            Text(
+                cell.content.previewTextForTableCell().ifBlank { " " },
+                color = Color(0xFF334155),
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

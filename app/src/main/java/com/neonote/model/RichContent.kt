@@ -86,6 +86,17 @@ data class TableCell(
     val content: RichContent = RichContent(),
     val backgroundColorArgb: Int? = null,
     val verticalAlignment: TableCellVerticalAlignment = TableCellVerticalAlignment.Top,
+    /** Size of an anchor cell. Continuation cells keep both values at one. */
+    val rowSpan: Int = 1,
+    val columnSpan: Int = 1,
+    /** Non-null only for cells visually covered by another anchor cell. */
+    val mergedInto: TableCellMergeAnchor? = null,
+)
+
+@Serializable
+data class TableCellMergeAnchor(
+    val rowIndex: Int,
+    val columnIndex: Int,
 )
 
 @Serializable
