@@ -14,7 +14,7 @@ import kotlinx.coroutines.withContext
 
 private const val MaximumClipboardImageBytes = 32 * 1024 * 1024
 
-/** Returns the first clipboard URI whose declared or resolved MIME type is an image. */
+/** Returns the first clipboard URI that can conservatively be identified as an image. */
 internal fun ClipboardManager.primaryImageUri(context: Context): Uri? {
     val clip = primaryClip ?: return null
     val descriptionContainsImage = (0 until clip.description.mimeTypeCount).any { index ->
@@ -24,17 +24,30 @@ internal fun ClipboardManager.primaryImageUri(context: Context): Uri? {
         val item = clip.getItemAt(index)
         val uri = item.uri ?: item.intent?.data ?: continue
         val resolvedType = runCatching { context.contentResolver.getType(uri) }.getOrNull()
-        if (descriptionContainsImage || resolvedType?.startsWith("image/", ignoreCase = true) == true) return uri
+        if (clipboardUriCanRepresentImage(resolvedType, descriptionContainsImage, clip.itemCount)) return uri
     }
     return null
 }
 
+/** The aggregate clip MIME is trusted only when there is one unresolved URI item. */
+internal fun clipboardUriCanRepresentImage(
+    resolvedMimeType: String?,
+    descriptionContainsImage: Boolean,
+    itemCount: Int,
+): Boolean = when {
+    resolvedMimeType != null -> resolvedMimeType.startsWith("image/", ignoreCase = true)
+    itemCount == 1 -> descriptionContainsImage
+    else -> false
+}
+
 internal suspend fun ContentResolver.readClipboardImageDraft(uri: Uri): AssetDraft? = withContext(Dispatchers.IO) {
     runCatching {
-        val mediaType = getType(uri)?.takeIf { it.startsWith("image/", ignoreCase = true) } ?: "image/*"
+        val resolvedType = getType(uri)
+        if (resolvedType != null && !resolvedType.startsWith("image/", ignoreCase = true)) return@runCatching null
         val bytes = openInputStream(uri)?.use { it.readBytesLimited(MaximumClipboardImageBytes) }
             ?: return@runCatching null
-        AssetDraft(mediaType, bytes, clipboardDisplayName(uri))
+        if (bytes.isEmpty()) return@runCatching null
+        AssetDraft(resolvedType ?: "image/*", bytes, clipboardDisplayName(uri))
     }.getOrNull()
 }
 
