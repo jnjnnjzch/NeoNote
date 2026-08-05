@@ -1,6 +1,7 @@
 package com.neonote
 
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -31,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -42,10 +44,12 @@ import com.neonote.engine.FileDocumentLibrary
 import com.neonote.engine.IdGenerator
 import com.neonote.engine.NeoNoteArchiveCodec
 import com.neonote.model.CanvasPoint
+import com.neonote.model.CanvasSize
 import com.neonote.model.EditorTool
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.util.UUID
+import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -55,8 +59,6 @@ import kotlinx.coroutines.withContext
 private const val AutoSaveDebounceMillis = 1_200L
 private const val MaximumImportedArchiveBytes = 256 * 1024 * 1024
 private const val MaximumImportedImageBytes = 64 * 1024 * 1024
-private const val DefaultFloatingImageHalfWidth = 160f
-private const val DefaultFloatingImageHalfHeight = 110f
 
 @Composable
 internal fun NeoNoteEditorScreen(
@@ -66,11 +68,16 @@ internal fun NeoNoteEditorScreen(
 ) {
     val state = controller.state
     val context = LocalContext.current
+    val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
     val library = remember(context) { FileDocumentLibrary(context.filesDir) }
     val assetStore = remember(context) { FileAssetStore(FileAssetStore.defaultDirectory(context.filesDir)) }
     val archiveCodec = remember(assetStore) { NeoNoteArchiveCodec(assetStore) }
     val documentEngine = remember { DocumentEngine(UuidIdGenerator()) }
+    val defaultImageScreenWidthPx = with(density) { 320.dp.toPx() }
+    val defaultImageScreenHeightPx = with(density) { 220.dp.toPx() }
+    val maximumImageScreenWidthPx = with(density) { 420.dp.toPx() }
+    val maximumImageScreenHeightPx = with(density) { 360.dp.toPx() }
 
     var libraryReady by rememberSaveable { mutableStateOf(false) }
     var libraryVisible by rememberSaveable { mutableStateOf(false) }
@@ -124,23 +131,34 @@ internal fun NeoNoteEditorScreen(
                 return@launch
             }
             val reference = assetStore.put(draft)
+            val screenSize = preferredFloatingImageScreenSize(
+                bytes = draft.bytes,
+                viewport = canvasViewportSize,
+                defaultWidthPx = defaultImageScreenWidthPx,
+                defaultHeightPx = defaultImageScreenHeightPx,
+                maximumWidthPx = maximumImageScreenWidthPx,
+                maximumHeightPx = maximumImageScreenHeightPx,
+            )
+            val zoom = controller.state.viewport.zoomScale.coerceAtLeast(0.2f)
+            val documentSize = CanvasSize(screenSize.width / zoom, screenSize.height / zoom)
             val center = controller.screenToDocument(
                 CanvasPoint(
                     canvasViewportSize.width / 2f,
                     canvasViewportSize.height / 2f,
                 ),
             )
-            controller.insertFloatingImage(
+            val imageId = controller.insertFloatingImage(
                 assetId = reference.id,
                 position = CanvasPoint(
-                    center.x - DefaultFloatingImageHalfWidth,
-                    center.y - DefaultFloatingImageHalfHeight,
+                    center.x - documentSize.width / 2f,
+                    center.y - documentSize.height / 2f,
                 ),
+                size = documentSize,
                 altText = reference.fileName,
             )
             controller.setTool(EditorTool.Selection)
-            controller.selectCanvasObject(controller.currentCanvas.objects.last().id)
-            statusMessage = "Image added · drag to position it"
+            controller.selectCanvasObject(imageId)
+            statusMessage = "Image added · drag or use the corner handle"
         }
     }
 
@@ -399,6 +417,40 @@ internal fun NeoNoteEditorScreen(
             onDismiss = { settingsVisible = false },
         )
     }
+}
+
+private data class FloatingImageScreenSize(val width: Float, val height: Float)
+
+private fun preferredFloatingImageScreenSize(
+    bytes: ByteArray,
+    viewport: IntSize,
+    defaultWidthPx: Float,
+    defaultHeightPx: Float,
+    maximumWidthPx: Float,
+    maximumHeightPx: Float,
+): FloatingImageScreenSize {
+    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+    val sourceWidth = options.outWidth.takeIf { it > 0 }?.toFloat()
+    val sourceHeight = options.outHeight.takeIf { it > 0 }?.toFloat()
+    val availableWidth = if (viewport.width > 0) {
+        min(viewport.width * 0.72f, maximumWidthPx)
+    } else {
+        defaultWidthPx
+    }
+    val availableHeight = if (viewport.height > 0) {
+        min(viewport.height * 0.58f, maximumHeightPx)
+    } else {
+        defaultHeightPx
+    }
+    if (sourceWidth == null || sourceHeight == null) {
+        return FloatingImageScreenSize(availableWidth, min(defaultHeightPx, availableHeight))
+    }
+    val fit = min(availableWidth / sourceWidth, availableHeight / sourceHeight).coerceAtMost(1f)
+    val width = (sourceWidth * fit).coerceAtLeast(min(defaultWidthPx * 0.55f, availableWidth))
+    val height = (sourceHeight * fit).coerceAtLeast(min(defaultHeightPx * 0.55f, availableHeight))
+    val secondFit = min(availableWidth / width, availableHeight / height).coerceAtMost(1f)
+    return FloatingImageScreenSize(width * secondFit, height * secondFit)
 }
 
 private class UuidIdGenerator : IdGenerator {
