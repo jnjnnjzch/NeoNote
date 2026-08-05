@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.HorizontalDivider
@@ -54,6 +55,8 @@ import kotlinx.coroutines.withContext
 private const val AutoSaveDebounceMillis = 1_200L
 private const val MaximumImportedArchiveBytes = 256 * 1024 * 1024
 private const val MaximumImportedImageBytes = 64 * 1024 * 1024
+private const val DefaultFloatingImageHalfWidth = 160f
+private const val DefaultFloatingImageHalfHeight = 110f
 
 @Composable
 internal fun NeoNoteEditorScreen(
@@ -121,12 +124,23 @@ internal fun NeoNoteEditorScreen(
                 return@launch
             }
             val reference = assetStore.put(draft)
-            val center = controller.screenToDocument(CanvasPoint(
-                canvasViewportSize.width / 2f,
-                canvasViewportSize.height / 2f,
-            ))
-            controller.insertFloatingImage(reference.id, center, altText = reference.fileName)
-            statusMessage = "Image added to canvas"
+            val center = controller.screenToDocument(
+                CanvasPoint(
+                    canvasViewportSize.width / 2f,
+                    canvasViewportSize.height / 2f,
+                ),
+            )
+            controller.insertFloatingImage(
+                assetId = reference.id,
+                position = CanvasPoint(
+                    center.x - DefaultFloatingImageHalfWidth,
+                    center.y - DefaultFloatingImageHalfHeight,
+                ),
+                altText = reference.fileName,
+            )
+            controller.setTool(EditorTool.Selection)
+            controller.selectCanvasObject(controller.currentCanvas.objects.last().id)
+            statusMessage = "Image added · drag to position it"
         }
     }
 
@@ -246,8 +260,9 @@ internal fun NeoNoteEditorScreen(
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
     ) {
         val expandedNavigation = maxWidth >= 720.dp
+        val focusedTextEditing = state.currentTool == EditorTool.Text && state.focusedRichContentBoxId != null
         Column(Modifier.fillMaxSize()) {
-            WorkspaceTopBar(
+            NaturalWorkspaceTopBar(
                 title = state.document.title,
                 favorite = state.document.isFavorite,
                 onLibrary = { libraryVisible = true },
@@ -264,7 +279,7 @@ internal fun NeoNoteEditorScreen(
                 onSettings = { settingsVisible = true },
                 onSaveNow = { coroutineScope.launch { controller.saveDocument(library); refreshLibrary() } },
             )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
             Row(Modifier.fillMaxSize()) {
                 if (expandedNavigation) {
                     PageRail(
@@ -278,37 +293,51 @@ internal fun NeoNoteEditorScreen(
                         onAddPage = controller::addPage,
                     )
                     Box(
-                        Modifier.fillMaxHeight().width(1.dp)
-                            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+                        Modifier
+                            .fillMaxHeight()
+                            .width(1.dp)
+                            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
                     )
                 }
                 Box(
-                    modifier = Modifier.fillMaxSize().onSizeChanged { canvasViewportSize = it },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (focusedTextEditing) Modifier.imePadding() else Modifier)
+                        .onSizeChanged { canvasViewportSize = it },
                 ) {
                     InfiniteCanvasViewport(
                         controller = controller,
                         selectionMode = state.currentTool == EditorTool.Selection,
                         modifier = Modifier.fillMaxSize(),
                     )
-                    CanvasMetaChip(
-                        controller.currentPageNumber,
-                        controller.pageCount,
-                        (state.viewport.zoomScale * 100f).roundToInt(),
-                        Modifier.align(Alignment.TopEnd).padding(16.dp),
-                    )
-                    ToolContextPanel(
-                        controller = controller,
-                        preferences = preferences,
-                        onPreferencesChange = onPreferencesChange,
-                        onInsertFloatingImage = { floatingImagePicker.launch("image/*") },
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 98.dp).fillMaxWidth(0.94f),
-                    )
-                    ToolDock(
-                        selectedTool = state.currentTool,
-                        onToolSelected = controller::setTool,
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp),
-                    )
-                    if (!expandedNavigation) {
+                    if (!focusedTextEditing) {
+                        CanvasMetaChip(
+                            controller.currentPageNumber,
+                            controller.pageCount,
+                            (state.viewport.zoomScale * 100f).roundToInt(),
+                            Modifier.align(Alignment.TopEnd).padding(12.dp),
+                        )
+                    }
+                    if (state.currentTool != EditorTool.Text) {
+                        NaturalToolContextPanel(
+                            controller = controller,
+                            preferences = preferences,
+                            onPreferencesChange = onPreferencesChange,
+                            onInsertFloatingImage = { floatingImagePicker.launch("image/*") },
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(horizontal = 10.dp, bottom = 86.dp)
+                                .fillMaxWidth(),
+                        )
+                    }
+                    if (!focusedTextEditing) {
+                        NaturalToolDock(
+                            selectedTool = state.currentTool,
+                            onToolSelected = controller::setTool,
+                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp),
+                        )
+                    }
+                    if (!expandedNavigation && !focusedTextEditing) {
                         CompactPageSwitcher(
                             controller.currentPageNumber,
                             controller.pageCount,
@@ -317,13 +346,15 @@ internal fun NeoNoteEditorScreen(
                             controller::switchToPreviousPage,
                             controller::switchToNextPage,
                             controller::addPage,
-                            Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 96.dp),
+                            Modifier.align(Alignment.TopStart).padding(start = 10.dp, top = 10.dp),
                         )
                     }
                     statusMessage?.let { message ->
                         Text(
                             message,
-                            modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp)
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 14.dp)
                                 .background(
                                     MaterialTheme.colorScheme.inverseSurface,
                                     androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
@@ -350,11 +381,13 @@ internal fun NeoNoteEditorScreen(
             onRestore = { id -> coroutineScope.launch { library.restore(id); refreshLibrary() } },
             onDeleteForever = { id -> coroutineScope.launch { library.permanentlyDelete(id); refreshLibrary() } },
             onImport = {
-                importLauncher.launch(arrayOf(
-                    "application/vnd.neonote",
-                    "application/zip",
-                    "application/octet-stream",
-                ))
+                importLauncher.launch(
+                    arrayOf(
+                        "application/vnd.neonote",
+                        "application/zip",
+                        "application/octet-stream",
+                    ),
+                )
             },
             onDismiss = { libraryVisible = false },
         )
