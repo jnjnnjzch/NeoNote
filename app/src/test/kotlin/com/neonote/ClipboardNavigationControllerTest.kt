@@ -32,6 +32,16 @@ class ClipboardNavigationControllerTest {
         assertEquals("Neo", run.text)
         assertTrue(run.bold)
         assertTrue(controller.canUndo)
+
+        controller.undo()
+
+        val restored = assertIs<RichContentBox>(controller.currentCanvas.objects.single())
+        val restoredText = (restored.content.blocks.single() as ParagraphNode)
+            .inlines
+            .filterIsInstance<InlineText>()
+            .joinToString("") { it.text }
+        assertEquals("hello world", restoredText)
+        assertTrue(controller.canRedo)
     }
 
     @Test
@@ -56,5 +66,13 @@ class ClipboardNavigationControllerTest {
         assertEquals(1, active.address.rowIndex)
         assertEquals(0, active.address.columnIndex)
         assertTrue(controller.canUndo)
+
+        controller.undo()
+
+        val restored = assertIs<TableNode>(
+            assertIs<RichContentBox>(controller.currentCanvas.objects.single()).content.blocks[tableIndex],
+        )
+        assertEquals(1, restored.rows.size)
+        assertTrue(controller.canRedo)
     }
 }
