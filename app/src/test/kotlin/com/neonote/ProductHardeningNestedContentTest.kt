@@ -5,6 +5,7 @@ import com.neonote.model.BlockFormula
 import com.neonote.model.CanvasPoint
 import com.neonote.model.RichContentBox
 import com.neonote.model.TableCellAddress
+import com.neonote.model.TableNode
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -18,8 +19,11 @@ class ProductHardeningNestedContentTest {
         controller.focusOrCreateRichContentBox(CanvasPoint(120f, 180f))
         val boxId = assertIs<RichContentBox>(controller.currentCanvas.objects.single()).id
         controller.insertRichContentTablePlaceholder(boxId)
+        val boxWithTable = assertIs<RichContentBox>(controller.currentCanvas.objects.single())
+        val tableBlockIndex = boxWithTable.content.blocks.indexOfFirst { it is TableNode }
+        assertTrue(tableBlockIndex >= 0)
         val address = TableCellAddress(
-            blockIndex = 1,
+            blockIndex = tableBlockIndex,
             rowIndex = 0,
             columnIndex = 0,
             contentBlockIndex = 0,
