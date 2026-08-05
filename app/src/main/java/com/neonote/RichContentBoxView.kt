@@ -1,5 +1,6 @@
 package com.neonote
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -17,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -29,7 +31,7 @@ import com.neonote.model.EditorTool
 import com.neonote.model.RichContentBox
 import kotlin.math.roundToInt
 
-private val MinimumRichContentBoxHeight = 96.dp
+private val MinimumRichContentBoxHeight = 64.dp
 
 @Composable
 internal fun RichContentBoxView(
@@ -48,9 +50,13 @@ internal fun RichContentBoxView(
     val borderColor = when {
         selected -> Color(0xFF2563EB)
         box.isFocused -> Color(0xFF7C3AED)
-        else -> Color(0xFFE2E8F0)
+        else -> Color.Transparent
     }
-    val shape = RoundedCornerShape(14.dp)
+    val backgroundColor = when {
+        selected || box.isFocused -> Color.White
+        else -> Color.Transparent
+    }
+    val shape = RoundedCornerShape(12.dp)
     val boxWidth = with(density) { box.size.width.toDp() }
     val persistedHeight = with(density) { box.size.height.toDp() }
     val interactionModifier = if (selectionMode) {
@@ -82,12 +88,22 @@ internal fun RichContentBoxView(
             .offset { IntOffset(box.position.x.roundToInt(), box.position.y.roundToInt()) }
             .width(boxWidth)
             .then(sizingModifier)
+            .animateContentSize()
+            .shadow(
+                elevation = if (box.isFocused) 5.dp else 0.dp,
+                shape = shape,
+                clip = false,
+            )
             .clip(shape)
-            .background(Color.White)
-            .border(if (selected || box.isFocused) 2.dp else 1.dp, borderColor, shape)
+            .background(backgroundColor)
+            .border(
+                width = if (selected || box.isFocused) 1.5.dp else 0.dp,
+                color = borderColor,
+                shape = shape,
+            )
             .padding(
-                horizontal = RichContentLayoutDefaults.BoxChromePadding.dp.coerceAtLeast(12.dp),
-                vertical = RichContentLayoutDefaults.BoxChromePadding.dp.coerceAtLeast(10.dp),
+                horizontal = RichContentLayoutDefaults.BoxChromePadding.dp.coerceAtLeast(13.dp),
+                vertical = RichContentLayoutDefaults.BoxChromePadding.dp.coerceAtLeast(8.dp),
             )
             .then(interactionModifier),
     ) {
