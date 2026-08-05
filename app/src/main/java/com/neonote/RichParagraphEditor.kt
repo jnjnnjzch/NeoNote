@@ -47,7 +47,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neonote.engine.InlineStyle
 import com.neonote.engine.MathExpressionFormatter
-import com.neonote.engine.RichContentLayoutDefaults
 import com.neonote.model.InlineFormula
 import com.neonote.model.InlineImage
 import com.neonote.model.InlineLineBreak
@@ -57,6 +56,9 @@ import com.neonote.model.ParagraphNode
 import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
 import com.neonote.model.TextAlignment
+
+private val RichParagraphBodySize = 16.sp
+private val RichParagraphLineHeight = 24.sp
 
 @Composable
 internal fun RichParagraphEditor(
@@ -86,7 +88,9 @@ internal fun RichParagraphEditor(
     val clipboardManager = remember(context) { context.getSystemService(ClipboardManager::class.java) }
     val focusRequester = remember { FocusRequester() }
     val modelText = paragraph.plainTextForEditor()
-    var platformValue by remember(box.id, blockIndex) { mutableStateOf(TextFieldValue(modelText)) }
+    var platformValue by remember(box.id, blockIndex) {
+        mutableStateOf(TextFieldValue(modelText, TextRange(modelText.length)))
+    }
 
     LaunchedEffect(active, selectionMode, selected) {
         if (active && !selectionMode && !selected) focusRequester.requestFocus()
@@ -101,12 +105,12 @@ internal fun RichParagraphEditor(
 
     val paragraphTextStyle = LocalTextStyle.current.copy(
         color = Color(0xFF0F172A),
-        lineHeight = RichContentLayoutDefaults.LineHeight.sp,
+        lineHeight = RichParagraphLineHeight,
         fontSize = when (paragraph.style.headingLevel) {
-            1 -> 24.sp
-            2 -> 20.sp
-            3 -> 17.sp
-            else -> 14.sp
+            1 -> 26.sp
+            2 -> 22.sp
+            3 -> 18.sp
+            else -> RichParagraphBodySize
         },
         fontWeight = if (paragraph.style.headingLevel > 0) FontWeight.SemiBold else FontWeight.Normal,
         textAlign = when (paragraph.style.alignment) {
@@ -145,7 +149,7 @@ internal fun RichParagraphEditor(
         modifier = modifier
             .fillMaxWidth()
             .padding(start = indent)
-            .heightIn(min = RichContentLayoutDefaults.LineHeight.dp)
+            .heightIn(min = 24.dp)
             .focusRequester(focusRequester)
             .onFocusChanged { focusState ->
                 if (focusState.isFocused && !selectionMode && !selected && !box.isFocused) {
@@ -269,7 +273,7 @@ private fun InlineText.completeSpanStyle(): SpanStyle {
         textDecoration = if (decorations.isEmpty()) null else TextDecoration.combine(decorations),
         color = textColorArgb?.let(::Color) ?: Color.Unspecified,
         background = highlightColorArgb?.let(::Color) ?: Color.Unspecified,
-        fontSize = (14f * fontScale.coerceIn(0.5f, 4f)).sp,
+        fontSize = (16f * fontScale.coerceIn(0.5f, 4f)).sp,
     )
 }
 
