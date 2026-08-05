@@ -3,13 +3,13 @@ package com.neonote
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,11 +28,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.neonote.engine.DocumentSearchHit
 import com.neonote.engine.DocumentSearchIndex
 
@@ -45,7 +49,9 @@ internal fun DocumentSearchDialog(
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<DocumentSearchHit>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
+    val requester = remember { FocusRequester() }
 
+    LaunchedEffect(Unit) { requester.requestFocus() }
     LaunchedEffect(query) {
         val normalized = query.trim()
         if (normalized.isEmpty()) {
@@ -59,34 +65,52 @@ internal fun DocumentSearchDialog(
         searching = false
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(0.92f).fillMaxHeight(0.82f),
+            modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.88f),
             shape = RoundedCornerShape(22.dp),
             color = MaterialTheme.colorScheme.surface,
             shadowElevation = 18.dp,
         ) {
-            Column(Modifier.padding(18.dp)) {
+            Column(Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Search all notes", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = onDismiss) { Text("Close") }
+                    Text(
+                        "Search all notes",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    TextButton(onClick = onDismiss) { Text("Done") }
                 }
                 BasicTextField(
                     value = query,
                     onValueChange = { query = it.take(300) },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp)
                         .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                        .focusRequester(requester),
                     textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                     decorationBox = { inner ->
-                        if (query.isBlank()) Text(
-                            "Search titles, text, formulas, images and nested tables…",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        inner()
+                        Box {
+                            if (query.isBlank()) {
+                                Text(
+                                    "Search titles, text, formulas, images and tables…",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            inner()
+                        }
                     },
                 )
                 HorizontalDivider(Modifier.padding(vertical = 12.dp))
@@ -100,12 +124,14 @@ internal fun DocumentSearchDialog(
                         Text("Searching local notes…", Modifier.padding(top = 12.dp))
                     }
                     query.isBlank() -> SearchEmptyState(
-                        "Search stays entirely on this device.",
-                        "Results include document titles, sections, pages, formatted text, formulas, image captions and nested table cells.",
+                        title = "Search stays entirely on this device",
+                        description = "Results include note titles, pages, formatted text, formulas, image captions and nested table cells.",
+                        modifier = Modifier.weight(1f),
                     )
                     results.isEmpty() -> SearchEmptyState(
-                        "No matching notes",
-                        "Try fewer words or a broader phrase.",
+                        title = "No matching notes",
+                        description = "Try fewer words or a broader phrase.",
+                        modifier = Modifier.weight(1f),
                     )
                     else -> LazyColumn(
                         modifier = Modifier.weight(1f),
@@ -113,7 +139,7 @@ internal fun DocumentSearchDialog(
                     ) {
                         items(
                             items = results,
-                            key = { "${it.documentId}:${it.pageId}:${it.score}" },
+                            key = { "${it.documentId}:${it.pageId}" },
                         ) { hit ->
                             SearchResultCard(hit) { onOpenResult(hit) }
                         }
@@ -132,17 +158,13 @@ private fun SearchResultCard(hit: DocumentSearchHit, onClick: () -> Unit) {
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    hit.pageTitle,
-                    modifier = Modifier.weight(1f),
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text("${hit.score}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-            }
+            Text(
+                hit.pageTitle,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Text(
                 "${hit.documentTitle}  ›  ${hit.sectionTitle}",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -163,17 +185,28 @@ private fun SearchResultCard(hit: DocumentSearchHit, onClick: () -> Unit) {
 }
 
 @Composable
-private fun SearchEmptyState(title: String, description: String) {
+private fun SearchEmptyState(
+    title: String,
+    description: String,
+    modifier: Modifier = Modifier,
+) {
     Column(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 42.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
-        Text(title, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+        Text(
+            title,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center,
+        )
         Text(
             description,
-            modifier = Modifier.padding(top = 6.dp).width(420.dp),
+            modifier = Modifier.fillMaxWidth().padding(top = 7.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center,
         )
     }
 }
