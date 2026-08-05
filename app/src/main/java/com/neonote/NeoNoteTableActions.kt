@@ -1,7 +1,6 @@
 package com.neonote
 
 import com.neonote.engine.ActiveRichContentTarget
-import com.neonote.engine.RichContentMeasurer
 import com.neonote.engine.RichContentTree
 import com.neonote.engine.TableMergeEngine
 import com.neonote.engine.gridColumnCount
@@ -94,9 +93,9 @@ internal fun NeoNoteEditorController.cycleActiveTableCellAlignment(boxId: String
         })
     }
 
-private inline fun NeoNoteEditorController.mutateActiveTable(
+private fun NeoNoteEditorController.mutateActiveTable(
     boxId: String,
-    crossinline transform: (TableNode, TableCellAddress) -> TableNode,
+    transform: (TableNode, TableCellAddress) -> TableNode,
 ) {
     val address = (activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell)?.address ?: return
     mutateTableDocument(boxId, address) { content ->
@@ -104,9 +103,9 @@ private inline fun NeoNoteEditorController.mutateActiveTable(
     }
 }
 
-private inline fun NeoNoteEditorController.mutateActiveCell(
+private fun NeoNoteEditorController.mutateActiveCell(
     boxId: String,
-    crossinline transform: (com.neonote.model.TableCell) -> com.neonote.model.TableCell,
+    transform: (com.neonote.model.TableCell) -> com.neonote.model.TableCell,
 ) {
     val active = (activeRichContentTarget(boxId) as? ActiveRichContentTarget.TableCell)?.address ?: return
     val table = RichContentTree.table(
@@ -116,38 +115,17 @@ private inline fun NeoNoteEditorController.mutateActiveCell(
     val step = active.path.last()
     val anchor = table.resolveAnchor(step.rowIndex, step.columnIndex)
     val anchorAddress = active.withLastCell(anchor.first, anchor.second)
-    mutateTableDocument(boxId, anchorAddress) { content -> RichContentTree.updateCell(content, anchorAddress, transform) }
+    mutateTableDocument(boxId, anchorAddress) { content ->
+        RichContentTree.updateCell(content, anchorAddress, transform)
+    }
 }
 
-private inline fun NeoNoteEditorController.mutateTableDocument(
+private fun NeoNoteEditorController.mutateTableDocument(
     boxId: String,
     focusAddress: TableCellAddress,
-    crossinline transform: (com.neonote.model.RichContent) -> com.neonote.model.RichContent,
+    transform: (com.neonote.model.RichContent) -> com.neonote.model.RichContent,
 ) {
-    val original = state
-    val pageId = original.currentPageId ?: return
-    val pageIndex = original.document.pages.indexOfFirst { it.id == pageId }
-    if (pageIndex < 0) return
-    val page = original.document.pages[pageIndex]
-    var changed = false
-    val objects = page.canvas.objects.map { value ->
-        if (value !is RichContentBox || value.id != boxId || value.isLocked) return@map value
-        val nextContent = transform(value.content)
-        if (nextContent == value.content) return@map value
-        changed = true
-        val updated = value.copy(content = nextContent)
-        if (updated.autoSizeHeight) RichContentMeasurer().resizeBoxToMeasuredContent(updated) else updated
-    }
-    if (!changed) return
-    val now = System.currentTimeMillis()
-    val nextPage = page.copy(canvas = page.canvas.copy(objects = objects), updatedAtEpochMillis = now)
-    val document = original.document.copy(
-        pages = original.document.pages.mapIndexed { index, item -> if (index == pageIndex) nextPage else item },
-        revision = original.document.revision + 1,
-        updatedAtEpochMillis = now,
-    )
-    replaceDocument(document, recordHistory = true)
-    if (state.currentPageId != pageId) switchPage(pageId)
+    if (!mutateRichContentBoxContent(boxId, keepFocused = true, transform = transform)) return
     setTool(com.neonote.model.EditorTool.Text)
     focusRichContentTableCell(boxId, focusAddress)
 }
