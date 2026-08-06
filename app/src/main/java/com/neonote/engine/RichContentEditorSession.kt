@@ -54,6 +54,9 @@ public class RichContentEditorSession(
     public var localParagraphEditableBuffer: String = initialBox.paragraphPlainTextOrEmpty(activeBlockIndex)
         private set
 
+    public var activeTableCellSelection: ParagraphTextSelection = ParagraphTextSelection.cursor(0)
+        private set
+
     private val mutablePendingCommands: MutableList<RichContentCommand> = mutableListOf()
     public val pendingCommands: List<RichContentCommand> get() = mutablePendingCommands.toList()
 
@@ -72,11 +75,101 @@ public class RichContentEditorSession(
         setActiveParagraphSelection(selectionStart, selectionEnd)
     }
 
-    public fun focusTableCell(address: TableCellAddress) {
+    public fun focusTableCell(
+        address: TableCellAddress,
+        selectionStart: Int = activeTableCellSelection.start,
+        selectionEnd: Int = selectionStart,
+    ) {
         if (!RichContentTree.isValid(box.content, address)) return
         activeBlockIndex = address.blockIndex.coerceAtLeast(0)
         activeTarget = ActiveRichContentTarget.TableCell(address)
         localParagraphEditableBuffer = tableCellPlainText(address)
+        val length = localParagraphEditableBuffer.length
+        activeTableCellSelection = ParagraphTextSelection(
+            selectionStart.coerceIn(0, length),
+            selectionEnd.coerceIn(0, length),
+        )
+    }
+
+    public fun setActiveTableCellSelection(address: TableCellAddress, start: Int, end: Int = start) {
+        focusTableCell(address, start, end)
+    }
+
+    public fun activeListKind(): ListKind? = when (val target = activeTarget) {
+        is ActiveRichContentTarget.Paragraph ->
+            (box.content.blocks.getOrNull(target.blockIndex) as? ParagraphNode)?.listMetadata?.kind
+        is ActiveRichContentTarget.TableCell ->
+            (RichContentTree.block(box.content, target.address) as? ParagraphNode)?.listMetadata?.kind
+        else -> null
+    }
+
+    public fun activeTableDimensions(): Pair<Int, Int>? {
+        val address = (activeTarget as? ActiveRichContentTarget.TableCell)?.address ?: return null
+        val table = RichContentTree.table(box.content, address) ?: return null
+        return table.rows.size to (table.rows.maxOfOrNull { it.size } ?: 0)
+    }
+
+    /**
+     * Keyboard traversal follows the visual cell order. Tab on the last cell creates
+     * one new row and moves into its first cell; Shift+Tab at the first cell stays put.
+     */
+    public fun moveTableCellFocus(forward: Boolean): RichContentEditorEdit {
+        val address = (activeTarget as? ActiveRichContentTarget.TableCell)?.address ?: return noCommandEdit()
+        val table = RichContentTree.table(box.content, address) ?: return noCommandEdit()
+        val rowCount = table.rows.size.coerceAtLeast(1)
+        val columnCount = (table.rows.maxOfOrNull { it.size } ?: 0).coerceAtLeast(1)
+        val current = address.path.last()
+        val currentFlat = current.rowIndex.coerceIn(0, rowCount - 1) * columnCount +
+            current.columnIndex.coerceIn(0, columnCount - 1)
+        var targetFlat = currentFlat + if (forward) 1 else -1
+        var edit = noCommandEdit()
+        if (!forward && targetFlat < 0) {
+            focusTableCell(address.withContainingCell(0, 0).withContentBlock(0), 0)
+            return noCommandEdit()
+        }
+        if (forward && targetFlat >= rowCount * columnCount) {
+            edit = addTableRow(address)
+            targetFlat = rowCount * columnCount
+        }
+        val targetRow = targetFlat / columnCount
+        val targetColumn = targetFlat % columnCount
+        val targetCell = address.withContainingCell(targetRow, targetColumn)
+        val firstBlock = RichContentTree.cellContent(box.content, targetCell)
+            ?.blocks
+            ?.indexOfFirst { it is ParagraphNode }
+            ?.takeIf { it >= 0 }
+            ?: 0
+        focusTableCell(targetCell.withContentBlock(firstBlock), 0)
+        return edit.copy(box = box, selection = selection)
+    }
+
+    public fun unifiedPlainSelection(): ParagraphTextSelection = ParagraphTextSelection(
+        start = box.plainOffsetOf(selection.start),
+        end = box.plainOffsetOf(selection.end),
+    )
+
+    public fun paragraphPlatformSelection(blockIndex: Int): ParagraphTextSelection? =
+        activeParagraphSelection.takeIf {
+            (activeTarget as? ActiveRichContentTarget.Paragraph)?.blockIndex == blockIndex
+        }
+
+    public fun tableCellPlatformSelection(address: TableCellAddress): ParagraphTextSelection? =
+        activeTableCellSelection.takeIf {
+            (activeTarget as? ActiveRichContentTarget.TableCell)?.address == address
+        }
+
+    /**
+     * Formatting reflected by the current caret or selection. Explicit typing
+     * overrides win; otherwise the surrounding content drives toolbar state.
+     */
+    public fun contextualTypingStyle(): TypingStyle = when (val target = activeTarget) {
+        is ActiveRichContentTarget.TableCell -> {
+            val localSelection = activeTableCellTextSelection(target.address)
+            val content = RichContentTree.cellContent(box.content, target.address)
+            content?.contextualTypingStyle(localSelection, typingStyle) ?: typingStyle
+        }
+        is ActiveRichContentTarget.Paragraph -> box.content.contextualTypingStyle(selection, typingStyle)
+        else -> typingStyle
     }
 
     public fun focusFormulaBlock(blockIndex: Int) {
@@ -141,8 +234,22 @@ public class RichContentEditorSession(
         applyCommand(RichContentCommand.DeleteSelection(selection))
 
     public fun toggleStyle(style: InlineStyle): RichContentEditorEdit {
+        val cell = activeTarget as? ActiveRichContentTarget.TableCell
+        if (cell != null) {
+            if (activeTableCellSelection.isCollapsed) {
+                typingStyle = typingStyle.withStyle(style, !contextualTypingStyle().hasStyle(style))
+                return noCommandEdit()
+            }
+            val local = activeTableCellTextSelection(cell.address)
+            return applyCellCommand(cell.address, when (style) {
+                InlineStyle.Bold -> RichContentCommand.ToggleBold(local)
+                InlineStyle.Italic -> RichContentCommand.ToggleItalic(local)
+                InlineStyle.Underline -> RichContentCommand.ToggleUnderline(local)
+                InlineStyle.Strikethrough -> RichContentCommand.ToggleStrikethrough(local)
+            })
+        }
         if (selection.isCollapsed) {
-            typingStyle = typingStyle.toggled(style)
+            typingStyle = typingStyle.withStyle(style, !contextualTypingStyle().hasStyle(style))
             return noCommandEdit()
         }
         return applyCommand(when (style) {
@@ -159,6 +266,14 @@ public class RichContentEditorSession(
     public fun toggleStrikethrough(): RichContentEditorEdit = toggleStyle(InlineStyle.Strikethrough)
 
     public fun setTextColor(colorArgb: Int?): RichContentEditorEdit {
+        val cell = activeTarget as? ActiveRichContentTarget.TableCell
+        if (cell != null) {
+            if (activeTableCellSelection.isCollapsed) {
+                typingStyle = typingStyle.copy(textColorArgb = colorArgb)
+                return noCommandEdit()
+            }
+            return applyCellCommand(cell.address, RichContentCommand.SetTextColor(activeTableCellTextSelection(cell.address), colorArgb))
+        }
         if (selection.isCollapsed) {
             typingStyle = typingStyle.copy(textColorArgb = colorArgb)
             return noCommandEdit()
@@ -167,6 +282,14 @@ public class RichContentEditorSession(
     }
 
     public fun setHighlightColor(colorArgb: Int?): RichContentEditorEdit {
+        val cell = activeTarget as? ActiveRichContentTarget.TableCell
+        if (cell != null) {
+            if (activeTableCellSelection.isCollapsed) {
+                typingStyle = typingStyle.copy(highlightColorArgb = colorArgb)
+                return noCommandEdit()
+            }
+            return applyCellCommand(cell.address, RichContentCommand.SetHighlightColor(activeTableCellTextSelection(cell.address), colorArgb))
+        }
         if (selection.isCollapsed) {
             typingStyle = typingStyle.copy(highlightColorArgb = colorArgb)
             return noCommandEdit()
@@ -183,6 +306,14 @@ public class RichContentEditorSession(
     }
 
     public fun setLink(url: String?): RichContentEditorEdit {
+        val cell = activeTarget as? ActiveRichContentTarget.TableCell
+        if (cell != null) {
+            if (activeTableCellSelection.isCollapsed) {
+                typingStyle = typingStyle.copy(link = url?.takeIf(String::isNotBlank))
+                return noCommandEdit()
+            }
+            return applyCellCommand(cell.address, RichContentCommand.SetLink(activeTableCellTextSelection(cell.address), url))
+        }
         if (selection.isCollapsed) {
             typingStyle = typingStyle.copy(link = url?.takeIf(String::isNotBlank))
             return noCommandEdit()
@@ -190,11 +321,16 @@ public class RichContentEditorSession(
         return applyCommand(RichContentCommand.SetLink(selection, url))
     }
 
-    public fun toggleList(kind: ListKind): RichContentEditorEdit = applyCommand(when (kind) {
-        ListKind.Bullet -> RichContentCommand.ToggleBulletList(selection)
-        ListKind.Numbered -> RichContentCommand.ToggleNumberedList(selection)
-        ListKind.Todo -> RichContentCommand.ToggleTodo(selection)
-    })
+    public fun toggleList(kind: ListKind): RichContentEditorEdit {
+        val cell = activeTarget as? ActiveRichContentTarget.TableCell
+        val targetSelection = if (cell != null) activeTableCellTextSelection(cell.address) else selection
+        val command = when (kind) {
+            ListKind.Bullet -> RichContentCommand.ToggleBulletList(targetSelection)
+            ListKind.Numbered -> RichContentCommand.ToggleNumberedList(targetSelection)
+            ListKind.Todo -> RichContentCommand.ToggleTodo(targetSelection)
+        }
+        return if (cell != null) applyCellCommand(cell.address, command) else applyCommand(command)
+    }
 
     public fun toggleBulletList(): RichContentEditorEdit = toggleList(ListKind.Bullet)
     public fun toggleNumberedList(): RichContentEditorEdit = toggleList(ListKind.Numbered)
@@ -202,14 +338,27 @@ public class RichContentEditorSession(
     public fun toggleTodoCheckedState(blockIndex: Int): RichContentEditorEdit =
         applyCommand(RichContentCommand.ToggleTodoCheckedState(blockIndex))
 
-    public fun setParagraphAlignment(alignment: TextAlignment): RichContentEditorEdit =
-        applyCommand(RichContentCommand.SetParagraphAlignment(selection, alignment))
+    public fun toggleActiveTodoCheckedState(): RichContentEditorEdit {
+        val cell = activeTarget as? ActiveRichContentTarget.TableCell
+            ?: return toggleTodoCheckedState(activeBlockIndex)
+        return applyCellCommand(cell.address, RichContentCommand.ToggleTodoCheckedState(cell.address.contentBlockIndex))
+    }
 
-    public fun setHeadingLevel(level: Int): RichContentEditorEdit =
-        applyCommand(RichContentCommand.SetHeadingLevel(selection, level))
+    public fun setParagraphAlignment(alignment: TextAlignment): RichContentEditorEdit = contextualParagraphCommand {
+        RichContentCommand.SetParagraphAlignment(it, alignment)
+    }
 
-    public fun changeIndent(delta: Int): RichContentEditorEdit =
-        applyCommand(RichContentCommand.ChangeIndent(selection, delta))
+    public fun setHeadingLevel(level: Int): RichContentEditorEdit = contextualParagraphCommand {
+        RichContentCommand.SetHeadingLevel(it, level)
+    }
+
+    public fun changeIndent(delta: Int): RichContentEditorEdit = contextualParagraphCommand {
+        RichContentCommand.ChangeIndent(it, delta)
+    }
+
+    public fun insertLineBreak(): RichContentEditorEdit = contextualParagraphCommand {
+        RichContentCommand.InsertLineBreak(it)
+    }
 
     public fun insertTablePlaceholder(rows: Int = 2, columns: Int = 2): RichContentEditorEdit {
         val index = activeBlockInsertionIndex()
@@ -236,6 +385,123 @@ public class RichContentEditorSession(
         return edit
     }
 
+    public fun insertFormulaInCell(address: TableCellAddress, expression: String = ""): RichContentEditorEdit {
+        focusTableCell(address)
+        val insertion = address.contentBlockIndex.coerceAtLeast(0)
+        val next = RichContentTree.insertBlock(box.content, address, BlockFormula(expression = expression), insertion)
+        if (next == box.content) return noCommandEdit()
+        box = box.copy(content = next)
+        activeTarget = ActiveRichContentTarget.TableCell(address.copy(contentBlockIndex = insertion))
+        localEditableBuffer = box.toPlainText()
+        localParagraphEditableBuffer = tableCellPlainText(address)
+        return RichContentEditorEdit(box, selection, emptyList())
+    }
+
+    public fun insertImageInCell(address: TableCellAddress, assetId: String, altText: String? = null): RichContentEditorEdit {
+        focusTableCell(address)
+        val insertion = address.contentBlockIndex.coerceAtLeast(0)
+        val next = RichContentTree.insertBlock(box.content, address, BlockImage(assetId = assetId, altText = altText), insertion)
+        if (next == box.content) return noCommandEdit()
+        box = box.copy(content = next)
+        activeTarget = ActiveRichContentTarget.TableCell(address.copy(contentBlockIndex = insertion))
+        localEditableBuffer = box.toPlainText()
+        localParagraphEditableBuffer = tableCellPlainText(address)
+        return RichContentEditorEdit(box, selection, emptyList())
+    }
+
+    public fun updateNestedFormula(
+        address: TableCellAddress,
+        expression: String? = null,
+        displayMode: FormulaDisplayMode? = null,
+        numbered: Boolean? = null,
+    ): RichContentEditorEdit {
+        val formula = RichContentTree.block(box.content, address) as? BlockFormula ?: return noCommandEdit()
+        val replacement = formula.copy(
+            expression = expression ?: formula.expression,
+            displayMode = displayMode ?: formula.displayMode,
+            numbered = numbered ?: formula.numbered,
+        )
+        val next = RichContentTree.replaceBlock(box.content, address, replacement)
+        if (next == box.content) return noCommandEdit()
+        box = box.copy(content = next)
+        activeTarget = ActiveRichContentTarget.TableCell(address)
+        activeBlockIndex = address.blockIndex
+        localEditableBuffer = box.toPlainText()
+        return RichContentEditorEdit(box, selection, emptyList())
+    }
+
+    public fun updateNestedImage(
+        address: TableCellAddress,
+        width: Float? = null,
+        height: Float? = null,
+        rotationDegrees: Float? = null,
+        crop: ImageCrop? = null,
+        caption: String? = null,
+        replacementAssetId: String? = null,
+    ): RichContentEditorEdit {
+        val image = RichContentTree.block(box.content, address) as? BlockImage ?: return noCommandEdit()
+        val replacement = image.copy(
+            assetId = replacementAssetId ?: image.assetId,
+            width = width ?: image.width,
+            height = height ?: image.height,
+            rotationDegrees = rotationDegrees ?: image.rotationDegrees,
+            crop = (crop ?: image.crop).normalized(),
+            caption = caption ?: image.caption,
+        )
+        val next = RichContentTree.replaceBlock(box.content, address, replacement)
+        if (next == box.content) return noCommandEdit()
+        box = box.copy(content = next)
+        activeTarget = ActiveRichContentTarget.TableCell(address)
+        activeBlockIndex = address.blockIndex
+        localEditableBuffer = box.toPlainText()
+        return RichContentEditorEdit(box, selection, emptyList())
+    }
+
+    public fun deleteNestedBlock(address: TableCellAddress): RichContentEditorEdit {
+        var next = RichContentTree.deleteBlock(box.content, address)
+        val cellContent = RichContentTree.cellContent(next, address)
+        if (cellContent != null && cellContent.blocks.isEmpty()) {
+            next = RichContentTree.updateCellContent(next, address) { RichContent(listOf(ParagraphNode())) }
+        }
+        if (next == box.content) return noCommandEdit()
+        box = box.copy(content = next)
+        val parentAddress = address.withContentBlock(0)
+        activeTarget = if (RichContentTree.isValid(box.content, parentAddress)) {
+            ActiveRichContentTarget.TableCell(parentAddress)
+        } else ActiveRichContentTarget.Paragraph(box.coerceParagraphBlockIndex(address.blockIndex))
+        activeBlockIndex = activeTarget.blockIndexForSession()
+        localEditableBuffer = box.toPlainText()
+        syncActiveParagraphFromSelection()
+        return RichContentEditorEdit(box, selection, emptyList())
+    }
+
+    public fun deleteTable(address: TableCellAddress): RichContentEditorEdit {
+        val path = address.path
+        if (path.isEmpty()) return noCommandEdit()
+        if (path.size == 1) return deleteBlock(path.first().tableBlockIndex)
+        val first = path.first()
+        val parentPath = path.dropLast(1)
+        val currentTable = path.last()
+        val tableBlockInParent = TableCellAddress(
+            blockIndex = first.tableBlockIndex,
+            rowIndex = first.rowIndex,
+            columnIndex = first.columnIndex,
+            contentBlockIndex = currentTable.tableBlockIndex,
+            nestedPath = parentPath.drop(1),
+        )
+        val next = RichContentTree.deleteBlock(box.content, tableBlockInParent)
+        if (next == box.content) return noCommandEdit()
+        box = box.copy(content = next)
+        val parentCell = tableBlockInParent.copy(contentBlockIndex = 0)
+        activeTarget = if (RichContentTree.isValid(box.content, parentCell)) {
+            ActiveRichContentTarget.TableCell(parentCell)
+        } else ActiveRichContentTarget.Paragraph(box.coerceParagraphBlockIndex(first.tableBlockIndex))
+        activeBlockIndex = activeTarget.blockIndexForSession()
+        localEditableBuffer = box.toPlainText()
+        syncActiveParagraphFromSelection()
+        return RichContentEditorEdit(box, selection, emptyList())
+    }
+
     public fun addTableRow(address: TableCellAddress, after: Boolean = true): RichContentEditorEdit =
         tableCommand(address, RichContentCommand.AddTableRow(address, after))
 
@@ -260,6 +526,34 @@ public class RichContentEditorSession(
             ActiveRichContentTarget.Paragraph(box.coerceParagraphBlockIndex(address.blockIndex))
         }
         return edit
+    }
+
+    public fun continueAfterFormula(blockIndex: Int): RichContentEditorEdit {
+        if (box.content.blocks.getOrNull(blockIndex) !is BlockFormula) return noCommandEdit()
+        val targetIndex = (blockIndex + 1).coerceAtMost(box.content.blocks.size)
+        val edit = if (box.content.blocks.getOrNull(targetIndex) is ParagraphNode) {
+            noCommandEdit()
+        } else {
+            ensureTrailingParagraphAfter(blockIndex)
+        }
+        focusParagraph(targetIndex.coerceIn(0, box.content.blocks.lastIndex.coerceAtLeast(0)), 0)
+        return edit.copy(box = box, selection = selection)
+    }
+
+    public fun continueAfterNestedBlock(address: TableCellAddress): RichContentEditorEdit {
+        val cellContent = RichContentTree.cellContent(box.content, address) ?: return noCommandEdit()
+        val targetIndex = (address.contentBlockIndex + 1).coerceIn(0, cellContent.blocks.size)
+        val nextContent = if (cellContent.blocks.getOrNull(targetIndex) is ParagraphNode) {
+            box.content
+        } else {
+            RichContentTree.insertBlock(box.content, address, ParagraphNode(), targetIndex)
+        }
+        if (nextContent != box.content) box = box.copy(content = nextContent)
+        val target = address.withContentBlock(targetIndex.coerceIn(0,
+            (RichContentTree.cellContent(box.content, address)?.blocks?.lastIndex ?: 0).coerceAtLeast(0)))
+        focusTableCell(target, 0)
+        localEditableBuffer = box.toPlainText()
+        return RichContentEditorEdit(box, selection, emptyList())
     }
 
     public fun insertBlockFormulaPlaceholder(expression: String = ""): RichContentEditorEdit {
@@ -427,18 +721,85 @@ public class RichContentEditorSession(
 
     public fun replaceTableCellParagraphFromPlatformInput(
         address: TableCellAddress,
+        previousText: String,
         nextText: String,
+        selectionStart: Int,
+        selectionEnd: Int = selectionStart,
     ): RichContentEditorEdit {
-        focusTableCell(address)
-        val edit = applyCommandPreservingTarget(RichContentCommand.ReplaceTableCellParagraphText(address, nextText))
-        activeBlockIndex = address.blockIndex
-        activeTarget = ActiveRichContentTarget.TableCell(address)
-        localParagraphEditableBuffer = nextText
+        focusTableCell(address, activeTableCellSelection.start, activeTableCellSelection.end)
+        if (previousText != localParagraphEditableBuffer) localParagraphEditableBuffer = previousText
+        if (nextText == localParagraphEditableBuffer) {
+            setActiveTableCellSelection(address, selectionStart, selectionEnd)
+            return noCommandEdit()
+        }
+        val diff = TextDiff.between(localParagraphEditableBuffer, nextText)
+        val localSelection = TextSelection(TextRange(
+            TextCursorPosition(address.contentBlockIndex, diff.deletedStart),
+            TextCursorPosition(address.contentBlockIndex, diff.deletedEnd),
+        ))
+        val command = when {
+            diff.insertedText == "\n" && diff.deletedStart == diff.deletedEnd ->
+                RichContentCommand.InsertParagraph(selection = localSelection)
+            diff.insertedText.isEmpty() && diff.deletedEnd > diff.deletedStart -> {
+                if (diff.deletedEnd - diff.deletedStart == 1) {
+                    RichContentCommand.DeleteBackward(TextSelection.cursor(localSelection.end))
+                } else RichContentCommand.DeleteSelection(localSelection)
+            }
+            '\n' in diff.insertedText || '\r' in diff.insertedText ->
+                RichContentCommand.PastePlainText(diff.insertedText, localSelection, typingStyle)
+            else -> RichContentCommand.InsertText(diff.insertedText, localSelection, typingStyle)
+        }
+        val edit = applyCellCommand(address, command)
+        val nextAddress = (activeTarget as? ActiveRichContentTarget.TableCell)?.address ?: address
+        setActiveTableCellSelection(nextAddress, selectionStart, selectionEnd)
+        localParagraphEditableBuffer = tableCellPlainText(nextAddress)
         return edit
     }
 
     public fun tableCellPlainText(address: TableCellAddress): String =
         (RichContentTree.block(box.content, address) as? ParagraphNode)?.plainText().orEmpty()
+
+    private fun activeTableCellTextSelection(address: TableCellAddress): TextSelection = TextSelection(TextRange(
+        TextCursorPosition(address.contentBlockIndex, activeTableCellSelection.start),
+        TextCursorPosition(address.contentBlockIndex, activeTableCellSelection.end),
+    ))
+
+    private fun contextualParagraphCommand(factory: (TextSelection) -> RichContentCommand): RichContentEditorEdit {
+        val cell = activeTarget as? ActiveRichContentTarget.TableCell
+        return if (cell != null) applyCellCommand(cell.address, factory(activeTableCellTextSelection(cell.address)))
+        else applyCommand(factory(selection))
+    }
+
+    private fun applyCellCommand(address: TableCellAddress, command: RichContentCommand): RichContentEditorEdit {
+        val cellContent = RichContentTree.cellContent(box.content, address) ?: return noCommandEdit()
+        val cellBox = RichContentBox(id = "cell-editor", content = cellContent)
+        val result = engine.execute(cellBox, command)
+        val editedBox = when (result) {
+            is RichContentCommandResult.ContentEdited -> result.box
+            is RichContentCommandResult.ContentInserted -> result.box
+            is RichContentCommandResult.ContentReplaced -> result.box
+        }
+        val editedSelection = when (result) {
+            is RichContentCommandResult.ContentEdited -> result.selection
+            is RichContentCommandResult.ContentInserted -> TextSelection.cursor(editedBox.content.endCursorPosition())
+            is RichContentCommandResult.ContentReplaced -> TextSelection.cursor(editedBox.content.endCursorPosition())
+        }
+        val nextContent = RichContentTree.updateCellContent(box.content, address) { editedBox.content }
+        box = box.copy(content = nextContent)
+        val nextBlockIndex = editedSelection.start.blockIndex.coerceIn(0, editedBox.content.blocks.lastIndex.coerceAtLeast(0))
+        val nextAddress = address.copy(contentBlockIndex = nextBlockIndex)
+        activeTarget = ActiveRichContentTarget.TableCell(nextAddress)
+        activeBlockIndex = address.blockIndex
+        val nextLength = tableCellPlainText(nextAddress).length
+        activeTableCellSelection = ParagraphTextSelection(
+            editedSelection.start.inlineOffset.coerceIn(0, nextLength),
+            editedSelection.end.inlineOffset.coerceIn(0, nextLength),
+        )
+        localEditableBuffer = box.toPlainText()
+        localParagraphEditableBuffer = tableCellPlainText(nextAddress)
+        mutablePendingCommands += command
+        return RichContentEditorEdit(box, selection, listOf(command))
+    }
 
     public fun drainPendingCommands(): List<RichContentCommand> = pendingCommands.also { mutablePendingCommands.clear() }
 
@@ -503,6 +864,19 @@ public data class ParagraphTextSelection(val start: Int, val end: Int = start) {
     public companion object { public fun cursor(offset: Int): ParagraphTextSelection = ParagraphTextSelection(offset) }
 }
 
+private fun TableCellAddress.withContainingCell(rowIndex: Int, columnIndex: Int): TableCellAddress =
+    if (nestedPath.isEmpty()) {
+        copy(rowIndex = rowIndex, columnIndex = columnIndex, contentBlockIndex = 0)
+    } else {
+        copy(
+            nestedPath = nestedPath.dropLast(1) + nestedPath.last().copy(
+                rowIndex = rowIndex,
+                columnIndex = columnIndex,
+            ),
+            contentBlockIndex = 0,
+        )
+    }
+
 public data class TypingStyle(
     val bold: Boolean = false,
     val italic: Boolean = false,
@@ -517,11 +891,20 @@ public data class TypingStyle(
     val isExplicitUnderline: Boolean = underline,
     val isExplicitStrikethrough: Boolean = strikethrough,
 ) {
-    public fun toggled(style: InlineStyle): TypingStyle = when (style) {
-        InlineStyle.Bold -> copy(bold = !bold, isExplicitBold = true)
-        InlineStyle.Italic -> copy(italic = !italic, isExplicitItalic = true)
-        InlineStyle.Underline -> copy(underline = !underline, isExplicitUnderline = true)
-        InlineStyle.Strikethrough -> copy(strikethrough = !strikethrough, isExplicitStrikethrough = true)
+    public fun toggled(style: InlineStyle): TypingStyle = withStyle(style, !hasStyle(style))
+
+    public fun hasStyle(style: InlineStyle): Boolean = when (style) {
+        InlineStyle.Bold -> bold
+        InlineStyle.Italic -> italic
+        InlineStyle.Underline -> underline
+        InlineStyle.Strikethrough -> strikethrough
+    }
+
+    public fun withStyle(style: InlineStyle, enabled: Boolean): TypingStyle = when (style) {
+        InlineStyle.Bold -> copy(bold = enabled, isExplicitBold = true)
+        InlineStyle.Italic -> copy(italic = enabled, isExplicitItalic = true)
+        InlineStyle.Underline -> copy(underline = enabled, isExplicitUnderline = true)
+        InlineStyle.Strikethrough -> copy(strikethrough = enabled, isExplicitStrikethrough = true)
     }
 }
 
@@ -642,6 +1025,79 @@ private fun ParagraphNode.textLength(): Int = inlines.sumOf { inline -> when (in
     is InlineText -> inline.text.length
     InlineLineBreak, is InlineFormula, is InlineImage -> 1
 } }
+
+private data class ContextualInlineStyle(
+    val bold: Boolean,
+    val italic: Boolean,
+    val underline: Boolean,
+    val strikethrough: Boolean,
+    val textColorArgb: Int?,
+    val highlightColorArgb: Int?,
+    val fontScale: Float,
+    val link: String?,
+)
+
+private fun InlineText.contextualStyles(): List<ContextualInlineStyle> = List(text.length) {
+    ContextualInlineStyle(
+        bold = bold,
+        italic = italic,
+        underline = underline,
+        strikethrough = strikethrough,
+        textColorArgb = textColorArgb,
+        highlightColorArgb = highlightColorArgb,
+        fontScale = fontScale,
+        link = link,
+    )
+}
+
+private fun ParagraphNode.contextualStyles(): List<ContextualInlineStyle?> = inlines.flatMap { inline ->
+    when (inline) {
+        is InlineText -> inline.contextualStyles()
+        InlineLineBreak, is InlineFormula, is InlineImage -> listOf(null)
+    }
+}
+
+private fun com.neonote.model.RichContent.contextualTypingStyle(
+    rawSelection: TextSelection,
+    fallback: TypingStyle,
+): TypingStyle {
+    if (blocks.isEmpty()) return fallback
+    val selection = rawSelection.ordered()
+    val styles = mutableListOf<ContextualInlineStyle>()
+    if (selection.isCollapsed) {
+        val paragraph = blocks.getOrNull(selection.start.blockIndex) as? ParagraphNode ?: return fallback
+        val chars = paragraph.contextualStyles()
+        if (chars.isEmpty()) return fallback
+        val caret = selection.start.inlineOffset.coerceIn(0, chars.size)
+        val nearby = (caret - 1 downTo 0).firstNotNullOfOrNull { chars[it] }
+            ?: (caret until chars.size).firstNotNullOfOrNull { chars[it] }
+        nearby?.let(styles::add)
+    } else {
+        for (blockIndex in selection.start.blockIndex..selection.end.blockIndex) {
+            val paragraph = blocks.getOrNull(blockIndex) as? ParagraphNode ?: continue
+            val chars = paragraph.contextualStyles()
+            val from = if (blockIndex == selection.start.blockIndex) selection.start.inlineOffset else 0
+            val to = if (blockIndex == selection.end.blockIndex) selection.end.inlineOffset else chars.size
+            chars.subList(from.coerceIn(0, chars.size), to.coerceIn(0, chars.size))
+                .filterNotNullTo(styles)
+        }
+    }
+    if (styles.isEmpty()) return fallback
+    fun <T> common(selector: (ContextualInlineStyle) -> T): T? {
+        val first = selector(styles.first())
+        return first.takeIf { styles.all { style -> selector(style) == first } }
+    }
+    return fallback.copy(
+        bold = if (fallback.isExplicitBold) fallback.bold else styles.all { it.bold },
+        italic = if (fallback.isExplicitItalic) fallback.italic else styles.all { it.italic },
+        underline = if (fallback.isExplicitUnderline) fallback.underline else styles.all { it.underline },
+        strikethrough = if (fallback.isExplicitStrikethrough) fallback.strikethrough else styles.all { it.strikethrough },
+        textColorArgb = fallback.textColorArgb ?: common { it.textColorArgb },
+        highlightColorArgb = fallback.highlightColorArgb ?: common { it.highlightColorArgb },
+        fontScale = fallback.fontScale ?: common { it.fontScale },
+        link = fallback.link ?: common { it.link },
+    )
+}
 
 private fun String.modelPlainOffsetOf(platformOffset: Int): Int =
     take(platformOffset.coerceIn(0, length)).replace("\r\n", "\n").replace('\r', '\n').length

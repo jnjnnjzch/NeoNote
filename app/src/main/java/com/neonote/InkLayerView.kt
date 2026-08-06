@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import com.neonote.engine.InkStrokeWidthMapper
 import com.neonote.ink.InkRenderCache
+import com.neonote.model.CanvasRect
 import com.neonote.model.InkBrush
 import com.neonote.model.InkLayer
 import com.neonote.model.InkStroke
@@ -20,6 +21,7 @@ public fun InkLayerView(
     pageId: String?,
     inkLayer: InkLayer,
     activeStroke: InkStroke?,
+    visibleBounds: CanvasRect? = null,
     modifier: Modifier = Modifier,
 ) {
     val cache = remember(pageId) { InkRenderCache() }
@@ -31,7 +33,15 @@ public fun InkLayerView(
     Canvas(modifier = modifier) {
         cacheVersion
         committedTiles.forEach { tile ->
-            drawImage(tile.imageBitmap, topLeft = Offset(tile.originX, tile.originY))
+            val tileBounds = CanvasRect(
+                tile.originX,
+                tile.originY,
+                tile.originX + cache.tileSize,
+                tile.originY + cache.tileSize,
+            )
+            if (visibleBounds == null || tileBounds.intersects(visibleBounds)) {
+                drawImage(tile.imageBitmap, topLeft = Offset(tile.originX, tile.originY))
+            }
         }
         activeStroke?.let { drawInkStroke(it) }
     }
@@ -63,3 +73,6 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawInkStroke(strok
         )
     }
 }
+
+private fun CanvasRect.intersects(other: CanvasRect): Boolean =
+    right >= other.left && left <= other.right && bottom >= other.top && top <= other.bottom

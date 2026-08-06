@@ -55,7 +55,11 @@ class DocumentSearchTest {
             assertEquals("page", search.search("counterfactual").single().pageId)
             assertEquals("page", search.search("D_post").single().pageId)
             assertEquals("page", search.search("population geometry").single().pageId)
-            assertEquals("page", search.search("deeply nested evidence").single().pageId)
+            val nestedHit = search.search("deeply nested evidence").single()
+            assertEquals("page", nestedHit.pageId)
+            assertEquals("box", nestedHit.targetObjectId)
+            assertTrue(nestedHit.targetX != null && nestedHit.targetY != null)
+            assertTrue(search.search("asset").isEmpty())
             assertTrue(search.search("missing phrase").isEmpty())
         } finally {
             root.deleteRecursively()

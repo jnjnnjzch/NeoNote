@@ -23,6 +23,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -82,6 +83,7 @@ internal fun RichContentRenderer(
         }
         var numberedIndex = 0
         var previousNumbered = false
+        var formulaNumber = 0
         content.blocks.forEachIndexed { blockIndex, block ->
             when (block) {
                 is ParagraphNode -> {
@@ -104,16 +106,18 @@ internal fun RichContentRenderer(
                     )
                 }
                 is BlockFormula -> {
-                    numberedIndex = 0
-                    previousNumbered = false
+                    numberedIndex = 0; previousNumbered = false
                     val rendered = MathExpressionFormatter.render(block.expression)
-                    StaticBlockCard(
-                        label = if (rendered.isValid) "Formula" else "Formula error",
-                        accent = "ƒx",
-                        text = rendered.displayText.ifBlank { "Enter formula" } +
-                            if (block.numbered) "  (${blockIndex + 1})" else "",
-                        error = !rendered.isValid,
-                    )
+                    if (block.numbered) formulaNumber += 1
+                    if (block.expression.isNotBlank()) {
+                        Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(rendered.displayText.ifBlank { block.expression }, Modifier.weight(1f),
+                                color = if (rendered.isValid) Color(0xFF171326) else Color(0xFFB42318),
+                                fontSize = if (block.displayMode == com.neonote.model.FormulaDisplayMode.Display) 24.sp else 18.sp,
+                                fontFamily = FontFamily.Serif, fontWeight = FontWeight.Medium)
+                            if (block.numbered) Text("($formulaNumber)", color = Color(0xFF817A8E), style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
                 }
                 is BlockImage -> {
                     numberedIndex = 0

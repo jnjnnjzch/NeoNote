@@ -28,6 +28,9 @@ public data class DocumentSearchHit(
     val pageTitle: String,
     val snippet: String,
     val score: Int,
+    val targetObjectId: String? = null,
+    val targetX: Float? = null,
+    val targetY: Float? = null,
 )
 
 public interface DocumentSearchIndex {
@@ -78,7 +81,8 @@ public class FileDocumentSearchIndex(
         return pages.mapNotNull { page ->
             val sectionId = effectiveSectionId(page)
             val section = sectionsById.getValue(sectionId)
-            val pageBody = page.searchableBody()
+            val searchableObjects = page.searchableObjects()
+            val pageBody = searchableObjects.joinToString("\n", transform = SearchableCanvasObject::text)
             val fields = SearchFields(
                 documentTitle = title,
                 sectionTitle = section.title,
@@ -87,6 +91,11 @@ public class FileDocumentSearchIndex(
             )
             val score = fields.score(terms)
             if (score <= 0 || !terms.all(fields.normalizedCorpus::contains)) return@mapNotNull null
+            val bestTarget = searchableObjects
+                .map { candidate -> candidate to candidate.text.matchScore(terms) }
+                .filter { (_, targetScore) -> targetScore > 0 }
+                .maxByOrNull { (_, targetScore) -> targetScore }
+                ?.first
             DocumentSearchHit(
                 documentId = id,
                 documentTitle = title,
@@ -94,8 +103,11 @@ public class FileDocumentSearchIndex(
                 sectionTitle = section.title,
                 pageId = page.id,
                 pageTitle = page.title.ifBlank { "Untitled page" },
-                snippet = pageBody.bestSnippet(terms),
+                snippet = (bestTarget?.text ?: pageBody).bestSnippet(terms),
                 score = score,
+                targetObjectId = bestTarget?.objectId,
+                targetX = bestTarget?.centerX,
+                targetY = bestTarget?.centerY,
             )
         }
     }
@@ -134,13 +146,30 @@ private fun String.matchWeight(term: String, weight: Int): Int {
     return exactBonus + count.coerceAtMost(12) * weight
 }
 
-private fun com.neonote.model.NotePage.searchableBody(): String = buildString {
-    canvas.objects.sortedBy { it.zIndex }.forEach { objectValue ->
-        when (objectValue) {
-            is RichContentBox -> appendLine(objectValue.content.searchableText())
-            is FloatingImage -> appendLine(listOfNotNull(objectValue.altText, objectValue.assetId).joinToString(" "))
-        }
+private data class SearchableCanvasObject(
+    val objectId: String,
+    val text: String,
+    val centerX: Float,
+    val centerY: Float,
+)
+
+private fun com.neonote.model.NotePage.searchableObjects(): List<SearchableCanvasObject> =
+    canvas.objects.sortedBy { it.zIndex }.mapNotNull { objectValue ->
+        val text = when (objectValue) {
+            is RichContentBox -> objectValue.content.searchableText()
+            is FloatingImage -> objectValue.altText.orEmpty()
+        }.trim()
+        if (text.isBlank()) null else SearchableCanvasObject(
+            objectId = objectValue.id,
+            text = text,
+            centerX = objectValue.bounds.center.x,
+            centerY = objectValue.bounds.center.y,
+        )
     }
+
+private fun String.matchScore(terms: List<String>): Int {
+    val normalized = normalizedSearchText()
+    return terms.sumOf { term -> if (term in normalized) 1 + normalized.windowed(term.length).count { it == term } else 0 }
 }
 
 private fun RichContent.searchableText(): String = blocks.joinToString("\n", transform = BlockNode::searchableText)
@@ -148,7 +177,7 @@ private fun RichContent.searchableText(): String = blocks.joinToString("\n", tra
 private fun BlockNode.searchableText(): String = when (this) {
     is ParagraphNode -> inlines.joinToString("", transform = InlineNode::searchableText)
     is BlockFormula -> expression
-    is BlockImage -> listOfNotNull(altText, caption, assetId).joinToString(" ")
+    is BlockImage -> listOfNotNull(altText, caption).joinToString(" ")
     is TableNode -> rows.flatten().joinToString("\n") { it.content.searchableText() }
 }
 
@@ -156,7 +185,7 @@ private fun InlineNode.searchableText(): String = when (this) {
     is InlineText -> text
     InlineLineBreak -> "\n"
     is InlineFormula -> expression
-    is InlineImage -> listOfNotNull(altText, assetId).joinToString(" ")
+    is InlineImage -> altText.orEmpty()
 }
 
 private fun String.bestSnippet(terms: List<String>): String {

@@ -3,6 +3,8 @@ package com.neonote
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -16,6 +18,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -69,148 +72,91 @@ internal fun RichParagraphEditor(
     selectionMode: Boolean,
     selected: Boolean,
     controller: NeoNoteEditorController,
+    markerNumber: Int = 0,
     modifier: Modifier = Modifier,
 ) {
-    if (!active) {
-        RichContentRenderer(
-            content = RichContent(blocks = listOf(paragraph)),
-            selectionMode = selectionMode,
-            selected = selected,
-            onFocus = { controller.focusRichContentParagraph(box.id, blockIndex, paragraph.plainTextForEditor().length) },
-            onToggleTodoChecked = { controller.toggleRichContentTodoCheckedState(box.id, blockIndex) },
-            modifier = modifier,
-            applyContentPadding = false,
-        )
-        return
-    }
-
     val context = LocalContext.current
     val clipboardManager = remember(context) { context.getSystemService(ClipboardManager::class.java) }
     val focusRequester = remember { FocusRequester() }
     val modelText = paragraph.plainTextForEditor()
+    val restoredSelection = controller.activeRichContentParagraphSelection(box.id, blockIndex)
     var platformValue by remember(box.id, blockIndex) {
-        mutableStateOf(TextFieldValue(modelText, TextRange(modelText.length)))
+        val start = restoredSelection?.start?.coerceIn(0, modelText.length) ?: modelText.length
+        val end = restoredSelection?.end?.coerceIn(0, modelText.length) ?: start
+        mutableStateOf(TextFieldValue(modelText, TextRange(start, end)))
     }
-
-    LaunchedEffect(active, selectionMode, selected) {
-        if (active && !selectionMode && !selected) focusRequester.requestFocus()
-    }
+    val editable = !selectionMode && !selected
+    LaunchedEffect(active, editable) { if (active && editable) focusRequester.requestFocus() }
     LaunchedEffect(modelText) {
         if (platformValue.text != modelText) {
-            val start = platformValue.selection.start.coerceIn(0, modelText.length)
-            val end = platformValue.selection.end.coerceIn(0, modelText.length)
+            val restored = controller.activeRichContentParagraphSelection(box.id, blockIndex)
+            val start = (restored?.start ?: platformValue.selection.start).coerceIn(0, modelText.length)
+            val end = (restored?.end ?: platformValue.selection.end).coerceIn(0, modelText.length)
             platformValue = TextFieldValue(modelText, TextRange(start, end))
         }
     }
-
     val paragraphTextStyle = LocalTextStyle.current.copy(
-        color = Color(0xFF0F172A),
-        lineHeight = RichParagraphLineHeight,
-        fontSize = when (paragraph.style.headingLevel) {
-            1 -> 26.sp
-            2 -> 22.sp
-            3 -> 18.sp
-            else -> RichParagraphBodySize
-        },
+        color = Color(0xFF0F172A), lineHeight = RichParagraphLineHeight,
+        fontSize = when (paragraph.style.headingLevel) { 1 -> 26.sp; 2 -> 22.sp; 3 -> 18.sp; else -> RichParagraphBodySize },
         fontWeight = if (paragraph.style.headingLevel > 0) FontWeight.SemiBold else FontWeight.Normal,
-        textAlign = when (paragraph.style.alignment) {
-            TextAlignment.Start -> TextAlign.Start
-            TextAlignment.Center -> TextAlign.Center
-            TextAlignment.End -> TextAlign.End
-        },
+        textAlign = when (paragraph.style.alignment) { TextAlignment.Start -> TextAlign.Start; TextAlignment.Center -> TextAlign.Center; TextAlignment.End -> TextAlign.End },
     )
     val indent = (paragraph.style.indentLevel * 20).dp
-
-    BasicTextField(
-        value = platformValue,
-        onValueChange = { nextValue ->
-            val previousValue = platformValue
-            platformValue = nextValue
-            controller.updateRichContentParagraphFromPlatformInput(
-                boxId = box.id,
-                blockIndex = blockIndex,
-                previousText = previousValue.text,
-                nextText = nextValue.text,
-                selectionStart = nextValue.selection.start,
-                selectionEnd = nextValue.selection.end,
-                hasActiveComposition = nextValue.composition != null,
+    Row(modifier = modifier.fillMaxWidth().padding(start = indent), verticalAlignment = Alignment.Top) {
+        when (paragraph.listMetadata?.kind) {
+            ListKind.Bullet -> Text("•", Modifier.padding(end = 8.dp).widthIn(min = 18.dp), color = Color(0xFF334155), style = paragraphTextStyle)
+            ListKind.Numbered -> Text("${markerNumber.coerceAtLeast(1)}.", Modifier.padding(end = 8.dp).widthIn(min = 24.dp), color = Color(0xFF334155), style = paragraphTextStyle)
+            ListKind.Todo -> CompactTodoCheckbox(
+                checked = paragraph.listMetadata.checked,
+                onCheckedChange = { controller.toggleRichContentTodoCheckedState(box.id, blockIndex) },
+                enabled = editable,
             )
-        },
-        enabled = !selectionMode && !selected,
-        singleLine = false,
-        minLines = 1,
-        keyboardOptions = KeyboardOptions(
-            capitalization = KeyboardCapitalization.Sentences,
-            imeAction = ImeAction.Default,
-        ),
-        textStyle = paragraphTextStyle,
-        cursorBrush = SolidColor(Color(0xFF7C3AED)),
-        visualTransformation = remember(paragraph) { CompleteParagraphVisualTransformation(paragraph) },
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(start = indent)
-            .heightIn(min = 24.dp)
-            .focusRequester(focusRequester)
-            .onFocusChanged { focusState ->
-                if (focusState.isFocused && !selectionMode && !selected && !box.isFocused) {
-                    controller.activateRichContentBox(box.id)
-                }
-            }
-            .onPreviewKeyEvent { keyEvent ->
-                val style = keyEvent.richContentShortcutStyle()
-                val listKind = keyEvent.richContentShortcutListKind()
-                val pastedText = keyEvent.richContentPlainTextPaste(clipboardManager, context)
-                when {
-                    pastedText != null && box.isFocused -> {
-                        val start = minOf(platformValue.selection.start, platformValue.selection.end)
-                        val end = maxOf(platformValue.selection.start, platformValue.selection.end)
-                        val nextText = platformValue.text.replaceRange(start, end, pastedText)
-                        val nextCursor = start + pastedText.length
-                        val previousValue = platformValue
-                        platformValue = TextFieldValue(nextText, TextRange(nextCursor))
-                        controller.updateRichContentParagraphFromPlatformInput(
-                            boxId = box.id,
-                            blockIndex = blockIndex,
-                            previousText = previousValue.text,
-                            nextText = nextText,
-                            selectionStart = nextCursor,
-                            selectionEnd = nextCursor,
-                            hasActiveComposition = false,
-                        )
-                        true
-                    }
-                    style != null && box.isFocused -> {
-                        controller.toggleRichContentParagraphStyle(
-                            boxId = box.id,
-                            blockIndex = blockIndex,
-                            style = style,
-                            selectionStart = platformValue.selection.start,
-                            selectionEnd = platformValue.selection.end,
-                        )
-                        true
-                    }
-                    listKind != null && box.isFocused -> {
-                        controller.toggleRichContentParagraphList(
-                            boxId = box.id,
-                            blockIndex = blockIndex,
-                            kind = listKind,
-                            selectionStart = platformValue.selection.start,
-                            selectionEnd = platformValue.selection.end,
-                        )
-                        true
-                    }
-                    else -> false
-                }
+            null -> Unit
+        }
+        BasicTextField(
+            value = platformValue,
+            onValueChange = { next ->
+                val previous = platformValue; platformValue = next
+                controller.updateRichContentParagraphFromPlatformInput(box.id, blockIndex, previous.text, next.text,
+                    next.selection.start, next.selection.end, next.composition != null)
             },
-        decorationBox = { innerTextField ->
-            Box(modifier = Modifier.fillMaxWidth()) {
-                if (platformValue.text.isEmpty()) {
-                    Text("Start typing…", color = Color(0xFF94A3B8), style = paragraphTextStyle)
-                }
-                innerTextField()
-            }
-        },
-    )
+            enabled = editable, readOnly = !active, singleLine = false, minLines = 1,
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Default),
+            textStyle = paragraphTextStyle, cursorBrush = SolidColor(Color(0xFF7C3AED)),
+            visualTransformation = remember(paragraph) { CompleteParagraphVisualTransformation(paragraph) },
+            modifier = Modifier.weight(1f).heightIn(min = 24.dp).focusRequester(focusRequester)
+                .onFocusChanged { fs -> if (fs.isFocused && editable && !active) {
+                    controller.focusRichContentParagraph(box.id, blockIndex, platformValue.selection.start, platformValue.selection.end)
+                } }
+                .onPreviewKeyEvent { event ->
+                    val style = event.richContentShortcutStyle(); val list = event.richContentShortcutListKind()
+                    val paste = event.richContentPlainTextPaste(clipboardManager, context)
+                    when {
+                        active && event.type == KeyEventType.KeyDown && event.key == Key.Enter && event.isShiftPressed -> {
+                            controller.insertActiveRichContentLineBreak(box.id)
+                            true
+                        }
+                        active && event.type == KeyEventType.KeyDown && event.key == Key.Tab -> {
+                            controller.changeActiveParagraphIndent(box.id, if (event.isShiftPressed) -1 else 1)
+                            true
+                        }
+                        paste != null && active -> {
+                            val a=minOf(platformValue.selection.start, platformValue.selection.end); val b=maxOf(platformValue.selection.start, platformValue.selection.end)
+                            val nextText=platformValue.text.replaceRange(a,b,paste); val cursor=a+paste.length; val prev=platformValue
+                            platformValue=TextFieldValue(nextText, TextRange(cursor))
+                            controller.updateRichContentParagraphFromPlatformInput(box.id,blockIndex,prev.text,nextText,cursor,cursor,false); true
+                        }
+                        style != null && active -> { controller.toggleRichContentParagraphStyle(box.id,blockIndex,style,platformValue.selection.start,platformValue.selection.end); true }
+                        list != null && active -> { controller.toggleRichContentParagraphList(box.id,blockIndex,list,platformValue.selection.start,platformValue.selection.end); true }
+                        else -> false
+                    }
+                },
+            decorationBox = { inner -> Box(Modifier.fillMaxWidth()) {
+                if (platformValue.text.isEmpty() && active) Text("Start typing…", color = Color(0xFF94A3B8), style = paragraphTextStyle)
+                inner()
+            } },
+        )
+    }
 }
 
 private fun ParagraphNode.plainTextForEditor(): String = inlines.joinToString("") { inline ->
@@ -224,7 +170,7 @@ private fun ParagraphNode.plainTextForEditor(): String = inlines.joinToString(""
 private const val InlineAtomPlaceholder: String = "\uFFFC"
 
 /** Preserves one model character per platform character, keeping IME offsets identity-mapped. */
-private class CompleteParagraphVisualTransformation(
+internal class CompleteParagraphVisualTransformation(
     private val paragraph: ParagraphNode,
 ) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {

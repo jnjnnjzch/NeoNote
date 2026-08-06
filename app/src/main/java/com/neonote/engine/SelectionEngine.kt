@@ -123,7 +123,7 @@ public class SelectionEngine {
     ): InfiniteCanvas = scaleSelection(canvas, selection, widthScale, heightScale, anchor)
 
     public fun deleteSelection(canvas: InfiniteCanvas, selection: SelectionState): InfiniteCanvas = canvas.copy(
-        objects = canvas.objects.filterNot { selection.isObjectSelected(it.id) },
+        objects = canvas.objects.filterNot { selection.isObjectSelected(it.id) && !it.isLocked() },
         inkLayer = canvas.inkLayer.copy(strokes = canvas.inkLayer.strokes.filterNot { selection.isStrokeSelected(it.id) }),
     )
 
@@ -171,7 +171,7 @@ public class SelectionEngine {
     public fun bringSelectionToFront(canvas: InfiniteCanvas, selection: SelectionState): InfiniteCanvas {
         var nextZ = (canvas.objects.maxOfOrNull(CanvasObject::zIndex) ?: 0) + 1
         return canvas.copy(objects = canvas.objects.map { objectValue ->
-            if (!selection.isObjectSelected(objectValue.id)) objectValue
+            if (!selection.isObjectSelected(objectValue.id) || objectValue.isLocked()) objectValue
             else when (objectValue) {
                 is RichContentBox -> objectValue.copy(zIndex = nextZ++)
                 is FloatingImage -> objectValue.copy(zIndex = nextZ++)
@@ -182,7 +182,7 @@ public class SelectionEngine {
     public fun sendSelectionToBack(canvas: InfiniteCanvas, selection: SelectionState): InfiniteCanvas {
         var nextZ = (canvas.objects.minOfOrNull(CanvasObject::zIndex) ?: 0) - selection.selectedRefs.size
         return canvas.copy(objects = canvas.objects.map { objectValue ->
-            if (!selection.isObjectSelected(objectValue.id)) objectValue
+            if (!selection.isObjectSelected(objectValue.id) || objectValue.isLocked()) objectValue
             else when (objectValue) {
                 is RichContentBox -> objectValue.copy(zIndex = nextZ++)
                 is FloatingImage -> objectValue.copy(zIndex = nextZ++)

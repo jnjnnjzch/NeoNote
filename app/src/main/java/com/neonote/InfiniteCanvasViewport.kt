@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,7 +17,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -28,6 +32,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInteropFilter
@@ -52,12 +57,14 @@ import com.neonote.input.toAndroidPointerSnapshot
 import com.neonote.input.withPressureSamples
 import com.neonote.model.CanvasObject
 import com.neonote.model.CanvasPoint
+import com.neonote.model.CanvasRect
 import com.neonote.model.EditorTool
 import com.neonote.model.FloatingImage
 import com.neonote.model.RichContentBox
 
 private const val FocusedObjectScreenMargin = 22f
 private const val FocusedTextToolbarClearance = 72f
+private const val FloatingToolDockClearance = 86f
 private const val FingerInkHitToleranceScreenPx = 14f
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -72,6 +79,7 @@ internal fun InfiniteCanvasViewport(
     val selectionEngine = remember { SelectionEngine() }
     val platformSnapshotStore = remember { PlatformSnapshotStore() }
     val density = LocalDensity.current
+    var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     val inputMode = when (controller.state.currentTool) {
         EditorTool.Pen -> InputMode.Write
         EditorTool.Text -> InputMode.Write
@@ -82,14 +90,18 @@ internal fun InfiniteCanvasViewport(
     Box(
         modifier = modifier
             .background(Color(0xFFFAF9FC))
-            .onSizeChanged { viewportSize ->
-                controller.updateViewportMetrics(viewportSize.width, density.density)
+            .onSizeChanged { nextViewportSize ->
+                viewportSize = nextViewportSize
+                controller.updateViewportMetrics(nextViewportSize.width, nextViewportSize.height, density.density)
                 controller.state.focusedRichContentBoxId
                     ?.let { focusedId ->
                         controller.currentCanvas.objects.filterIsInstance<RichContentBox>()
                             .firstOrNull { it.id == focusedId }
                     }
-                    ?.let { focusedBox -> keepObjectVisible(controller, focusedBox, viewportSize) }
+                    ?.let { focusedBox -> keepCanvasObjectVisible(controller, focusedBox, nextViewportSize) }
+            }
+            .pointerInput(controller, controller.state.currentTool) {
+                handleGlobalTouchNavigation(controller)
             }
             .pointerInteropFilter { motionEvent ->
                 if (AndroidStylusInputAdapter.isStylusOrEraser(motionEvent)) {
@@ -117,6 +129,19 @@ internal fun InfiniteCanvasViewport(
                 )
             },
     ) {
+        val visibleBounds = remember(controller.state.viewport, viewportSize) {
+            if (viewportSize == IntSize.Zero) null else {
+                val topLeft = controller.screenToDocument(CanvasPoint(0f, 0f))
+                val bottomRight = controller.screenToDocument(CanvasPoint(viewportSize.width.toFloat(), viewportSize.height.toFloat()))
+                val margin = 180f / controller.state.viewport.zoomScale.coerceAtLeast(.2f)
+                CanvasRect(
+                    minOf(topLeft.x, bottomRight.x) - margin,
+                    minOf(topLeft.y, bottomRight.y) - margin,
+                    maxOf(topLeft.x, bottomRight.x) + margin,
+                    maxOf(topLeft.y, bottomRight.y) + margin,
+                )
+            }
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -132,13 +157,23 @@ internal fun InfiniteCanvasViewport(
                 pageId = controller.state.currentPageId,
                 inkLayer = controller.currentCanvas.inkLayer,
                 activeStroke = controller.activeInkStroke,
+                visibleBounds = visibleBounds,
                 modifier = Modifier.fillMaxSize(),
             )
-            controller.currentCanvas.objects.sortedBy(CanvasObject::zIndex).forEach { canvasObject ->
+            controller.currentCanvas.objects
+                .asSequence()
+                .filter { canvasObject ->
+                    visibleBounds == null || canvasObject.bounds.intersects(visibleBounds) ||
+                        controller.state.selection.isObjectSelected(canvasObject.id) ||
+                        controller.state.focusedRichContentBoxId == canvasObject.id
+                }
+                .sortedBy(CanvasObject::zIndex)
+                .forEach { canvasObject ->
                 CanvasObjectView(
                     canvasObject = canvasObject,
                     selected = controller.state.selection.isObjectSelected(canvasObject.id),
                     selectionMode = selectionMode,
+                    highlighted = controller.searchHighlightedObjectId == canvasObject.id,
                     controller = controller,
                 )
             }
@@ -181,12 +216,51 @@ internal fun InfiniteCanvasViewport(
                 },
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color.White.copy(alpha = 0.9f))
                     .padding(horizontal = 18.dp, vertical = 12.dp),
                 color = Color(0xFF746D82),
                 style = MaterialTheme.typography.bodyMedium,
             )
+        }
+    }
+}
+
+private fun CanvasRect.intersects(other: CanvasRect): Boolean =
+    right >= other.left && left <= other.right && bottom >= other.top && top <= other.bottom
+
+private suspend fun PointerInputScope.handleGlobalTouchNavigation(controller: NeoNoteEditorController) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        if (down.type != PointerType.Touch) return@awaitEachGesture
+        var draggingCanvas = false
+        var lastPosition = down.position
+        val startPosition = down.position
+        while (true) {
+            val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+            val pressed = event.changes.filter { it.pressed && it.type == PointerType.Touch }
+            if (pressed.size >= 2) {
+                controller.clearSearchHighlight()
+                val pan = event.calculatePan()
+                val zoom = event.calculateZoom()
+                val centroid = event.calculateCentroid(useCurrent = true)
+                if (pan != Offset.Zero) controller.panViewportBy(pan.x, pan.y)
+                if (zoom != 1f) controller.zoomViewportBy(zoom, CanvasPoint(centroid.x, centroid.y))
+                event.changes.forEach { it.consume() }
+                draggingCanvas = true
+                continue
+            }
+            val primary = event.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+            if (!primary.pressed) return@awaitEachGesture
+            if (controller.state.currentTool == EditorTool.Pen) {
+                val distance = (primary.position - startPosition).getDistance()
+                if (draggingCanvas || distance > viewConfiguration.touchSlop) {
+                    controller.clearSearchHighlight()
+                    val delta = primary.position - lastPosition
+                    if (delta != Offset.Zero) controller.panViewportBy(delta.x, delta.y)
+                    primary.consume()
+                    draggingCanvas = true
+                }
+            }
+            lastPosition = primary.position
         }
     }
 }
@@ -200,11 +274,12 @@ private fun CanvasObjectView(
     canvasObject: CanvasObject,
     selected: Boolean,
     selectionMode: Boolean,
+    highlighted: Boolean,
     controller: NeoNoteEditorController,
 ) {
     when (canvasObject) {
-        is RichContentBox -> RichContentBoxView(canvasObject, selected, selectionMode, controller)
-        is FloatingImage -> FloatingImageView(canvasObject, selected, selectionMode, controller)
+        is RichContentBox -> RichContentBoxView(canvasObject, selected, selectionMode, controller, highlighted)
+        is FloatingImage -> FloatingImageView(canvasObject, selected, selectionMode, controller, highlighted)
     }
 }
 
@@ -338,7 +413,7 @@ private fun routePointerEvent(
     if (result.action is InputAction.CreateOrFocusRichContentBox) {
         controller.state.focusedRichContentBoxId
             ?.let { id -> controller.currentCanvas.objects.filterIsInstance<RichContentBox>().firstOrNull { it.id == id } }
-            ?.let { keepObjectVisible(controller, it, viewportSize) }
+            ?.let { keepCanvasObjectVisible(controller, it, viewportSize) }
         return
     }
 
@@ -349,29 +424,29 @@ private fun routePointerEvent(
             if (controller.state.currentTool != EditorTool.Eraser) {
                 controller.setTool(EditorTool.Text)
                 controller.activateRichContentBox(focusedObjectId)
-                keepObjectVisible(controller, focusedObject, viewportSize)
+                keepCanvasObjectVisible(controller, focusedObject, viewportSize)
             }
         }
         is FloatingImage -> {
             if (controller.state.currentTool != EditorTool.Eraser) {
                 controller.setTool(EditorTool.Selection)
                 controller.selectCanvasObject(focusedObjectId)
+                keepCanvasObjectVisible(controller, focusedObject, viewportSize)
             }
         }
         null -> Unit
     }
 }
 
-private fun keepObjectVisible(
+private fun keepCanvasObjectVisible(
     controller: NeoNoteEditorController,
-    box: RichContentBox,
+    canvasObject: CanvasObject,
     viewportSize: IntSize,
 ) {
     if (viewportSize.width <= 0 || viewportSize.height <= 0) return
-    val topLeft = controller.documentToScreen(box.position)
-    val bottomRight = controller.documentToScreen(
-        CanvasPoint(box.position.x + box.size.width, box.position.y + box.size.height),
-    )
+    val bounds = canvasObject.bounds
+    val topLeft = controller.documentToScreen(CanvasPoint(bounds.left, bounds.top))
+    val bottomRight = controller.documentToScreen(CanvasPoint(bounds.right, bounds.bottom))
     val topClearance = if (controller.state.currentTool == EditorTool.Text) {
         FocusedTextToolbarClearance
     } else {
@@ -384,8 +459,13 @@ private fun keepObjectVisible(
         dx = viewportSize.width - FocusedObjectScreenMargin - bottomRight.x
     }
     if (topLeft.y < topClearance) dy = topClearance - topLeft.y
-    if (bottomRight.y > viewportSize.height - FocusedObjectScreenMargin) {
-        dy = viewportSize.height - FocusedObjectScreenMargin - bottomRight.y
+    val bottomClearance = if (controller.state.currentTool == EditorTool.Text) {
+        FocusedObjectScreenMargin
+    } else {
+        FloatingToolDockClearance
+    }
+    if (bottomRight.y > viewportSize.height - bottomClearance) {
+        dy = viewportSize.height - bottomClearance - bottomRight.y
     }
     if (dx != 0f || dy != 0f) controller.panViewportBy(dx, dy)
 }

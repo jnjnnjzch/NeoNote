@@ -15,6 +15,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -60,7 +64,7 @@ internal fun SelectionTransformOverlay(
                 )
             }
 
-            Box(
+            if (controller.selectionCanTransform) Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .offset(x = handleSize / 2, y = handleSize / 2)
@@ -70,13 +74,33 @@ internal fun SelectionTransformOverlay(
                         role = Role.Button
                         contentDescription = "Resize selection"
                     }
-                    .pointerInput(controller.state.selection.selectedRefs) {
-                        detectDragGestures { change, dragAmount ->
+                    .pointerInput(controller.state.selection.selectedRefs, widthPx, heightPx) {
+                        var accumulatedX = 0f
+                        var accumulatedY = 0f
+                        var appliedX = 1f
+                        var appliedY = 1f
+                        detectDragGestures(
+                            onDragStart = {
+                                accumulatedX = 0f
+                                accumulatedY = 0f
+                                appliedX = 1f
+                                appliedY = 1f
+                                controller.beginSelectionTransform()
+                            },
+                            onDragCancel = controller::cancelSelectionTransform,
+                            onDragEnd = controller::endSelectionTransform,
+                        ) { change, dragAmount ->
                             change.consume()
-                            val horizontal = (widthPx + dragAmount.x) / widthPx
-                            val vertical = (heightPx + dragAmount.y) / heightPx
-                            val scale = max(horizontal, vertical).coerceIn(0.82f, 1.18f)
-                            if (scale != 1f) controller.scaleSelection(scale)
+                            accumulatedX += dragAmount.x
+                            accumulatedY += dragAmount.y
+                            val targetX = ((widthPx + accumulatedX) / widthPx).coerceIn(0.12f, 8f)
+                            val targetY = if (controller.selectionResizesTextWidthOnly) 1f
+                            else ((heightPx + accumulatedY) / heightPx).coerceIn(0.12f, 8f)
+                            val stepX = targetX / appliedX
+                            val stepY = targetY / appliedY
+                            controller.resizeSelectionDuringTransform(stepX, stepY)
+                            appliedX = targetX
+                            appliedY = targetY
                         }
                     },
                 contentAlignment = Alignment.Center,
@@ -88,7 +112,7 @@ internal fun SelectionTransformOverlay(
         Surface(
             modifier = Modifier.offset {
                 IntOffset(
-                    x = max(4f, bottomRight.x - with(density) { 88.dp.toPx() }).roundToInt(),
+                    x = max(4f, bottomRight.x - with(density) { 164.dp.toPx() }).roundToInt(),
                     y = max(4f, topLeft.y - with(density) { 48.dp.toPx() }).roundToInt(),
                 )
             },
@@ -97,8 +121,19 @@ internal fun SelectionTransformOverlay(
             shadowElevation = 6.dp,
         ) {
             Row {
-                SelectionQuickAction("Copy", "Duplicate selection", controller::duplicateSelection)
-                SelectionQuickAction("Delete", "Delete selection", controller::deleteSelection, destructive = true)
+                SelectionQuickAction("Copy", "Copy selection", controller::copySelection)
+                if (controller.selectionHasLockedObjects) {
+                    SelectionQuickAction("Unlock", "Unlock selection", { controller.setSelectionLocked(false) })
+                } else {
+                    SelectionQuickAction("Cut", "Cut selection", controller::cutSelection, enabled = controller.selectionCanDelete)
+                }
+                SelectionQuickAction(
+                    "Delete",
+                    "Delete selection",
+                    controller::deleteSelection,
+                    destructive = true,
+                    enabled = controller.selectionCanDelete,
+                )
             }
         }
     }
@@ -110,11 +145,12 @@ private fun SelectionQuickAction(
     description: String,
     onClick: () -> Unit,
     destructive: Boolean = false,
+    enabled: Boolean = true,
 ) {
     Box(
         modifier = Modifier
             .size(52.dp)
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics {
                 role = Role.Button
                 contentDescription = description
@@ -123,7 +159,11 @@ private fun SelectionQuickAction(
     ) {
         Text(
             label,
-            color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+            color = when {
+                !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = .32f)
+                destructive -> MaterialTheme.colorScheme.error
+                else -> MaterialTheme.colorScheme.primary
+            },
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.labelSmall,
         )

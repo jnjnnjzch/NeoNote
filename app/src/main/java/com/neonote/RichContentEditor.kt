@@ -13,6 +13,7 @@ import com.neonote.engine.RichContentLayoutDefaults
 import com.neonote.model.BlockFormula
 import com.neonote.model.BlockImage
 import com.neonote.model.ParagraphNode
+import com.neonote.model.RichContent
 import com.neonote.model.RichContentBox
 import com.neonote.model.TableNode
 
@@ -31,7 +32,7 @@ internal fun RichContentEditor(
         ),
         verticalArrangement = Arrangement.spacedBy(RichContentLayoutDefaults.BlockSpacing.dp),
     ) {
-        if (box.content.blocks.isEmpty() || box.content.blocks.all { it is ParagraphNode }) {
+        if (box.content.usesUnifiedParagraphEditor()) {
             UnifiedRichTextEditor(
                 box = box,
                 selectionMode = selectionMode,
@@ -46,9 +47,16 @@ internal fun RichContentEditor(
         val activeBlockIndex = activeTarget?.blockIndexForEditor()
             ?: box.content.blocks.indexOfFirst { it is ParagraphNode }.coerceAtLeast(0)
 
+        var numberedIndex = 0
+        var previousNumbered = false
+        var formulaNumber = 0
         box.content.blocks.forEachIndexed { blockIndex, block ->
             when (block) {
-                is ParagraphNode -> RichParagraphEditor(
+                is ParagraphNode -> {
+                    val markerNumber = if (block.listMetadata?.kind == com.neonote.model.ListKind.Numbered) {
+                        numberedIndex = if (previousNumbered) numberedIndex + 1 else 1; previousNumbered = true; numberedIndex
+                    } else { numberedIndex = 0; previousNumbered = false; 0 }
+                    RichParagraphEditor(
                     box = box,
                     blockIndex = blockIndex,
                     paragraph = block,
@@ -57,19 +65,28 @@ internal fun RichContentEditor(
                     selectionMode = selectionMode,
                     selected = selected,
                     controller = controller,
+                    markerNumber = markerNumber,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                is BlockFormula -> FormulaBlockEditor(
+                }
+                is BlockFormula -> {
+                    numberedIndex = 0; previousNumbered = false
+                    if (block.numbered) formulaNumber += 1
+                    FormulaBlockEditor(
                     box = box,
                     blockIndex = blockIndex,
                     formula = block,
+                    formulaNumber = formulaNumber,
                     active = activeTarget == ActiveRichContentTarget.FormulaBlock(blockIndex),
                     selectionMode = selectionMode,
                     selected = selected,
                     controller = controller,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                is TableNode -> TableBlockEditor(
+                }
+                is TableNode -> {
+                    numberedIndex = 0; previousNumbered = false
+                    TableBlockEditor(
                     box = box,
                     blockIndex = blockIndex,
                     table = block,
@@ -78,7 +95,10 @@ internal fun RichContentEditor(
                     controller = controller,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                is BlockImage -> ImageBlockView(
+                }
+                is BlockImage -> {
+                    numberedIndex = 0; previousNumbered = false
+                    ImageBlockView(
                     box = box,
                     blockIndex = blockIndex,
                     block = block,
@@ -88,6 +108,7 @@ internal fun RichContentEditor(
                     controller = controller,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                }
             }
         }
     }
@@ -99,3 +120,8 @@ private fun ActiveRichContentTarget.blockIndexForEditor(): Int = when (this) {
     is ActiveRichContentTarget.FormulaBlock -> blockIndex
     is ActiveRichContentTarget.ImageBlock -> blockIndex
 }
+
+
+/** Native cross-paragraph selection is used only when it can faithfully represent the content. */
+internal fun RichContent.usesUnifiedParagraphEditor(): Boolean =
+    blocks.isEmpty() || blocks.all { block -> block is ParagraphNode && block.listMetadata == null }

@@ -1,9 +1,11 @@
 package com.neonote
 
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.provider.OpenableColumns
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -30,13 +32,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
-import com.neonote.engine.AssetDraft
 import com.neonote.engine.DocumentEngine
 import com.neonote.engine.DocumentSummary
 import com.neonote.engine.FileAssetStore
@@ -60,7 +68,6 @@ import kotlinx.coroutines.withContext
 
 private const val AutoSaveDebounceMillis = 1_200L
 private const val MaximumImportedArchiveBytes = 256 * 1024 * 1024
-private const val MaximumImportedImageBytes = 64 * 1024 * 1024
 
 @Composable
 internal fun NeoNoteEditorScreen(
@@ -72,6 +79,7 @@ internal fun NeoNoteEditorScreen(
     val context = LocalContext.current
     val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
+    val clipboard = remember(context) { context.getSystemService(ClipboardManager::class.java) }
     val library = remember(context) { FileDocumentLibrary(context.filesDir) }
     val assetStore = remember(context) { FileAssetStore(FileAssetStore.defaultDirectory(context.filesDir)) }
     val archiveCodec = remember(assetStore) { NeoNoteArchiveCodec(assetStore) }
@@ -94,6 +102,44 @@ internal fun NeoNoteEditorScreen(
     var pendingExport by remember { mutableStateOf<ByteArray?>(null) }
     var canvasViewportSize by remember { mutableStateOf(IntSize.Zero) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
+    var toolOptionsVisible by rememberSaveable { mutableStateOf(false) }
+
+    suspend fun addImageFromUri(uri: Uri, preferInline: Boolean) {
+        val draft = context.contentResolver.readEditorImageAssetDraft(uri)
+        if (draft == null) {
+            statusMessage = "Image import failed"
+            return
+        }
+        val reference = assetStore.put(draft)
+        val focusedBoxId = controller.state.focusedRichContentBoxId
+        if (preferInline && focusedBoxId != null) {
+            controller.insertImageAtActiveContext(focusedBoxId, reference.id, reference.fileName ?: "Image")
+            statusMessage = "Image inserted"
+            return
+        }
+        val screenSize = preferredFloatingImageScreenSize(
+            bytes = draft.bytes,
+            viewport = canvasViewportSize,
+            defaultWidthPx = defaultImageScreenWidthPx,
+            defaultHeightPx = defaultImageScreenHeightPx,
+            maximumWidthPx = maximumImageScreenWidthPx,
+            maximumHeightPx = maximumImageScreenHeightPx,
+        )
+        val zoom = controller.state.viewport.zoomScale.coerceAtLeast(0.2f)
+        val documentSize = CanvasSize(screenSize.width / zoom, screenSize.height / zoom)
+        val center = controller.screenToDocument(
+            CanvasPoint(canvasViewportSize.width / 2f, canvasViewportSize.height / 2f),
+        )
+        val imageId = controller.insertFloatingImage(
+            assetId = reference.id,
+            position = CanvasPoint(center.x - documentSize.width / 2f, center.y - documentSize.height / 2f),
+            size = documentSize,
+            altText = reference.fileName,
+        )
+        controller.setTool(EditorTool.Selection)
+        controller.selectCanvasObject(imageId)
+        statusMessage = "Image placed · drag to position it"
+    }
 
     suspend fun refreshLibrary() {
         documents = library.list(includeTrash = true)
@@ -131,42 +177,7 @@ internal fun NeoNoteEditorScreen(
     }
 
     val floatingImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) coroutineScope.launch {
-            val draft = context.contentResolver.readWorkspaceImageDraft(uri)
-            if (draft == null) {
-                statusMessage = "Image import failed"
-                return@launch
-            }
-            val reference = assetStore.put(draft)
-            val screenSize = preferredFloatingImageScreenSize(
-                bytes = draft.bytes,
-                viewport = canvasViewportSize,
-                defaultWidthPx = defaultImageScreenWidthPx,
-                defaultHeightPx = defaultImageScreenHeightPx,
-                maximumWidthPx = maximumImageScreenWidthPx,
-                maximumHeightPx = maximumImageScreenHeightPx,
-            )
-            val zoom = controller.state.viewport.zoomScale.coerceAtLeast(0.2f)
-            val documentSize = CanvasSize(screenSize.width / zoom, screenSize.height / zoom)
-            val center = controller.screenToDocument(
-                CanvasPoint(
-                    canvasViewportSize.width / 2f,
-                    canvasViewportSize.height / 2f,
-                ),
-            )
-            val imageId = controller.insertFloatingImage(
-                assetId = reference.id,
-                position = CanvasPoint(
-                    center.x - documentSize.width / 2f,
-                    center.y - documentSize.height / 2f,
-                ),
-                size = documentSize,
-                altText = reference.fileName,
-            )
-            controller.setTool(EditorTool.Selection)
-            controller.selectCanvasObject(imageId)
-            statusMessage = "Image added · drag or use the corner handle"
-        }
+        if (uri != null) coroutineScope.launch { addImageFromUri(uri, preferInline = false) }
     }
 
     LaunchedEffect(
@@ -197,7 +208,7 @@ internal fun NeoNoteEditorScreen(
         libraryReady = true
     }
 
-    LaunchedEffect(state.document, libraryReady) {
+    LaunchedEffect(state.document.revision, controller.contentChangeToken, libraryReady) {
         if (!libraryReady) return@LaunchedEffect
         delay(AutoSaveDebounceMillis)
         controller.saveDocument(library)
@@ -255,15 +266,17 @@ internal fun NeoNoteEditorScreen(
     fun exportCurrentDocument() {
         coroutineScope.launch {
             controller.saveDocument(library)
-            pendingExport = archiveCodec.export(controller.state.document)
-            exportLauncher.launch(controller.state.document.title.safeFileName() + ".neonote")
+            val exportDocument = controller.documentForPersistence()
+            pendingExport = archiveCodec.export(exportDocument)
+            exportLauncher.launch(exportDocument.title.safeFileName() + ".neonote")
         }
     }
 
     fun shareCurrentDocument() {
         coroutineScope.launch {
             controller.saveDocument(library)
-            val archive = archiveCodec.export(controller.state.document)
+            val shareDocument = controller.documentForPersistence()
+            val archive = archiveCodec.export(shareDocument)
             val directory = context.cacheDir.resolve("shared").also { it.mkdirs() }
             directory.listFiles()?.forEach {
                 if (System.currentTimeMillis() - it.lastModified() > 86_400_000L) it.delete()
@@ -281,8 +294,106 @@ internal fun NeoNoteEditorScreen(
         }
     }
 
+    fun canvasInsertionPoint(): CanvasPoint = controller.screenToDocument(
+        CanvasPoint(
+            if (canvasViewportSize.width > 0) canvasViewportSize.width * 0.42f else 220f,
+            if (canvasViewportSize.height > 0) canvasViewportSize.height * 0.28f else 160f,
+        ),
+    )
+
+    fun beginContentAtInsertionPoint(afterFocus: (String) -> Unit = {}) {
+        controller.setTool(EditorTool.Pen)
+        controller.createRichContentBox(canvasInsertionPoint(), avoidOverlap = true)
+        controller.state.focusedRichContentBoxId?.let(afterFocus)
+    }
+
+    BackHandler(
+        enabled = libraryVisible || searchVisible || settingsVisible ||
+            state.focusedRichContentBoxId != null || state.selection.selectedRefs.isNotEmpty() ||
+            state.currentTool == EditorTool.Selection || state.currentTool == EditorTool.Eraser || toolOptionsVisible,
+    ) {
+        when {
+            settingsVisible -> settingsVisible = false
+            searchVisible -> searchVisible = false
+            libraryVisible -> libraryVisible = false
+            toolOptionsVisible -> toolOptionsVisible = false
+            else -> controller.handleBack()
+        }
+    }
+
     BoxWithConstraints(
-        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown || libraryVisible || searchVisible || settingsVisible) return@onPreviewKeyEvent false
+                when {
+                    event.isCtrlPressed && !event.isShiftPressed && event.key == Key.C &&
+                        state.selection.selectedRefs.isNotEmpty() -> {
+                        controller.copySelection()
+                        true
+                    }
+                    event.isCtrlPressed && !event.isShiftPressed && event.key == Key.X &&
+                        state.selection.selectedRefs.isNotEmpty() -> {
+                        controller.cutSelection()
+                        true
+                    }
+                    event.isCtrlPressed && !event.isShiftPressed && event.key == Key.A &&
+                        state.focusedRichContentBoxId == null -> {
+                        controller.selectAllCanvasContent()
+                        true
+                    }
+                    event.isCtrlPressed && !event.isShiftPressed && event.key == Key.V -> {
+                        when {
+                            state.focusedRichContentBoxId == null && state.currentTool == EditorTool.Selection && controller.canPasteSelection -> {
+                                controller.pasteSelection()
+                                true
+                            }
+                            clipboard.imageUriOrNull() != null -> {
+                                val imageUri = requireNotNull(clipboard.imageUriOrNull())
+                                coroutineScope.launch {
+                                    addImageFromUri(imageUri, preferInline = controller.state.focusedRichContentBoxId != null)
+                                }
+                                true
+                            }
+                            state.focusedRichContentBoxId == null -> {
+                                val pastedText = clipboard.plainTextOrNull(context)
+                                if (pastedText == null) false else {
+                                    beginContentAtInsertionPoint { boxId ->
+                                        controller.updateRichContentText(boxId, pastedText)
+                                    }
+                                    true
+                                }
+                            }
+                            else -> false
+                        }
+                    }
+                    state.selection.selectedRefs.isNotEmpty() &&
+                        (event.key == Key.Delete || event.key == Key.Backspace) -> {
+                        controller.deleteSelection()
+                        true
+                    }
+                    event.isCtrlPressed && !event.isShiftPressed && event.key == Key.D &&
+                        state.selection.selectedRefs.isNotEmpty() -> {
+                        controller.duplicateSelection()
+                        true
+                    }
+                    event.isCtrlPressed && !event.isShiftPressed && event.key == Key.S -> {
+                        coroutineScope.launch { controller.saveDocument(library); refreshLibrary() }
+                        true
+                    }
+                    event.isCtrlPressed && !event.isShiftPressed && event.key == Key.F -> {
+                        controller.state.focusedRichContentBoxId?.let(controller::commitRichContentEditing)
+                        coroutineScope.launch { controller.saveDocument(library); searchVisible = true }
+                        true
+                    }
+                    event.isCtrlPressed && !event.isShiftPressed && event.key == Key.Z -> { controller.undo(); true }
+                    (event.isCtrlPressed && event.key == Key.Y) ||
+                        (event.isCtrlPressed && event.isShiftPressed && event.key == Key.Z) -> { controller.redo(); true }
+                    event.key == Key.Escape -> controller.handleBack()
+                    else -> false
+                }
+            },
     ) {
         val expandedNavigation = maxWidth >= 720.dp
         val focusedTextEditing = state.currentTool == EditorTool.Text && state.focusedRichContentBoxId != null
@@ -290,7 +401,14 @@ internal fun NeoNoteEditorScreen(
             NaturalWorkspaceTopBar(
                 title = state.document.title,
                 favorite = state.document.isFavorite,
-                onLibrary = { libraryVisible = true },
+                onLibrary = {
+                    controller.state.focusedRichContentBoxId?.let(controller::commitRichContentEditing)
+                    coroutineScope.launch { controller.saveDocument(library); refreshLibrary(); libraryVisible = true }
+                },
+                onSearch = {
+                    controller.state.focusedRichContentBoxId?.let(controller::commitRichContentEditing)
+                    coroutineScope.launch { controller.saveDocument(library); searchVisible = true }
+                },
                 onTitleChange = controller::renameDocument,
                 onFavorite = controller::toggleDocumentFavorite,
                 saveLabel = controller.saveStateLabel,
@@ -304,24 +422,16 @@ internal fun NeoNoteEditorScreen(
                 onSettings = { settingsVisible = true },
                 onSaveNow = { coroutineScope.launch { controller.saveDocument(library); refreshLibrary() } },
             )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.16f))
+            IntentNavigation(controller = controller, compact = !expandedNavigation)
             Row(Modifier.fillMaxSize()) {
                 if (expandedNavigation) {
-                    PageRail(
-                        pages = state.document.pages,
-                        currentPageId = state.currentPageId,
-                        onPageSelected = controller::switchPage,
-                        onRename = controller::renamePage,
-                        onDuplicate = controller::duplicatePage,
-                        onDelete = controller::deletePage,
-                        onMove = controller::movePage,
-                        onAddPage = controller::addPage,
-                    )
+                    IntentPageRail(controller)
                     Box(
                         Modifier
                             .fillMaxHeight()
                             .width(1.dp)
-                            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.16f)),
                     )
                 }
                 Box(
@@ -335,43 +445,33 @@ internal fun NeoNoteEditorScreen(
                         selectionMode = state.currentTool == EditorTool.Selection,
                         modifier = Modifier.fillMaxSize(),
                     )
-                    if (!focusedTextEditing) {
-                        CanvasMetaChip(
-                            controller.currentPageNumber,
-                            controller.pageCount,
-                            (state.viewport.zoomScale * 100f).roundToInt(),
-                            Modifier.align(Alignment.TopEnd).padding(12.dp),
-                        )
-                    }
-                    if (state.currentTool != EditorTool.Text) {
+                    if (toolOptionsVisible && state.currentTool != EditorTool.Text && !focusedTextEditing) {
                         NaturalToolContextPanel(
                             controller = controller,
                             preferences = preferences,
                             onPreferencesChange = onPreferencesChange,
-                            onInsertFloatingImage = { floatingImagePicker.launch("image/*") },
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
-                                .padding(horizontal = 10.dp, bottom = 86.dp)
+                                .padding(horizontal = 10.dp, bottom = 82.dp)
                                 .fillMaxWidth(),
                         )
                     }
                     if (!focusedTextEditing) {
                         NaturalToolDock(
                             selectedTool = state.currentTool,
-                            onToolSelected = controller::setTool,
-                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp),
-                        )
-                    }
-                    if (!expandedNavigation && !focusedTextEditing) {
-                        CompactPageSwitcher(
-                            controller.currentPageNumber,
-                            controller.pageCount,
-                            controller.canSwitchToPreviousPage,
-                            controller.canSwitchToNextPage,
-                            controller::switchToPreviousPage,
-                            controller::switchToNextPage,
-                            controller::addPage,
-                            Modifier.align(Alignment.TopStart).padding(start = 10.dp, top = 10.dp),
+                            onToolSelected = { tool ->
+                                if (tool == state.currentTool && tool != EditorTool.Text) {
+                                    toolOptionsVisible = !toolOptionsVisible
+                                } else {
+                                    controller.setTool(tool)
+                                    toolOptionsVisible = false
+                                }
+                            },
+                            onInsertText = { beginContentAtInsertionPoint() },
+                            onInsertTable = { beginContentAtInsertionPoint { id -> controller.insertTableAtActiveContext(id) } },
+                            onInsertFormula = { beginContentAtInsertionPoint { id -> controller.insertFormulaAtActiveContext(id) } },
+                            onInsertImage = { floatingImagePicker.launch("image/*") },
+                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
                         )
                     }
                     statusMessage?.let { message ->
@@ -379,7 +479,7 @@ internal fun NeoNoteEditorScreen(
                             message,
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
-                                .padding(top = 14.dp)
+                                .padding(top = 12.dp)
                                 .background(
                                     MaterialTheme.colorScheme.inverseSurface,
                                     androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
@@ -449,6 +549,21 @@ internal fun NeoNoteEditorScreen(
     }
 }
 
+private fun ClipboardManager?.imageUriOrNull(): Uri? {
+    val clip = this?.primaryClip ?: return null
+    return (0 until clip.itemCount).firstNotNullOfOrNull { index -> clip.getItemAt(index).uri }
+}
+
+private fun ClipboardManager?.plainTextOrNull(context: android.content.Context): String? {
+    val clip = this?.primaryClip ?: return null
+    val description = clip.description
+    if (!description.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) &&
+        !description.hasMimeType(ClipDescription.MIMETYPE_TEXT_HTML)) return null
+    return (0 until clip.itemCount)
+        .firstNotNullOfOrNull { index -> clip.getItemAt(index).coerceToText(context)?.toString() }
+        ?.takeIf { it.isNotEmpty() }
+}
+
 private data class FloatingImageScreenSize(val width: Float, val height: Float)
 
 private fun preferredFloatingImageScreenSize(
@@ -485,27 +600,6 @@ private fun preferredFloatingImageScreenSize(
 private class UuidIdGenerator : IdGenerator {
     override fun nextId(prefix: String): String = "$prefix-${UUID.randomUUID()}"
 }
-
-private suspend fun android.content.ContentResolver.readWorkspaceImageDraft(uri: Uri): AssetDraft? =
-    withContext(Dispatchers.IO) {
-        runCatching {
-            val bytes = openInputStream(uri)?.use { it.readBytesLimited(MaximumImportedImageBytes) }
-                ?: return@runCatching null
-            if (bytes.isEmpty()) return@runCatching null
-            AssetDraft(
-                mediaType = getType(uri) ?: "application/octet-stream",
-                bytes = bytes,
-                fileName = displayName(uri),
-            )
-        }.getOrNull()
-    }
-
-private fun android.content.ContentResolver.displayName(uri: Uri): String? =
-    query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-        if (!cursor.moveToFirst()) return@use null
-        val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-        if (index >= 0) cursor.getString(index) else null
-    }
 
 private fun InputStream.readBytesLimited(maximumBytes: Int): ByteArray {
     val output = ByteArrayOutputStream()

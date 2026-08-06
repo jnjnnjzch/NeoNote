@@ -52,6 +52,7 @@ internal fun FloatingImageView(
     selected: Boolean,
     selectionMode: Boolean,
     controller: NeoNoteEditorController,
+    highlighted: Boolean = false,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -75,6 +76,7 @@ internal fun FloatingImageView(
     val borderColor = when {
         image.isLocked -> Color(0xFFB7791F)
         selected -> Color(0xFF2563EB)
+        highlighted -> Color(0xFFF59E0B)
         else -> Color.Transparent
     }
     Box(
@@ -86,7 +88,7 @@ internal fun FloatingImageView(
             .shadow(if (selected) 4.dp else 0.dp, shape, clip = false)
             .clip(shape)
             .background(Color(0xFFF0EDF4))
-            .border(if (selected || image.isLocked) 2.dp else 0.dp, borderColor, shape)
+            .border(if (selected || image.isLocked || highlighted) 2.dp else 0.dp, borderColor, shape)
             .onSizeChanged { destinationSize = it }
             .then(
                 if (selectionMode) Modifier.pointerInput(image.id) {

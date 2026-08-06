@@ -30,6 +30,7 @@ import com.neonote.model.TextSelection
 public class RichContentEngine {
     public fun execute(box: RichContentBox, command: RichContentCommand): RichContentCommandResult = when (command) {
         is RichContentCommand.InsertText -> insertText(box, command.text, command.selection, command.typingStyle)
+        is RichContentCommand.InsertLineBreak -> insertInlineNode(box, InlineLineBreak, command.selection)
         is RichContentCommand.PastePlainText -> pastePlainText(box, command.text, command.selection, command.typingStyle)
         is RichContentCommand.DeleteBackward -> deleteBackward(box, command.selection)
         is RichContentCommand.DeleteSelection -> deleteSelection(box, command.selection)
@@ -118,8 +119,19 @@ public class RichContentEngine {
                 TextSelection(TextRange(cursor.copy(inlineOffset = cursor.inlineOffset - 1), cursor)),
             )
         }
-        if (cursor.blockIndex == 0) return RichContentCommandResult.ContentEdited(prepared.box, prepared.selection)
         val blocks = prepared.box.content.blocks
+        val currentAtCursor = blocks.getOrNull(cursor.blockIndex) as? ParagraphNode
+        if (currentAtCursor?.listMetadata != null) {
+            val nextStyle = if (currentAtCursor.style.indentLevel > 0) {
+                currentAtCursor.style.copy(indentLevel = currentAtCursor.style.indentLevel - 1)
+            } else currentAtCursor.style
+            val next = currentAtCursor.copy(listMetadata = null, style = nextStyle)
+            return RichContentCommandResult.ContentEdited(
+                prepared.box.copy(content = RichContent(blocks.replaceAt(cursor.blockIndex, next))),
+                prepared.selection,
+            )
+        }
+        if (cursor.blockIndex == 0) return RichContentCommandResult.ContentEdited(prepared.box, prepared.selection)
         val previous = blocks[cursor.blockIndex - 1] as? ParagraphNode
             ?: return RichContentCommandResult.ContentEdited(prepared.box, prepared.selection)
         val current = blocks[cursor.blockIndex] as? ParagraphNode
@@ -142,6 +154,16 @@ public class RichContentEngine {
         val blocks = deleted.box.content.blocks
         val paragraph = blocks[cursor.blockIndex] as ParagraphNode
         val chars = paragraph.toStyledChars()
+        if (paragraph.listMetadata != null && chars.isEmpty()) {
+            val next = paragraph.copy(
+                listMetadata = null,
+                style = paragraph.style.copy(indentLevel = (paragraph.style.indentLevel - 1).coerceAtLeast(0)),
+            )
+            return RichContentCommandResult.ContentEdited(
+                deleted.box.copy(content = RichContent(blocks.replaceAt(cursor.blockIndex, next))),
+                TextSelection.cursor(TextCursorPosition(cursor.blockIndex, 0)),
+            )
+        }
         val nextList = paragraph.listMetadata?.let { if (it.kind == ListKind.Todo) it.copy(checked = false) else it }
         val nextBlocks = blocks.take(cursor.blockIndex) +
             paragraph.copy(inlines = chars.take(cursor.inlineOffset).toInlineTextNodes()) +
@@ -556,6 +578,7 @@ public enum class InlineStyle { Bold, Italic, Underline, Strikethrough }
 
 public sealed interface RichContentCommand {
     public data class InsertText(val text: String, val selection: TextSelection, val typingStyle: TypingStyle = TypingStyle()) : RichContentCommand
+    public data class InsertLineBreak(val selection: TextSelection) : RichContentCommand
     public data class PastePlainText(val text: String, val selection: TextSelection, val typingStyle: TypingStyle = TypingStyle()) : RichContentCommand
     public data class DeleteBackward(val selection: TextSelection) : RichContentCommand
     public data class DeleteSelection(val selection: TextSelection) : RichContentCommand

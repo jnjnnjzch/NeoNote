@@ -74,8 +74,11 @@ internal fun UnifiedRichTextEditor(
     val clipboard = remember(context) { context.getSystemService(ClipboardManager::class.java) }
     val requester = remember { FocusRequester() }
     val modelText = box.content.toUnifiedPlatformText()
+    val restoredSelection = controller.activeRichContentPlainSelection(box.id)
     var value by remember(box.id) {
-        mutableStateOf(TextFieldValue(modelText, TextRange(modelText.length)))
+        val start = restoredSelection?.start?.coerceIn(0, modelText.length) ?: modelText.length
+        val end = restoredSelection?.end?.coerceIn(0, modelText.length) ?: start
+        mutableStateOf(TextFieldValue(modelText, TextRange(start, end)))
     }
     val editable = !selectionMode && !selected
 
@@ -84,31 +87,16 @@ internal fun UnifiedRichTextEditor(
     }
     LaunchedEffect(modelText) {
         if (value.text != modelText) {
+            val restored = controller.activeRichContentPlainSelection(box.id)
             value = value.copy(
                 text = modelText,
                 selection = TextRange(
-                    value.selection.start.coerceIn(0, modelText.length),
-                    value.selection.end.coerceIn(0, modelText.length),
+                    (restored?.start ?: value.selection.start).coerceIn(0, modelText.length),
+                    (restored?.end ?: value.selection.end).coerceIn(0, modelText.length),
                 ),
                 composition = null,
             )
         }
-    }
-
-    if (!box.isFocused) {
-        RichContentRenderer(
-            content = box.content,
-            selectionMode = selectionMode,
-            selected = selected,
-            onFocus = { controller.activateRichContentBox(box.id) },
-            onToggleTodoChecked = { controller.toggleRichContentTodoCheckedState(box.id, it) },
-            modifier = modifier
-                .fillMaxWidth()
-                .wrapContentHeight(unbounded = true)
-                .heightIn(min = MinimumUnifiedEditorHeight),
-            applyContentPadding = false,
-        )
-        return
     }
 
     BasicTextField(
@@ -126,6 +114,7 @@ internal fun UnifiedRichTextEditor(
             )
         },
         enabled = editable,
+        readOnly = !box.isFocused,
         singleLine = false,
         minLines = 1,
         maxLines = Int.MAX_VALUE,
@@ -155,6 +144,14 @@ internal fun UnifiedRichTextEditor(
                 val list = event.unifiedListShortcut()
                 val paste = event.unifiedPlainTextPaste(clipboard, context)
                 when {
+                    event.type == KeyEventType.KeyDown && event.key == Key.Enter && event.isShiftPressed -> {
+                        controller.insertActiveRichContentLineBreak(box.id)
+                        true
+                    }
+                    event.type == KeyEventType.KeyDown && event.key == Key.Tab -> {
+                        controller.changeActiveParagraphIndent(box.id, if (event.isShiftPressed) -1 else 1)
+                        true
+                    }
                     paste != null -> {
                         val start = minOf(value.selection.start, value.selection.end)
                         val end = maxOf(value.selection.start, value.selection.end)
@@ -190,7 +187,7 @@ internal fun UnifiedRichTextEditor(
                     .wrapContentHeight(unbounded = true)
                     .heightIn(min = MinimumUnifiedEditorHeight),
             ) {
-                if (value.text.isEmpty()) {
+                if (value.text.isEmpty() && box.isFocused) {
                     Text(
                         "Start typing…",
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),

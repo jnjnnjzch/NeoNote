@@ -3,7 +3,6 @@ package com.neonote
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -384,7 +383,7 @@ internal fun ToolContextPanel(
                         onPreferencesChange(preferences.copy(pressureEnabled = it))
                     },
                 )
-                ContextAction("Canvas image", false, onInsertFloatingImage)
+                ContextAction("Place image", false, onInsertFloatingImage)
             }
             EditorTool.Eraser -> Row(
                 Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -418,7 +417,7 @@ internal fun ToolContextPanel(
             ) {
                 Text("Tap the canvas to create a text box. Formatting appears above the active box.")
                 Spacer(Modifier.width(12.dp))
-                ContextAction("Canvas image", false, onInsertFloatingImage)
+                ContextAction("Place image", false, onInsertFloatingImage)
             }
         }
     }

@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -52,7 +53,7 @@ internal fun NaturalDocumentLibraryDialog(
     onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
-    var newTitle by remember { mutableStateOf("") }
+    var createDialogVisible by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
     val visible = documents.filter {
         it.isTrashed == showTrash && it.title.contains(query.trim(), ignoreCase = true)
@@ -84,6 +85,9 @@ internal fun NaturalDocumentLibraryDialog(
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
+                    }
+                    if (!showTrash) {
+                        TextButton(onClick = { createDialogVisible = true }) { Text("＋ New note") }
                     }
                     TextButton(onClick = onDismiss) { Text("Done") }
                     Box {
@@ -142,38 +146,6 @@ internal fun NaturalDocumentLibraryDialog(
                     },
                 )
 
-                if (!showTrash) {
-                    Row(
-                        modifier = Modifier.padding(top = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        BasicTextField(
-                            value = newTitle,
-                            onValueChange = { newTitle = it.take(120) },
-                            singleLine = true,
-                            modifier = Modifier
-                                .weight(1f)
-                                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
-                                .padding(horizontal = 12.dp, vertical = 11.dp),
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
-                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                            decorationBox = { inner ->
-                                Box {
-                                    if (newTitle.isBlank()) {
-                                        Text("New note title", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                    inner()
-                                }
-                            },
-                        )
-                        TextButton(
-                            onClick = {
-                                onCreate(newTitle.ifBlank { "Untitled Note" })
-                                newTitle = ""
-                            },
-                        ) { Text("Create", fontWeight = FontWeight.SemiBold) }
-                    }
-                }
 
                 HorizontalDivider(Modifier.padding(vertical = 12.dp))
 
@@ -185,7 +157,7 @@ internal fun NaturalDocumentLibraryDialog(
                     ) {
                         Text(
                             if (query.isNotBlank()) "No matching notes"
-                            else if (showTrash) "Trash is empty" else "Create your first note above",
+                            else if (showTrash) "Trash is empty" else "Create your first note",
                             fontWeight = FontWeight.SemiBold,
                         )
                         if (query.isNotBlank()) {
@@ -216,6 +188,18 @@ internal fun NaturalDocumentLibraryDialog(
                 }
             }
         }
+    }
+    if (createDialogVisible) {
+        NameDialog(
+            title = "New note",
+            initialValue = "",
+            confirmLabel = "Create",
+            onDismiss = { createDialogVisible = false },
+            onConfirm = { title ->
+                createDialogVisible = false
+                onCreate(title.ifBlank { "Untitled Note" })
+            },
+        )
     }
 }
 
@@ -256,15 +240,37 @@ private fun DocumentLibraryCard(
                 )
             }
             Spacer(Modifier.padding(horizontal = 2.dp))
-            if (showTrash) {
-                TextButton(onClick = onRestore) { Text("Restore") }
-                TextButton(onClick = onDeleteForever) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+            var menuVisible by remember(item.id, showTrash) { mutableStateOf(false) }
+            var permanentDeleteConfirmation by remember(item.id) { mutableStateOf(false) }
+            if (showTrash) TextButton(onClick = onRestore) { Text("Restore") }
+            Box {
+                TextButton(onClick = { menuVisible = true }) { Text("⋮") }
+                DropdownMenu(expanded = menuVisible, onDismissRequest = { menuVisible = false }) {
+                    if (showTrash) {
+                        DropdownMenuItem(
+                            text = { Text("Delete forever", color = MaterialTheme.colorScheme.error) },
+                            onClick = { menuVisible = false; permanentDeleteConfirmation = true },
+                        )
+                    } else {
+                        DropdownMenuItem(
+                            text = { Text("Move to trash", color = MaterialTheme.colorScheme.error) },
+                            onClick = { menuVisible = false; onTrash() },
+                        )
+                    }
                 }
-            } else {
-                TextButton(onClick = onTrash) {
-                    Text("Trash", color = MaterialTheme.colorScheme.error)
-                }
+            }
+            if (permanentDeleteConfirmation) {
+                AlertDialog(
+                    onDismissRequest = { permanentDeleteConfirmation = false },
+                    title = { Text("Delete forever?") },
+                    text = { Text("“${item.title.ifBlank { "Untitled Note" }}” and its local assets cannot be restored after this.") },
+                    confirmButton = {
+                        TextButton(onClick = { permanentDeleteConfirmation = false; onDeleteForever() }) {
+                            Text("Delete forever", color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    dismissButton = { TextButton(onClick = { permanentDeleteConfirmation = false }) { Text("Cancel") } },
+                )
             }
         }
     }

@@ -16,6 +16,7 @@ internal class DocumentSearchCoordinator(
         val loaded = library.load(hit.documentId).document ?: return false
         controller.replaceDocument(loaded, recordHistory = false)
         if (loaded.pages.any { it.id == hit.pageId }) controller.switchPage(hit.pageId)
+        controller.revealSearchTarget(hit.targetObjectId, hit.targetX, hit.targetY)
         return true
     }
 }
